@@ -1,7 +1,6 @@
 from dotenv import load_dotenv
 import os
-from app.models import Category, Transaction
-from sqlmodel import create_engine, SQLModel
+from sqlmodel import create_engine, SQLModel, Session
 
 load_dotenv()
 
@@ -11,6 +10,12 @@ engine = create_engine(DATABASE_URL, echo=True)
 
 def create_db_and_tables():
     SQLModel.metadata.create_all(engine)
+
+def get_session():
+    with Session(engine) as session:
+        yield session
+
+
 
 
 if __name__ == "__main__":
