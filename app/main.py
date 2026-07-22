@@ -1,4 +1,4 @@
-from fastapi import FastAPI, Depends
+from fastapi import FastAPI, Depends, HTTPException
 from sqlmodel import Session, select
 from app.models import Category, CategoryCreate, Transaction, TransactionCreate
 from app.database import get_session
@@ -37,3 +37,17 @@ def create_category(category: CategoryCreate, session: Session = Depends(get_ses
 def list_categorys(session: Session = Depends(get_session)):
     categorys = session.exec(select(Category)).all()
     return categorys
+
+@app.delete("/category/{category_id}")
+def delete_category(category_id: int, session: Session = Depends(get_session)):
+    category = session.get(Category, category_id)
+
+    if not category:
+        raise HTTPException(status_code = 404, detail="Category not found")
+
+    session.delete(category)
+    session.commit()
+
+    return{
+        "message": "Categoria excluída."
+    }
