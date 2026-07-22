@@ -35,3 +35,11 @@ class Transaction(TransactionBase, table=True):
 
 class TransactionCreate(TransactionBase):
     pass
+
+class TransactionUpdate(SQLModel):
+    date: date | None = None
+    description: str | None = None
+    amount_planned: float | None = None
+    amount_paid: float | None = None
+    note: str | None = None
+    category_id: int | None = None
