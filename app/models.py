@@ -1,4 +1,4 @@
-from datetime import date
+import datetime as dt
 from sqlmodel import SQLModel, Field
 from enum import Enum
 
@@ -28,7 +28,7 @@ class CategoryUpdate(SQLModel):
     icon: str | None = None
 
 class TransactionBase(SQLModel):
-    date: date
+    date: dt.date
     description: str
     amount_planned: float | None = None
     amount_paid: float | None = None
@@ -43,7 +43,7 @@ class TransactionCreate(TransactionBase):
     pass
 
 class TransactionUpdate(SQLModel):
-    date: date | None = None
+    date: dt.date | None = None
     description: str | None = None
     amount_planned: float | None = None
     amount_paid: float | None = None
