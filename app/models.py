@@ -21,6 +21,12 @@ class Category(CategoryBase, table=True):
 class CategoryCreate(CategoryBase):
     pass
 
+class CategoryUpdate(SQLModel):
+    name: str | None = None
+    type: CategoryType | None = None
+    color: str | None = None
+    icon: str | None = None
+
 class TransactionBase(SQLModel):
     date: date
     description: str
