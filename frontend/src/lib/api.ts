@@ -1,3 +1,4 @@
+import type { Period } from "./period";
 import type {
   Category,
   CategoryCreate,
@@ -46,7 +47,11 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
 
 // ---------- Transações ----------
 export const transactionsApi = {
-  list: () => request<Transaction[]>("/transactions"),
+  // Sem período devolve tudo — útil pra séries de vários meses.
+  list: (period?: Period) =>
+    request<Transaction[]>(
+      `/transactions${period ? `?year=${period.year}&month=${period.month}` : ""}`
+    ),
   get: (id: number) => request<Transaction>(`/transactions/${id}`),
   create: (data: TransactionCreate) =>
     request<Transaction>("/transactions", { method: "POST", body: JSON.stringify(data) }),

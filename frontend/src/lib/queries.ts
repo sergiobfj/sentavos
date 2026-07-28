@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { categoriesApi, transactionsApi } from "./api";
+import { usePeriod } from "./period";
 import type {
   CategoryCreate,
   CategoryUpdate,
@@ -13,8 +14,15 @@ const keys = {
 };
 
 // ---------- Transações ----------
+// O mês entra na queryKey: sem ele o react-query serviria o cache do mês
+// anterior. Como keys.transactions virou prefixo, os invalidateQueries
+// abaixo continuam limpando todos os meses de uma vez.
 export function useTransactions() {
-  return useQuery({ queryKey: keys.transactions, queryFn: transactionsApi.list });
+  const { period, ym } = usePeriod();
+  return useQuery({
+    queryKey: [...keys.transactions, ym],
+    queryFn: () => transactionsApi.list(period),
+  });
 }
 
 export function useCreateTransaction() {

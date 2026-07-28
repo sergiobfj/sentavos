@@ -246,6 +246,20 @@ input[type="color"] { padding: 4px; height: 42px; cursor: pointer; }
   * { animation-duration: 0.01ms !important; transition: none !important; }
 }
 
+/* ---------- Barra de período ---------- */
+.topbar {
+  display: flex; justify-content: flex-end; align-items: center;
+  gap: 10px; margin-bottom: 22px; flex-wrap: wrap;
+}
+.month-picker {
+  display: flex; align-items: center; gap: 6px;
+  background: var(--surface); border: 1px solid var(--border-soft);
+  border-radius: var(--radius-sm); padding: 6px 8px;
+}
+/* width auto vence o width:100% genérico dos selects */
+.month-picker select { width: auto; padding: 6px 8px; font-weight: 650; }
+.month-picker .btn { font-size: 17px; line-height: 1; padding: 4px 9px; }
+
 /* ---------- Responsive shell ---------- */
 @media (max-width: 720px) {
   .app { grid-template-columns: 1fr; }

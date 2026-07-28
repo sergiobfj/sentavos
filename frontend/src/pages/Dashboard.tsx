@@ -1,11 +1,13 @@
 import { useMemo } from "react";
 import { Link } from "react-router-dom";
 import { useCategories, useTransactions } from "../lib/queries";
+import { usePeriod } from "../lib/period";
 import { ApiError } from "../lib/api";
 import { formatDate, formatMoney } from "../lib/format";
 import type { Category, CategoryType } from "../lib/types";
 
 export default function Dashboard() {
+  const { label } = usePeriod();
   const { data: transactions, isLoading, error } = useTransactions();
   const { data: categories } = useCategories();
 
@@ -58,7 +60,7 @@ export default function Dashboard() {
         <div>
           <div className="eyebrow">Visão geral</div>
           <h1>Painel</h1>
-          <p>Onde cada centavo está, num relance.</p>
+          <p>Onde cada centavo está em {label}, num relance.</p>
         </div>
         <Link className="btn btn-primary" to="/transacoes">+ Nova transação</Link>
       </div>

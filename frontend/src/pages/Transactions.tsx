@@ -7,11 +7,13 @@ import {
   useTransactions,
   useUpdateTransaction,
 } from "../lib/queries";
+import { usePeriod } from "../lib/period";
 import { ApiError } from "../lib/api";
 import { formatDate, formatMoney, todayIso } from "../lib/format";
 import type { Category, Transaction } from "../lib/types";
 
 export default function Transactions() {
+  const { label } = usePeriod();
   const { data: transactions, isLoading, error } = useTransactions();
   const { data: categories } = useCategories();
   const [editing, setEditing] = useState<Transaction | null>(null);
@@ -36,7 +38,7 @@ export default function Transactions() {
         <div>
           <div className="eyebrow">Movimentações</div>
           <h1>Transações</h1>
-          <p>Tudo que entrou, saiu ou foi guardado.</p>
+          <p>Tudo que entrou, saiu ou foi guardado em {label}.</p>
         </div>
         <button className="btn btn-primary" disabled={noCategories} onClick={() => setCreating(true)}>
           + Nova transação
@@ -109,7 +111,7 @@ export default function Transactions() {
         {!isLoading && !error && sorted.length === 0 && (
           <div className="empty">
             <div className="big">🧾</div>
-            Nenhuma transação ainda.
+            Nenhuma transação em {label}.
           </div>
         )}
       </div>
@@ -155,6 +157,7 @@ function TransactionForm({
     amount_paid: transaction?.amount_paid?.toString() ?? "",
     note: transaction?.note ?? "",
   });
+  const { setPeriod } = usePeriod();
   const create = useCreateTransaction();
   const update = useUpdateTransaction();
   const pending = create.isPending || update.isPending;
@@ -177,10 +180,18 @@ function TransactionForm({
       amount_paid: num(form.amount_paid),
       note: form.note.trim() || null,
     };
+    // Salvar um lançamento de outro mês some da lista e parece que falhou;
+    // então o app acompanha a data que foi salva.
+    function onSaved() {
+      const [y, m] = payload.date.split("-").map(Number);
+      if (y && m) setPeriod({ year: y, month: m });
+      onClose();
+    }
+
     if (isEdit) {
-      update.mutate({ id: transaction!.id, data: payload }, { onSuccess: onClose });
+      update.mutate({ id: transaction!.id, data: payload }, { onSuccess: onSaved });
     } else {
-      create.mutate(payload, { onSuccess: onClose });
+      create.mutate(payload, { onSuccess: onSaved });
     }
   }
 

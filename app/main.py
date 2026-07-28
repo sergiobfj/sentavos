@@ -1,7 +1,8 @@
 from contextlib import asynccontextmanager
 import os
+import datetime as dt
 
-from fastapi import Depends, FastAPI, HTTPException
+from fastapi import Depends, FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from sqlmodel import Session, select
 
@@ -14,6 +15,8 @@ from app.models import (
     TransactionCreate,
     TransactionUpdate,
 )
+
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -57,9 +60,28 @@ def create_transaction(transaction: TransactionCreate, session: Session = Depend
 
 
 @app.get("/transactions")
-def list_transactions(session: Session = Depends(get_session)):
-    transactions = session.exec(select(Transaction)).all()
-    return transactions
+def list_transactions(
+    session: Session = Depends(get_session),
+    year: int | None = Query(default=None, ge=1900, le=2999),
+    month: int | None = Query(default=None, ge=1, le=12),
+):
+    if month is not None and year is None:
+        raise HTTPException(status_code=400, detail="Informe o ano junto com o mês.")
+
+    query = select(Transaction)
+
+    if year is not None:
+        if month is None:
+            start, end = dt.date(year, 1, 1), dt.date(year + 1, 1, 1)
+        elif month == 12:
+            start, end = dt.date(year, 12, 1), dt.date(year + 1, 1, 1)
+        else:
+            start, end = dt.date(year, month, 1), dt.date(year, month + 1, 1)
+        query = query.where(Transaction.date >= start, Transaction.date < end)
+
+    return session.exec(
+        query.order_by(Transaction.date.desc(), Transaction.id.desc())
+    ).all()
 
 
 @app.get("/transactions/{transaction_id}")

@@ -1,4 +1,5 @@
 import { NavLink, Outlet } from "react-router-dom";
+import MonthPicker from "./MonthPicker";
 import logo from "../assets/logo.png";
 
 const links = [
@@ -28,6 +29,9 @@ export default function Layout() {
         <div className="foot">Cada centavo no seu lugar.</div>
       </aside>
       <main className="main">
+        <div className="topbar">
+          <MonthPicker />
+        </div>
         <Outlet />
       </main>
     </div>

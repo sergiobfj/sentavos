@@ -17,3 +17,8 @@ dev = [
     "httpx>=0.28.1",
     "pytest>=9.1.1",
 ]
+
+[tool.pytest.ini_options]
+# Sem isso, `uv run pytest` não acha o pacote app (só `python -m pytest` acharia).
+pythonpath = ["."]
+testpaths = ["app/tests"]
