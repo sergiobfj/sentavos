@@ -1,5 +1,6 @@
 import { NavLink, Outlet } from "react-router-dom";
 import MonthPicker from "./MonthPicker";
+import { useAuth } from "../lib/auth";
 import logo from "../assets/logo.png";
 
 const links = [
@@ -11,6 +12,8 @@ const links = [
 ];
 
 export default function Layout() {
+  const { session, signOut } = useAuth();
+
   return (
     <div className="app">
       <aside className="sidebar">
@@ -28,7 +31,10 @@ export default function Layout() {
             </NavLink>
           ))}
         </nav>
-        <div className="foot">Cada centavo no seu lugar.</div>
+        <div className="foot">
+          <div className="who" title={session?.user.email ?? ""}>{session?.user.email}</div>
+          <button className="btn btn-ghost btn-sm" onClick={signOut}>Sair</button>
+        </div>
       </aside>
       <main className="main">
         <div className="topbar">

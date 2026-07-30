@@ -2,10 +2,11 @@ from contextlib import asynccontextmanager
 import os
 import datetime as dt
 
-from fastapi import Depends, FastAPI, HTTPException, Query
+from fastapi import APIRouter, Depends, FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from sqlmodel import Session, and_, func, or_, select
 
+from app.auth import require_user
 from app.database import create_db_and_tables, get_session
 from app.models import (
     Asset,
@@ -59,6 +60,12 @@ app.add_middleware(
 )
 
 
+# Toda rota de dados vive neste router, que exige token. Colar o Depends em cada
+# endpoint seria pior: esquecer num deles abriria um buraco silencioso, e nenhum
+# teste pegaria. Aqui, rota nova nasce protegida — dá trabalho expor sem querer.
+router = APIRouter(dependencies=[Depends(require_user)])
+
+
 def month_bounds(year: int, month: int) -> tuple[dt.date, dt.date]:
     """Intervalo semiaberto [start, end) do mês. Dezembro vira janeiro do ano seguinte."""
     start = dt.date(year, month, 1)
@@ -80,7 +87,7 @@ async def root():
     return {"message": "API do Sentavos no ar"}
 
 
-@app.post("/transactions")
+@router.post("/transactions")
 def create_transaction(transaction: TransactionCreate, session: Session = Depends(get_session)):
     category = session.get(Category, transaction.category_id)
     if not category:
@@ -93,7 +100,7 @@ def create_transaction(transaction: TransactionCreate, session: Session = Depend
     return db_transaction
 
 
-@app.get("/transactions")
+@router.get("/transactions")
 def list_transactions(
     session: Session = Depends(get_session),
     year: int | None = Query(default=None, ge=1900, le=2999),
@@ -116,7 +123,7 @@ def list_transactions(
     ).all()
 
 
-@app.get("/transactions/{transaction_id}")
+@router.get("/transactions/{transaction_id}")
 def get_transaction(transaction_id: int, session: Session = Depends(get_session)):
     transaction = session.get(Transaction, transaction_id)
 
@@ -126,7 +133,7 @@ def get_transaction(transaction_id: int, session: Session = Depends(get_session)
     return transaction
 
 
-@app.delete("/transactions/{transaction_id}")
+@router.delete("/transactions/{transaction_id}")
 def delete_transaction(transaction_id: int, session: Session = Depends(get_session)):
     transaction = session.get(Transaction, transaction_id)
 
@@ -139,7 +146,7 @@ def delete_transaction(transaction_id: int, session: Session = Depends(get_sessi
     return {"message": "Transação excluída."}
 
 
-@app.patch("/transactions/{transaction_id}")
+@router.patch("/transactions/{transaction_id}")
 def update_transaction(
     transaction_id: int, transaction_data: TransactionUpdate, session: Session = Depends(get_session)
 ):
@@ -165,7 +172,7 @@ def update_transaction(
     return transaction
 
 
-@app.post("/categories")
+@router.post("/categories")
 def create_category(category: CategoryCreate, session: Session = Depends(get_session)):
     db_category = Category.model_validate(category)
     session.add(db_category)
@@ -174,13 +181,13 @@ def create_category(category: CategoryCreate, session: Session = Depends(get_ses
     return db_category
 
 
-@app.get("/categories")
+@router.get("/categories")
 def list_categories(session: Session = Depends(get_session)):
     categories = session.exec(select(Category)).all()
     return categories
 
 
-@app.get("/categories/{category_id}")
+@router.get("/categories/{category_id}")
 def get_category(category_id: int, session: Session = Depends(get_session)):
     category = session.get(Category, category_id)
 
@@ -190,7 +197,7 @@ def get_category(category_id: int, session: Session = Depends(get_session)):
     return category
 
 
-@app.patch("/categories/{category_id}")
+@router.patch("/categories/{category_id}")
 def update_category(
     category_id: int, category_data: CategoryUpdate, session: Session = Depends(get_session)
 ):
@@ -211,7 +218,7 @@ def update_category(
     return category
 
 
-@app.delete("/categories/{category_id}")
+@router.delete("/categories/{category_id}")
 def delete_category(category_id: int, session: Session = Depends(get_session)):
     category = session.get(Category, category_id)
 
@@ -246,7 +253,7 @@ def delete_category(category_id: int, session: Session = Depends(get_session)):
 
 
 # Declarado antes de /budgets/{budget_id} pra "summary" não ser lido como id.
-@app.get("/budgets/summary", response_model=BudgetSummary)
+@router.get("/budgets/summary", response_model=BudgetSummary)
 def get_budget_summary(
     year: int = Query(ge=1900, le=2999),
     month: int = Query(ge=1, le=12),
@@ -310,7 +317,7 @@ def get_budget_summary(
     return BudgetSummary(year=year, month=month, items=items, totals=totals)
 
 
-@app.put("/budgets")
+@router.put("/budgets")
 def set_budget(budget: BudgetCreate, session: Session = Depends(get_session)):
     """Define a meta da categoria no mês. Idempotente: cria ou sobrescreve.
 
@@ -341,7 +348,7 @@ def set_budget(budget: BudgetCreate, session: Session = Depends(get_session)):
     return db_budget
 
 
-@app.get("/budgets")
+@router.get("/budgets")
 def list_budgets(
     session: Session = Depends(get_session),
     year: int | None = Query(default=None, ge=1900, le=2999),
@@ -360,7 +367,7 @@ def list_budgets(
     return session.exec(query.order_by(Budget.year, Budget.month, Budget.category_id)).all()
 
 
-@app.patch("/budgets/{budget_id}")
+@router.patch("/budgets/{budget_id}")
 def update_budget(
     budget_id: int, budget_data: BudgetUpdate, session: Session = Depends(get_session)
 ):
@@ -379,7 +386,7 @@ def update_budget(
     return budget
 
 
-@app.delete("/budgets/{budget_id}")
+@router.delete("/budgets/{budget_id}")
 def delete_budget(budget_id: int, session: Session = Depends(get_session)):
     budget = session.get(Budget, budget_id)
 
@@ -394,7 +401,7 @@ def delete_budget(budget_id: int, session: Session = Depends(get_session)):
 
 # ---------- Patrimônio ----------
 # Declarado antes de /assets/{asset_id} pra "summary" não ser lido como id.
-@app.get("/assets/summary", response_model=AssetSummary)
+@router.get("/assets/summary", response_model=AssetSummary)
 def get_asset_summary(
     year: int = Query(ge=1900, le=2999),
     month: int = Query(ge=1, le=12),
@@ -490,7 +497,7 @@ def get_asset_summary(
     )
 
 
-@app.put("/assets/snapshots")
+@router.put("/assets/snapshots")
 def set_asset_snapshot(
     snapshot: AssetSnapshotCreate, session: Session = Depends(get_session)
 ):
@@ -519,7 +526,7 @@ def set_asset_snapshot(
     return db_snapshot
 
 
-@app.get("/assets/snapshots")
+@router.get("/assets/snapshots")
 def list_asset_snapshots(
     session: Session = Depends(get_session),
     asset_id: int | None = None,
@@ -537,7 +544,7 @@ def list_asset_snapshots(
     ).all()
 
 
-@app.patch("/assets/snapshots/{snapshot_id}")
+@router.patch("/assets/snapshots/{snapshot_id}")
 def update_asset_snapshot(
     snapshot_id: int,
     snapshot_data: AssetSnapshotUpdate,
@@ -558,7 +565,7 @@ def update_asset_snapshot(
     return snapshot
 
 
-@app.delete("/assets/snapshots/{snapshot_id}")
+@router.delete("/assets/snapshots/{snapshot_id}")
 def delete_asset_snapshot(snapshot_id: int, session: Session = Depends(get_session)):
     snapshot = session.get(AssetSnapshot, snapshot_id)
 
@@ -571,7 +578,7 @@ def delete_asset_snapshot(snapshot_id: int, session: Session = Depends(get_sessi
     return {"message": "Saldo excluído."}
 
 
-@app.post("/assets")
+@router.post("/assets")
 def create_asset(asset: AssetCreate, session: Session = Depends(get_session)):
     db_asset = Asset.model_validate(asset)
     session.add(db_asset)
@@ -580,12 +587,12 @@ def create_asset(asset: AssetCreate, session: Session = Depends(get_session)):
     return db_asset
 
 
-@app.get("/assets")
+@router.get("/assets")
 def list_assets(session: Session = Depends(get_session)):
     return session.exec(select(Asset).order_by(Asset.asset_class, Asset.name)).all()
 
 
-@app.patch("/assets/{asset_id}")
+@router.patch("/assets/{asset_id}")
 def update_asset(asset_id: int, asset_data: AssetUpdate, session: Session = Depends(get_session)):
     asset = session.get(Asset, asset_id)
 
@@ -602,7 +609,7 @@ def update_asset(asset_id: int, asset_data: AssetUpdate, session: Session = Depe
     return asset
 
 
-@app.delete("/assets/{asset_id}")
+@router.delete("/assets/{asset_id}")
 def delete_asset(asset_id: int, session: Session = Depends(get_session)):
     asset = session.get(Asset, asset_id)
 
@@ -626,3 +633,8 @@ def delete_asset(asset_id: int, session: Session = Depends(get_session)):
     session.commit()
 
     return {"message": "Ativo excluído."}
+
+
+# No fim de propósito: o router só é registrado depois de todas as rotas serem
+# declaradas nele.
+app.include_router(router)

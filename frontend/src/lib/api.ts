@@ -1,3 +1,4 @@
+import { accessToken, supabase } from "./supabase";
 import type { Period } from "./period";
 import type {
   Asset,
@@ -28,14 +29,29 @@ export class ApiError extends Error {
 }
 
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
+  // Toda chamada passa por aqui, então o token entra num lugar só — não tem
+  // como uma rota nova esquecer de mandar.
+  const token = await accessToken();
+
   let res: Response;
   try {
     res = await fetch(`${BASE_URL}${path}`, {
-      headers: { "Content-Type": "application/json" },
       ...options,
+      headers: {
+        "Content-Type": "application/json",
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        ...options.headers,
+      },
     });
   } catch {
     throw new ApiError(0, "Não consegui falar com a API. O backend está no ar?");
+  }
+
+  // Token venceu ou foi revogado: derruba a sessão pra a tela de login aparecer,
+  // em vez de deixar o app mostrando erro em toda aba.
+  if (res.status === 401) {
+    await supabase.auth.signOut();
+    throw new ApiError(401, "Sua sessão expirou. Entre de novo.");
   }
 
   if (!res.ok) {

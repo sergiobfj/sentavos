@@ -4,6 +4,7 @@ from sqlalchemy import event
 from sqlmodel import Session, SQLModel, create_engine
 from sqlmodel.pool import StaticPool
 
+from app.auth import require_user
 from app.database import get_session
 from app.main import app
 
@@ -30,6 +31,26 @@ def session_fixture():
 
 @pytest.fixture(name="client")
 def client_fixture(session):
+    """Cliente já autenticado — é o que a maioria dos testes quer exercitar."""
+    def get_session_override():
+        return session
+
+    app.dependency_overrides[get_session] = get_session_override
+    # A auth em si é testada pelo anon_client; aqui ela sai da frente pra o
+    # teste falar sobre a regra de negócio, não sobre token.
+    app.dependency_overrides[require_user] = lambda: "usuario-de-teste"
+    client = TestClient(app)
+    yield client
+    app.dependency_overrides.clear()
+
+
+@pytest.fixture(name="anon_client")
+def anon_client_fixture(session):
+    """Cliente sem token, com a auth de verdade ligada.
+
+    Existe pra provar que as rotas estão fechadas. Sem ele, o override do
+    client faria a suíte passar mesmo se a proteção caísse do router.
+    """
     def get_session_override():
         return session
 
