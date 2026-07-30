@@ -13,7 +13,7 @@ const TYPES: CategoryType[] = ["expense", "income", "investment"];
 
 const EMPTY = { name: "", type: "expense" as CategoryType, color: "#f5b301", icon: "💸" };
 
-export default function Categories() {
+export default function Settings() {
   const { data: categories, isLoading, error } = useCategories();
   const [editing, setEditing] = useState<Category | null>(null);
   const [creating, setCreating] = useState(false);
@@ -22,9 +22,16 @@ export default function Categories() {
     <>
       <div className="page-head">
         <div>
-          <div className="eyebrow">Organização</div>
-          <h1>Categorias</h1>
-          <p>Os potes onde cada centavo é separado.</p>
+          <div className="eyebrow">Ajustes</div>
+          <h1>Configurações</h1>
+          <p>As peças que o resto do app usa.</p>
+        </div>
+      </div>
+
+      <div className="section-head">
+        <div>
+          <h2>Categorias</h2>
+          <div className="hint" style={{ marginTop: 3 }}>Os potes onde cada centavo é separado.</div>
         </div>
         <button className="btn btn-primary" onClick={() => setCreating(true)}>+ Nova categoria</button>
       </div>

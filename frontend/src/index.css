@@ -238,6 +238,23 @@ input[type="color"] { padding: 4px; height: 42px; cursor: pointer; }
 .bar-track { height: 8px; border-radius: 6px; background: var(--surface-3); overflow: hidden; }
 .bar-fill { height: 100%; border-radius: 6px; }
 
+/* ---------- Sub-abas ---------- */
+.subtabs { display: flex; gap: 4px; margin-bottom: 18px; flex-wrap: wrap; }
+.subtabs button {
+  background: transparent; border: 1px solid transparent; border-radius: var(--radius-sm);
+  padding: 8px 14px; color: var(--text-dim); font-size: 14px; font-weight: 650;
+  font-family: inherit; cursor: pointer; transition: background 0.12s, color 0.12s;
+}
+.subtabs button:hover { background: var(--surface); color: var(--text); }
+.subtabs button.active { background: var(--surface-2); border-color: var(--border); color: var(--text); }
+
+/* Cabeçalho de seção dentro de uma página (sem o peso do .page-head) */
+.section-head {
+  display: flex; justify-content: space-between; align-items: flex-end;
+  gap: 16px; margin-bottom: 14px; flex-wrap: wrap;
+}
+.section-head h2 { font-size: 16px; font-weight: 700; }
+
 /* ---------- Orçamento ---------- */
 .bar-track.slim { height: 6px; }
 .usage { display: flex; align-items: center; gap: 10px; min-width: 150px; }

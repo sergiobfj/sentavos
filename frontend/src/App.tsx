@@ -2,8 +2,9 @@ import { Navigate, Route, Routes } from "react-router-dom";
 import Layout from "./components/Layout";
 import Dashboard from "./pages/Dashboard";
 import Budget from "./pages/Budget";
-import Transactions from "./pages/Transactions";
-import Categories from "./pages/Categories";
+import Investments from "./pages/Investments";
+import Assets from "./pages/Assets";
+import Settings from "./pages/Settings";
 
 export default function App() {
   return (
@@ -11,8 +12,13 @@ export default function App() {
       <Route element={<Layout />}>
         <Route path="/" element={<Dashboard />} />
         <Route path="/orcamento" element={<Budget />} />
-        <Route path="/transacoes" element={<Transactions />} />
-        <Route path="/categorias" element={<Categories />} />
+        <Route path="/investimentos" element={<Investments />} />
+        <Route path="/patrimonio" element={<Assets />} />
+        <Route path="/configuracoes" element={<Settings />} />
+        {/* Rotas antigas: Transações virou sub-aba de Orçamento e Categorias
+            entrou em Configurações. Redirecionar evita quebrar link salvo. */}
+        <Route path="/transacoes" element={<Navigate to="/orcamento?aba=lancamentos" replace />} />
+        <Route path="/categorias" element={<Navigate to="/configuracoes" replace />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Route>
     </Routes>

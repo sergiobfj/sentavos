@@ -58,11 +58,11 @@ export default function Dashboard() {
     <>
       <div className="page-head">
         <div>
-          <div className="eyebrow">Visão geral</div>
-          <h1>Painel</h1>
+          <div className="eyebrow">Resumo do mês</div>
+          <h1>Visão geral</h1>
           <p>Onde cada centavo está em {label}, num relance.</p>
         </div>
-        <Link className="btn btn-primary" to="/transacoes">+ Nova transação</Link>
+        <Link className="btn btn-primary" to="/orcamento?aba=lancamentos">+ Nova transação</Link>
       </div>
 
       <div className="stat-grid">
@@ -76,7 +76,7 @@ export default function Dashboard() {
         <div className="panel">
           <div className="panel-head">
             <h2>Últimas transações</h2>
-            <Link className="btn btn-ghost btn-sm" to="/transacoes">Ver todas</Link>
+            <Link className="btn btn-ghost btn-sm" to="/orcamento?aba=lancamentos">Ver todas</Link>
           </div>
           <div className="panel-body">
             {recent.length === 0 ? (

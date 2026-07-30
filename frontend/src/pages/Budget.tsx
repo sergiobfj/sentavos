@@ -1,10 +1,17 @@
 import { useEffect, useMemo, useState } from "react";
-import { Link } from "react-router-dom";
-import { useBudgetSummary, useSetBudget } from "../lib/queries";
+import { Link, useSearchParams } from "react-router-dom";
+import TransactionForm from "../components/TransactionForm";
+import TransactionList from "../components/TransactionList";
+import {
+  useBudgetSummary,
+  useCategories,
+  useSetBudget,
+  useTransactions,
+} from "../lib/queries";
 import { usePeriod } from "../lib/period";
 import { ApiError } from "../lib/api";
 import { formatMoney, parseMoney } from "../lib/format";
-import type { BudgetSummaryItem, CategoryType } from "../lib/types";
+import type { BudgetSummaryItem, Category, CategoryType, Transaction } from "../lib/types";
 
 // Despesa primeiro: é onde o orçamento aperta. Receita fecha a lista porque
 // funciona como referência ("cabe no que entra?"), não como teto.
@@ -14,8 +21,108 @@ const SECTIONS: { type: CategoryType; title: string; hint: string }[] = [
   { type: "income", title: "Receitas", hint: "Quanto espera receber no mês" },
 ];
 
+type Tab = "metas" | "lancamentos";
+
 export default function Budget() {
   const { label } = usePeriod();
+  // A sub-aba vive na URL pra sobreviver ao F5 e poder ser linkada de fora.
+  const [params, setParams] = useSearchParams();
+  const tab: Tab = params.get("aba") === "lancamentos" ? "lancamentos" : "metas";
+  const { data: categories } = useCategories();
+  const [creating, setCreating] = useState(false);
+  const [editing, setEditing] = useState<Transaction | null>(null);
+
+  function selectTab(next: Tab) {
+    setParams(
+      (prev) => {
+        const p = new URLSearchParams(prev);
+        if (next === "metas") p.delete("aba");
+        else p.set("aba", next);
+        return p;
+      },
+      { replace: true }
+    );
+  }
+
+  if (categories && categories.length === 0) {
+    return (
+      <>
+        <BudgetHead label={label} />
+        <div className="panel">
+          <div className="empty">
+            <div className="big">🎯</div>
+            Crie uma <b>categoria</b> pra começar a orçar.
+            <div style={{ marginTop: 14 }}>
+              <Link className="btn btn-primary" to="/configuracoes">Ir para configurações</Link>
+            </div>
+          </div>
+        </div>
+      </>
+    );
+  }
+
+  return (
+    <>
+      <BudgetHead
+        label={label}
+        action={
+          <button className="btn btn-primary" onClick={() => setCreating(true)}>
+            + Nova transação
+          </button>
+        }
+      />
+
+      <div className="subtabs" role="tablist">
+        <button
+          role="tab"
+          aria-selected={tab === "metas"}
+          className={tab === "metas" ? "active" : ""}
+          onClick={() => selectTab("metas")}
+        >
+          Metas
+        </button>
+        <button
+          role="tab"
+          aria-selected={tab === "lancamentos"}
+          className={tab === "lancamentos" ? "active" : ""}
+          onClick={() => selectTab("lancamentos")}
+        >
+          Lançamentos
+        </button>
+      </div>
+
+      {tab === "metas" ? <Metas /> : <Lancamentos categories={categories} onEdit={setEditing} />}
+
+      {creating && categories && (
+        <TransactionForm categories={categories} onClose={() => setCreating(false)} />
+      )}
+      {editing && categories && (
+        <TransactionForm
+          categories={categories}
+          transaction={editing}
+          onClose={() => setEditing(null)}
+        />
+      )}
+    </>
+  );
+}
+
+function BudgetHead({ label, action }: { label: string; action?: React.ReactNode }) {
+  return (
+    <div className="page-head">
+      <div>
+        <div className="eyebrow">Planejamento</div>
+        <h1>Orçamento</h1>
+        <p>Quanto você planejou e quanto já foi, em {label}.</p>
+      </div>
+      {action}
+    </div>
+  );
+}
+
+// ---------- Metas ----------
+
+function Metas() {
   const { data, isLoading, error } = useBudgetSummary();
 
   const bySection = useMemo(() => {
@@ -28,12 +135,6 @@ export default function Budget() {
     return groups;
   }, [data]);
 
-  const totals = data?.totals;
-  // A sobra é o que o mês devolve se tudo for exatamente ao orçado.
-  const leftover = totals
-    ? totals.income.budgeted - totals.expense.budgeted - totals.investment.budgeted
-    : 0;
-
   if (isLoading) {
     return (
       <div className="panel">
@@ -45,55 +146,36 @@ export default function Budget() {
     return <div className="panel"><div className="error-box">{(error as ApiError).message}</div></div>;
   }
 
-  const noCategories = (data?.items.length ?? 0) === 0;
+  const totals = data?.totals;
+  // A sobra é o que o mês devolve se tudo for exatamente ao orçado.
+  const leftover = totals
+    ? totals.income.budgeted - totals.expense.budgeted - totals.investment.budgeted
+    : 0;
 
   return (
     <>
-      <div className="page-head">
-        <div>
-          <div className="eyebrow">Planejamento</div>
-          <h1>Orçamento</h1>
-          <p>Quanto você planejou e quanto já foi, em {label}.</p>
-        </div>
-        <Link className="btn btn-primary" to="/transacoes">+ Nova transação</Link>
+      <div className="stat-grid">
+        <Stat label="Receita orçada" value={totals?.income.budgeted ?? 0} tone="pos" />
+        <Stat label="Despesa orçada" value={totals?.expense.budgeted ?? 0} tone="neg" />
+        <Stat
+          label="Já gasto"
+          value={totals?.expense.paid ?? 0}
+          tone="gold"
+          sub={usageLabel(totals?.expense.paid ?? 0, totals?.expense.budgeted ?? 0)}
+        />
+        <Stat
+          label="Sobra planejada"
+          value={leftover}
+          tone={leftover >= 0 ? "pos" : "neg"}
+          sub="Receita − despesa − investimento orçados"
+        />
       </div>
 
-      {noCategories ? (
-        <div className="panel">
-          <div className="empty">
-            <div className="big">🎯</div>
-            Crie uma <b>categoria</b> pra começar a orçar.
-            <div style={{ marginTop: 14 }}>
-              <Link className="btn btn-primary" to="/categorias">Ir para categorias</Link>
-            </div>
-          </div>
-        </div>
-      ) : (
-        <>
-          <div className="stat-grid">
-            <Stat label="Receita orçada" value={totals?.income.budgeted ?? 0} tone="pos" />
-            <Stat label="Despesa orçada" value={totals?.expense.budgeted ?? 0} tone="neg" />
-            <Stat
-              label="Já gasto"
-              value={totals?.expense.paid ?? 0}
-              tone="gold"
-              sub={usageLabel(totals?.expense.paid ?? 0, totals?.expense.budgeted ?? 0)}
-            />
-            <Stat
-              label="Sobra planejada"
-              value={leftover}
-              tone={leftover >= 0 ? "pos" : "neg"}
-              sub="Receita − despesa − investimento orçados"
-            />
-          </div>
-
-          {SECTIONS.map(({ type, title, hint }) => {
-            const items = bySection.get(type) ?? [];
-            if (items.length === 0) return null;
-            return <Section key={type} title={title} hint={hint} type={type} items={items} />;
-          })}
-        </>
-      )}
+      {SECTIONS.map(({ type, title, hint }) => {
+        const items = bySection.get(type) ?? [];
+        if (items.length === 0) return null;
+        return <Section key={type} title={title} hint={hint} type={type} items={items} />;
+      })}
     </>
   );
 }
@@ -259,6 +341,43 @@ function MetaInput({ item }: { item: BudgetSummaryItem }) {
     />
   );
 }
+
+// ---------- Lançamentos ----------
+
+function Lancamentos({
+  categories,
+  onEdit,
+}: {
+  categories?: Category[];
+  onEdit: (t: Transaction) => void;
+}) {
+  const { label } = usePeriod();
+  const { data: transactions, isLoading, error } = useTransactions();
+
+  return (
+    <div className="panel">
+      {isLoading && <div className="loading"><div className="spinner" />Carregando…</div>}
+      {error && <div className="error-box">{(error as ApiError).message}</div>}
+
+      {transactions && transactions.length > 0 && (
+        <TransactionList
+          transactions={transactions}
+          categories={categories ?? []}
+          onEdit={onEdit}
+        />
+      )}
+
+      {!isLoading && !error && transactions?.length === 0 && (
+        <div className="empty">
+          <div className="big">🧾</div>
+          Nenhuma transação em {label}.
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ---------- Auxiliares ----------
 
 function Stat({
   label,
