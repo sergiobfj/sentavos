@@ -218,6 +218,27 @@ def delete_category(category_id: int, session: Session = Depends(get_session)):
     if not category:
         raise HTTPException(status_code=404, detail="Category not found")
 
+    # Lançamento é histórico: apagar a categoria junto seria destruir dado que
+    # o usuário não pediu pra perder. Melhor recusar e deixar ele decidir.
+    lancamentos = session.exec(
+        select(func.count()).select_from(Transaction).where(Transaction.category_id == category_id)
+    ).one()
+
+    if lancamentos:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"A categoria tem {lancamentos} lançamento(s). "
+                "Exclua ou mova esses lançamentos antes de apagar a categoria."
+            ),
+        )
+
+    # Meta é planejamento, não histórico — pode sair junto. O flush garante que
+    # ela vá embora antes da categoria, senão a FK barra no Postgres.
+    for budget in session.exec(select(Budget).where(Budget.category_id == category_id)).all():
+        session.delete(budget)
+    session.flush()
+
     session.delete(category)
     session.commit()
 
@@ -595,6 +616,11 @@ def delete_asset(asset_id: int, session: Session = Depends(get_session)):
     ).all()
     for snapshot in snapshots:
         session.delete(snapshot)
+
+    # O flush é obrigatório: sem Relationship declarado o SQLAlchemy não sabe
+    # que asset_snapshots depende de assets e pode mandar o DELETE do ativo
+    # primeiro, o que o Postgres recusa por violação de FK.
+    session.flush()
 
     session.delete(asset)
     session.commit()

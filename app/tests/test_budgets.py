@@ -163,3 +163,26 @@ def test_delete_remove_meta(client):
 def test_patch_e_delete_inexistentes_dao_404(client):
     assert client.patch("/budgets/999", json={"amount": 1}).status_code == 404
     assert client.delete("/budgets/999").status_code == 404
+
+
+def test_excluir_categoria_leva_a_meta(client):
+    # Meta é planejamento, sai junto. Precisa sair ANTES da categoria, senão a
+    # FK barra o delete no Postgres (o SQLite só reclama com PRAGMA ligado).
+    cat = criar_categoria(client)
+    definir_meta(client, cat["id"], 800)
+
+    assert client.delete(f"/categories/{cat['id']}").status_code == 200
+    assert client.get("/budgets").json() == []
+
+
+def test_excluir_categoria_com_lancamento_da_409(client):
+    # Lançamento é histórico; apagar junto seria destruir dado sem o usuário pedir.
+    cat = criar_categoria(client)
+    lancar(client, cat["id"], "2026-07-10", paid=50)
+
+    r = client.delete(f"/categories/{cat['id']}")
+
+    assert r.status_code == 409
+    assert "lançamento" in r.json()["detail"]
+    # E a categoria continua lá.
+    assert len(client.get("/categories").json()) == 1
