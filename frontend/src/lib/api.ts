@@ -1,5 +1,8 @@
 import type { Period } from "./period";
 import type {
+  Budget,
+  BudgetSet,
+  BudgetSummary,
   Category,
   CategoryCreate,
   CategoryUpdate,
@@ -58,6 +61,18 @@ export const transactionsApi = {
   update: (id: number, data: TransactionUpdate) =>
     request<Transaction>(`/transactions/${id}`, { method: "PATCH", body: JSON.stringify(data) }),
   remove: (id: number) => request<{ message: string }>(`/transactions/${id}`, { method: "DELETE" }),
+};
+
+// ---------- Orçamento ----------
+export const budgetsApi = {
+  // Orçado x previsto x pago por categoria, já cruzado pelo backend.
+  summary: ({ year, month }: Period) =>
+    request<BudgetSummary>(`/budgets/summary?year=${year}&month=${month}`),
+  list: (period?: Period) =>
+    request<Budget[]>(`/budgets${period ? `?year=${period.year}&month=${period.month}` : ""}`),
+  // PUT porque é idempotente: a tela só sabe categoria + mês + valor, não o id da meta.
+  set: (data: BudgetSet) => request<Budget>("/budgets", { method: "PUT", body: JSON.stringify(data) }),
+  remove: (id: number) => request<{ message: string }>(`/budgets/${id}`, { method: "DELETE" }),
 };
 
 // ---------- Categorias ----------

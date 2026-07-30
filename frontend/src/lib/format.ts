@@ -18,6 +18,17 @@ export function formatDate(iso: string): string {
   });
 }
 
+// Devolve null pra campo vazio ou lixo, que os endpoints tratam como "sem valor".
+export function parseMoney(value: string): number | null {
+  const raw = value.trim();
+  if (raw === "") return null;
+  // Se tem vírgula, ela é o decimal e o ponto é milhar ("1.234,56"). Sem
+  // vírgula, o ponto é o decimal ("1234.56") — é como sai do teclado numérico.
+  const normalized = raw.includes(",") ? raw.replace(/\./g, "").replace(",", ".") : raw;
+  const n = Number(normalized);
+  return Number.isFinite(n) ? n : null;
+}
+
 export function todayIso(): string {
   const now = new Date();
   const y = now.getFullYear();

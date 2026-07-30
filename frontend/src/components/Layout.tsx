@@ -4,6 +4,7 @@ import logo from "../assets/logo.png";
 
 const links = [
   { to: "/", label: "Painel", end: true, icon: IconGrid },
+  { to: "/orcamento", label: "Orçamento", icon: IconTarget },
   { to: "/transacoes", label: "Transações", icon: IconList },
   { to: "/categorias", label: "Categorias", icon: IconTag },
 ];
@@ -45,6 +46,15 @@ function IconGrid() {
       <rect x="14" y="3" width="7" height="7" rx="1.5" />
       <rect x="14" y="14" width="7" height="7" rx="1.5" />
       <rect x="3" y="14" width="7" height="7" rx="1.5" />
+    </svg>
+  );
+}
+function IconTarget() {
+  return (
+    <svg className="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="12" cy="12" r="9" />
+      <circle cx="12" cy="12" r="5" />
+      <circle cx="12" cy="12" r="1.5" />
     </svg>
   );
 }

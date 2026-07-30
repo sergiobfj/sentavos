@@ -238,6 +238,17 @@ input[type="color"] { padding: 4px; height: 42px; cursor: pointer; }
 .bar-track { height: 8px; border-radius: 6px; background: var(--surface-3); overflow: hidden; }
 .bar-fill { height: 100%; border-radius: 6px; }
 
+/* ---------- Orçamento ---------- */
+.bar-track.slim { height: 6px; }
+.usage { display: flex; align-items: center; gap: 10px; min-width: 150px; }
+.usage .bar-track { flex: 1; }
+.usage .pct {
+  font-size: 12.5px; color: var(--text-dim); font-variant-numeric: tabular-nums;
+  width: 40px; text-align: right; flex: none;
+}
+/* width auto vence o width:100% genérico dos inputs */
+.meta-input { width: 130px; padding: 7px 10px; font-variant-numeric: tabular-nums; }
+
 .breakdown-item { padding: 12px 22px; display: flex; flex-direction: column; gap: 8px; }
 .breakdown-item .btop { display: flex; justify-content: space-between; font-size: 13.5px; }
 .breakdown-item .btop .v { font-variant-numeric: tabular-nums; color: var(--text-dim); }

@@ -9,7 +9,7 @@ import {
 } from "../lib/queries";
 import { usePeriod } from "../lib/period";
 import { ApiError } from "../lib/api";
-import { formatDate, formatMoney, todayIso } from "../lib/format";
+import { formatDate, formatMoney, parseMoney, todayIso } from "../lib/format";
 import type { Category, Transaction } from "../lib/types";
 
 export default function Transactions() {
@@ -163,21 +163,14 @@ function TransactionForm({
   const pending = create.isPending || update.isPending;
   const err = (create.error || update.error) as ApiError | null;
 
-  function num(v: string): number | null {
-    const t = v.trim();
-    if (t === "") return null;
-    const n = Number(t.replace(",", "."));
-    return Number.isFinite(n) ? n : null;
-  }
-
   function submit(e: React.FormEvent) {
     e.preventDefault();
     const payload = {
       date: form.date,
       description: form.description.trim(),
       category_id: Number(form.category_id),
-      amount_planned: num(form.amount_planned),
-      amount_paid: num(form.amount_paid),
+      amount_planned: parseMoney(form.amount_planned),
+      amount_paid: parseMoney(form.amount_paid),
       note: form.note.trim() || null,
     };
     // Salvar um lançamento de outro mês some da lista e parece que falhou;
