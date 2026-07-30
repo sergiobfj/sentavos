@@ -1,5 +1,10 @@
 import type { Period } from "./period";
 import type {
+  Asset,
+  AssetCreate,
+  AssetSnapshotSet,
+  AssetSummary,
+  AssetUpdate,
   Budget,
   BudgetSet,
   BudgetSummary,
@@ -73,6 +78,23 @@ export const budgetsApi = {
   // PUT porque é idempotente: a tela só sabe categoria + mês + valor, não o id da meta.
   set: (data: BudgetSet) => request<Budget>("/budgets", { method: "PUT", body: JSON.stringify(data) }),
   remove: (id: number) => request<{ message: string }>(`/budgets/${id}`, { method: "DELETE" }),
+};
+
+// ---------- Patrimônio ----------
+export const assetsApi = {
+  summary: ({ year, month }: Period) =>
+    request<AssetSummary>(`/assets/summary?year=${year}&month=${month}`),
+  list: () => request<Asset[]>("/assets"),
+  create: (data: AssetCreate) =>
+    request<Asset>("/assets", { method: "POST", body: JSON.stringify(data) }),
+  update: (id: number, data: AssetUpdate) =>
+    request<Asset>(`/assets/${id}`, { method: "PATCH", body: JSON.stringify(data) }),
+  remove: (id: number) => request<{ message: string }>(`/assets/${id}`, { method: "DELETE" }),
+  // Upsert do saldo do mês, mesmo motivo do PUT de metas.
+  setSnapshot: (data: AssetSnapshotSet) =>
+    request<unknown>("/assets/snapshots", { method: "PUT", body: JSON.stringify(data) }),
+  removeSnapshot: (id: number) =>
+    request<{ message: string }>(`/assets/snapshots/${id}`, { method: "DELETE" }),
 };
 
 // ---------- Categorias ----------

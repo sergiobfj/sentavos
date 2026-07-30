@@ -188,7 +188,12 @@ tbody tr:hover .row-actions { opacity: 1; }
 }
 .cat-card:hover { transform: translateY(-2px); }
 .cat-card .top { display: flex; align-items: center; gap: 12px; }
-.cat-icon { width: 44px; height: 44px; border-radius: 12px; display: grid; place-items: center; font-size: 22px; flex: none; }
+/* overflow:hidden porque o ícone deveria ser um emoji, mas nada impede um
+   texto longo ali — sem isso ele vaza por cima do badge do tipo. */
+.cat-icon {
+  width: 44px; height: 44px; border-radius: 12px; display: grid; place-items: center;
+  font-size: 22px; flex: none; overflow: hidden;
+}
 .cat-card .cname { font-weight: 700; font-size: 15.5px; }
 .cat-card .actions { display: flex; gap: 4px; margin-top: 2px; }
 
@@ -264,7 +269,7 @@ input[type="color"] { padding: 4px; height: 42px; cursor: pointer; }
   width: 40px; text-align: right; flex: none;
 }
 /* width auto vence o width:100% genérico dos inputs */
-.meta-input { width: 130px; padding: 7px 10px; font-variant-numeric: tabular-nums; }
+.money-cell { width: 130px; padding: 7px 10px; font-variant-numeric: tabular-nums; }
 
 .breakdown-item { padding: 12px 22px; display: flex; flex-direction: column; gap: 8px; }
 .breakdown-item .btop { display: flex; justify-content: space-between; font-size: 13.5px; }

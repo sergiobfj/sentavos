@@ -1,5 +1,6 @@
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
+import MoneyCell from "../components/MoneyCell";
 import TransactionForm from "../components/TransactionForm";
 import TransactionList from "../components/TransactionList";
 import {
@@ -10,7 +11,7 @@ import {
 } from "../lib/queries";
 import { usePeriod } from "../lib/period";
 import { ApiError } from "../lib/api";
-import { formatMoney, parseMoney } from "../lib/format";
+import { formatMoney } from "../lib/format";
 import type { BudgetSummaryItem, Category, CategoryType, Transaction } from "../lib/types";
 
 // Despesa primeiro: é onde o orçamento aperta. Receita fecha a lista porque
@@ -300,44 +301,20 @@ function Usage({ item }: { item: BudgetSummaryItem }) {
 function MetaInput({ item }: { item: BudgetSummaryItem }) {
   const { period } = usePeriod();
   const setBudget = useSetBudget();
-  const saved = item.budget_id ? String(item.budgeted).replace(".", ",") : "";
-  const [value, setValue] = useState(saved);
-
-  // Trocar de mês remonta a linha com outro valor salvo; sem isso o input
-  // continuaria mostrando o que foi digitado no mês anterior.
-  useEffect(() => setValue(saved), [saved]);
-
-  function commit() {
-    const amount = parseMoney(value);
-    // Campo apagado sem meta salva: nada a fazer.
-    if (amount === null && !item.budget_id) {
-      setValue("");
-      return;
-    }
-    if (amount === item.budgeted) return;
-
-    setBudget.mutate({
-      category_id: item.category_id,
-      year: period.year,
-      month: period.month,
-      amount: amount ?? 0,
-    });
-  }
 
   return (
-    <input
-      className="meta-input"
-      inputMode="decimal"
-      placeholder="0,00"
-      aria-label={`Orçado para ${item.category_name}`}
-      value={value}
-      disabled={setBudget.isPending}
-      onChange={(e) => setValue(e.target.value)}
-      onBlur={commit}
-      onKeyDown={(e) => {
-        if (e.key === "Enter") e.currentTarget.blur();
-        if (e.key === "Escape") setValue(saved);
-      }}
+    <MoneyCell
+      saved={item.budget_id ? item.budgeted : null}
+      ariaLabel={`Orçado para ${item.category_name}`}
+      pending={setBudget.isPending}
+      onCommit={(amount) =>
+        setBudget.mutate({
+          category_id: item.category_id,
+          year: period.year,
+          month: period.month,
+          amount: amount ?? 0,
+        })
+      }
     />
   );
 }

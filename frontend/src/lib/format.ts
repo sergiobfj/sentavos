@@ -29,6 +29,14 @@ export function parseMoney(value: string): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
+// "2026-05" -> "mai/2026". É o formato que o backend usa no as_of dos saldos.
+export function formatYm(ym: string): string {
+  const [y, m] = ym.split("-").map(Number);
+  if (!y || !m) return ym;
+  const mes = new Date(y, m - 1, 1).toLocaleDateString("pt-BR", { month: "short" });
+  return `${mes.replace(".", "")}/${y}`;
+}
+
 export function todayIso(): string {
   const now = new Date();
   const y = now.getFullYear();
