@@ -4,10 +4,20 @@ import datetime as dt
 
 from fastapi import Depends, FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
-from sqlmodel import Session, func, select
+from sqlmodel import Session, and_, func, or_, select
 
 from app.database import create_db_and_tables, get_session
 from app.models import (
+    Asset,
+    AssetClass,
+    AssetClassTotal,
+    AssetCreate,
+    AssetSnapshot,
+    AssetSnapshotCreate,
+    AssetSnapshotUpdate,
+    AssetSummary,
+    AssetSummaryItem,
+    AssetUpdate,
     Budget,
     BudgetCreate,
     BudgetSummary,
@@ -21,6 +31,7 @@ from app.models import (
     Transaction,
     TransactionCreate,
     TransactionUpdate,
+    is_liability,
 )
 
 
@@ -53,6 +64,15 @@ def month_bounds(year: int, month: int) -> tuple[dt.date, dt.date]:
     start = dt.date(year, month, 1)
     end = dt.date(year + 1, 1, 1) if month == 12 else dt.date(year, month + 1, 1)
     return start, end
+
+
+def month_index(year: int, month: int) -> int:
+    """Mês como número absoluto, pra comparar períodos sem cuidar de virada de ano."""
+    return year * 12 + (month - 1)
+
+
+def previous_month(year: int, month: int) -> tuple[int, int]:
+    return (year - 1, 12) if month == 1 else (year, month - 1)
 
 
 @app.get("/")
@@ -349,3 +369,234 @@ def delete_budget(budget_id: int, session: Session = Depends(get_session)):
     session.commit()
 
     return {"message": "Meta excluída."}
+
+
+# ---------- Patrimônio ----------
+# Declarado antes de /assets/{asset_id} pra "summary" não ser lido como id.
+@app.get("/assets/summary", response_model=AssetSummary)
+def get_asset_summary(
+    year: int = Query(ge=1900, le=2999),
+    month: int = Query(ge=1, le=12),
+    session: Session = Depends(get_session),
+):
+    """Saldo de cada ativo no mês, com variação e patrimônio líquido.
+
+    Saldo é estoque, não movimento: quem não atualizou o mês continua valendo
+    o último saldo lançado. Sem isso o patrimônio despencaria a zero em todo
+    mês que ficou sem preencher, o que seria mentira e não ausência de dado.
+    """
+    target = month_index(year, month)
+    prev_target = month_index(*previous_month(year, month))
+
+    snapshots = session.exec(
+        select(AssetSnapshot).where(
+            or_(
+                AssetSnapshot.year < year,
+                and_(AssetSnapshot.year == year, AssetSnapshot.month <= month),
+            )
+        )
+    ).all()
+
+    # Último snapshot de cada ativo até o mês pedido, e até o mês anterior.
+    latest: dict[int, AssetSnapshot] = {}
+    latest_prev: dict[int, AssetSnapshot] = {}
+
+    def keep_latest(bucket: dict[int, AssetSnapshot], snap: AssetSnapshot, idx: int):
+        current = bucket.get(snap.asset_id)
+        if current is None or month_index(current.year, current.month) < idx:
+            bucket[snap.asset_id] = snap
+
+    for snap in snapshots:
+        idx = month_index(snap.year, snap.month)
+        if idx <= target:
+            keep_latest(latest, snap, idx)
+        if idx <= prev_target:
+            keep_latest(latest_prev, snap, idx)
+
+    assets = session.exec(select(Asset).order_by(Asset.asset_class, Asset.name)).all()
+
+    items: list[AssetSummaryItem] = []
+    by_class = {classe.value: AssetClassTotal() for classe in AssetClass}
+    total_assets = total_liabilities = 0.0
+    prev_assets = prev_liabilities = 0.0
+
+    for asset in assets:
+        snap = latest.get(asset.id)
+        prev_snap = latest_prev.get(asset.id)
+        value = snap.value if snap else 0.0
+        previous = prev_snap.value if prev_snap else 0.0
+        liability = is_liability(asset.asset_class)
+
+        items.append(
+            AssetSummaryItem(
+                asset_id=asset.id,
+                name=asset.name,
+                asset_class=asset.asset_class,
+                liability=liability,
+                note=asset.note,
+                # Só conta como "deste mês" se o snapshot for do período pedido;
+                # valor herdado de mês anterior não tem id pra editar aqui.
+                snapshot_id=(
+                    snap.id if snap and month_index(snap.year, snap.month) == target else None
+                ),
+                value=value,
+                previous=previous,
+                change=value - previous,
+                as_of=f"{snap.year}-{snap.month:02d}" if snap else None,
+            )
+        )
+
+        total = by_class[AssetClass(asset.asset_class).value]
+        total.value += value
+        total.previous += previous
+
+        if liability:
+            total_liabilities += value
+            prev_liabilities += previous
+        else:
+            total_assets += value
+            prev_assets += previous
+
+    return AssetSummary(
+        year=year,
+        month=month,
+        items=items,
+        by_class=by_class,
+        assets=total_assets,
+        liabilities=total_liabilities,
+        net_worth=total_assets - total_liabilities,
+        previous_net_worth=prev_assets - prev_liabilities,
+    )
+
+
+@app.put("/assets/snapshots")
+def set_asset_snapshot(
+    snapshot: AssetSnapshotCreate, session: Session = Depends(get_session)
+):
+    """Lança o saldo do ativo no mês. Idempotente, pelo mesmo motivo do PUT de metas."""
+    asset = session.get(Asset, snapshot.asset_id)
+    if not asset:
+        raise HTTPException(status_code=400, detail="Asset not found")
+
+    db_snapshot = session.exec(
+        select(AssetSnapshot).where(
+            AssetSnapshot.asset_id == snapshot.asset_id,
+            AssetSnapshot.year == snapshot.year,
+            AssetSnapshot.month == snapshot.month,
+        )
+    ).first()
+
+    if db_snapshot:
+        db_snapshot.value = snapshot.value
+    else:
+        db_snapshot = AssetSnapshot.model_validate(snapshot)
+
+    session.add(db_snapshot)
+    session.commit()
+    session.refresh(db_snapshot)
+
+    return db_snapshot
+
+
+@app.get("/assets/snapshots")
+def list_asset_snapshots(
+    session: Session = Depends(get_session),
+    asset_id: int | None = None,
+    year: int | None = Query(default=None, ge=1900, le=2999),
+):
+    query = select(AssetSnapshot)
+
+    if asset_id is not None:
+        query = query.where(AssetSnapshot.asset_id == asset_id)
+    if year is not None:
+        query = query.where(AssetSnapshot.year == year)
+
+    return session.exec(
+        query.order_by(AssetSnapshot.year, AssetSnapshot.month, AssetSnapshot.asset_id)
+    ).all()
+
+
+@app.patch("/assets/snapshots/{snapshot_id}")
+def update_asset_snapshot(
+    snapshot_id: int,
+    snapshot_data: AssetSnapshotUpdate,
+    session: Session = Depends(get_session),
+):
+    snapshot = session.get(AssetSnapshot, snapshot_id)
+
+    if not snapshot:
+        raise HTTPException(status_code=404, detail="Snapshot not found")
+
+    for key, value in snapshot_data.model_dump(exclude_unset=True).items():
+        setattr(snapshot, key, value)
+
+    session.add(snapshot)
+    session.commit()
+    session.refresh(snapshot)
+
+    return snapshot
+
+
+@app.delete("/assets/snapshots/{snapshot_id}")
+def delete_asset_snapshot(snapshot_id: int, session: Session = Depends(get_session)):
+    snapshot = session.get(AssetSnapshot, snapshot_id)
+
+    if not snapshot:
+        raise HTTPException(status_code=404, detail="Snapshot not found")
+
+    session.delete(snapshot)
+    session.commit()
+
+    return {"message": "Saldo excluído."}
+
+
+@app.post("/assets")
+def create_asset(asset: AssetCreate, session: Session = Depends(get_session)):
+    db_asset = Asset.model_validate(asset)
+    session.add(db_asset)
+    session.commit()
+    session.refresh(db_asset)
+    return db_asset
+
+
+@app.get("/assets")
+def list_assets(session: Session = Depends(get_session)):
+    return session.exec(select(Asset).order_by(Asset.asset_class, Asset.name)).all()
+
+
+@app.patch("/assets/{asset_id}")
+def update_asset(asset_id: int, asset_data: AssetUpdate, session: Session = Depends(get_session)):
+    asset = session.get(Asset, asset_id)
+
+    if not asset:
+        raise HTTPException(status_code=404, detail="Asset not found")
+
+    for key, value in asset_data.model_dump(exclude_unset=True).items():
+        setattr(asset, key, value)
+
+    session.add(asset)
+    session.commit()
+    session.refresh(asset)
+
+    return asset
+
+
+@app.delete("/assets/{asset_id}")
+def delete_asset(asset_id: int, session: Session = Depends(get_session)):
+    asset = session.get(Asset, asset_id)
+
+    if not asset:
+        raise HTTPException(status_code=404, detail="Asset not found")
+
+    # Os saldos saem junto: sem isso a FK barra o delete e sobraria histórico
+    # órfão de um ativo que não existe mais.
+    snapshots = session.exec(
+        select(AssetSnapshot).where(AssetSnapshot.asset_id == asset_id)
+    ).all()
+    for snapshot in snapshots:
+        session.delete(snapshot)
+
+    session.delete(asset)
+    session.commit()
+
+    return {"message": "Ativo excluído."}
