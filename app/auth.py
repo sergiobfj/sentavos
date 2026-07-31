@@ -23,6 +23,18 @@ log = logging.getLogger("sentavos.auth")
 # alg="none" (ou trocado pra confundir o verificador) de ser aceito.
 ALGORITMOS_ACEITOS = {"HS256", "ES256", "RS256"}
 
+# Tolerância de relógio na verificação de exp/nbf/iat.
+#
+# Sem ela, um punhado de segundos de diferença entre esta máquina e o servidor do
+# Supabase derruba o login: o token chega com iat "no futuro" e o PyJWT recusa
+# com ImmatureSignatureError. Não é hipótese — foi o que aconteceu aqui com 2s de
+# desvio, e nenhum relógio fica perfeitamente sincronizado.
+#
+# O preço é aceitar um token expirado por até este tempo a mais. Com token de 1
+# hora e refresh automático no front, é troca barata; o alternativo é login que
+# falha de forma intermitente e inexplicável.
+FOLGA_DE_RELOGIO_SEGUNDOS = 60
+
 # auto_error=False pra devolver 401 na falta de token. O padrão do HTTPBearer é
 # 403, que significa "te conheço e não pode" — o certo aqui é "não te conheço".
 bearer = HTTPBearer(auto_error=False)
@@ -90,9 +102,10 @@ def require_user(
                 cabecalho.get("kid"), jwks_url, type(e).__name__, e,
             )
             raise HTTPException(status_code=401, detail="Sessão inválida ou expirada.")
-        except Exception:
+        except Exception as e:
             # JWKS fora do ar é problema do servidor, não credencial ruim. Dizer
             # 401 aqui mandaria o usuário tentar de novo pra sempre.
+            log.warning("JWKS inacessível (url=%s): %s: %s", jwks_url, type(e).__name__, e)
             raise HTTPException(
                 status_code=503,
                 detail="Não consegui verificar a sessão agora. Tente em instantes.",
@@ -105,6 +118,7 @@ def require_user(
             algorithms=[alg],
             # O Supabase emite aud="authenticated" pra usuário logado.
             audience="authenticated",
+            leeway=FOLGA_DE_RELOGIO_SEGUNDOS,
         )
     except jwt.PyJWTError as e:
         # Assinatura errada, expirado e malformado caem todos aqui: pro cliente

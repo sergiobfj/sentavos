@@ -49,19 +49,57 @@ def es256_fixture(monkeypatch):
     auth._cliente_jwks.cache_clear()
 
 
-def token_es256(privada, sub=USER_ID, minutos=10, aud="authenticated"):
+def token_es256(privada, sub=USER_ID, minutos=10, aud="authenticated", iat_offset=0):
     agora = dt.datetime.now(dt.timezone.utc)
-    return jwt.encode(
-        {"sub": sub, "aud": aud, "exp": agora + dt.timedelta(minutes=minutos)},
-        privada,
-        algorithm="ES256",
-        headers={"kid": KID},
-    )
+    corpo = {"sub": sub, "aud": aud, "exp": agora + dt.timedelta(minutes=minutos)}
+    if iat_offset:
+        corpo["iat"] = agora + dt.timedelta(seconds=iat_offset)
+    return jwt.encode(corpo, privada, algorithm="ES256", headers={"kid": KID})
 
 
 def test_token_es256_valido_entra(anon_client, es256):
     r = anon_client.get(
         "/transactions", headers={"Authorization": f"Bearer {token_es256(es256)}"}
+    )
+
+    assert r.status_code == 200
+
+
+def test_iat_alguns_segundos_no_futuro_ainda_entra(anon_client, es256):
+    """Desvio de relógio não pode derrubar login.
+
+    Relógio de máquina nenhuma bate exatamente com o do Supabase. Com 2s de
+    desvio real, o PyJWT recusava o token com ImmatureSignatureError e o login
+    ficava impossível sem nenhuma pista. A folga cobre isso.
+    """
+    r = anon_client.get(
+        "/transactions",
+        headers={"Authorization": f"Bearer {token_es256(es256, iat_offset=5)}"},
+    )
+
+    assert r.status_code == 200
+
+
+def test_iat_absurdamente_no_futuro_e_recusado(anon_client, es256):
+    # A folga é pra desvio de relógio, não pra token vindo de outro tempo.
+    longe = auth.FOLGA_DE_RELOGIO_SEGUNDOS + 600
+
+    r = anon_client.get(
+        "/transactions",
+        headers={"Authorization": f"Bearer {token_es256(es256, iat_offset=longe)}"},
+    )
+
+    assert r.status_code == 401
+
+
+def test_expirado_dentro_da_folga_ainda_entra(anon_client, es256):
+    # Consequência aceita da folga: token recém-expirado passa por mais alguns
+    # segundos. Documentado aqui pra a troca ser deliberada, não surpresa.
+    quase = -(auth.FOLGA_DE_RELOGIO_SEGUNDOS - 30) / 60
+
+    r = anon_client.get(
+        "/transactions",
+        headers={"Authorization": f"Bearer {token_es256(es256, minutos=quase)}"},
     )
 
     assert r.status_code == 200
