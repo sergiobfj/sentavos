@@ -261,6 +261,11 @@ input[type="color"] { padding: 4px; height: 42px; cursor: pointer; }
   text-align: center; color: var(--text-faint); font-size: 13px; margin: 0 0 6px;
 }
 .login-card .btn-primary { justify-content: center; margin-top: 4px; }
+.aviso-box {
+  background: rgba(245, 179, 1, 0.1); border: 1px solid rgba(245, 179, 1, 0.35);
+  color: var(--gold-hi); border-radius: var(--radius-sm);
+  padding: 10px 12px; font-size: 13px; line-height: 1.5;
+}
 
 /* ---------- Sub-abas ---------- */
 .subtabs { display: flex; gap: 4px; margin-bottom: 18px; flex-wrap: wrap; }

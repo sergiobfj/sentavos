@@ -1,12 +1,28 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { supabase } from "../lib/supabase";
+import { AVISO_LOGIN } from "../lib/api";
 import logo from "../assets/logo.png";
 
 export default function Login() {
   const [email, setEmail] = useState("");
   const [senha, setSenha] = useState("");
   const [erro, setErro] = useState<string | null>(null);
+  const [aviso, setAviso] = useState<string | null>(null);
   const [entrando, setEntrando] = useState(false);
+
+  // Recado de quem foi derrubado por 401. Consumido na leitura pra não ficar
+  // aparecendo em todo login seguinte.
+  useEffect(() => {
+    try {
+      const guardado = sessionStorage.getItem(AVISO_LOGIN);
+      if (guardado) {
+        setAviso(guardado);
+        sessionStorage.removeItem(AVISO_LOGIN);
+      }
+    } catch {
+      /* sessionStorage pode estar bloqueado */
+    }
+  }, []);
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
@@ -41,6 +57,10 @@ export default function Login() {
           <span className="name"><b>s</b>entavos</span>
         </div>
         <p className="login-tag">Cada centavo no seu lugar.</p>
+
+        {aviso && (
+          <div className="aviso-box">{aviso}</div>
+        )}
 
         <div className="field">
           <label htmlFor="l-email">E-mail</label>

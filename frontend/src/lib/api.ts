@@ -19,6 +19,9 @@ import type {
 
 const BASE_URL = import.meta.env.VITE_API_URL ?? "http://localhost:8000";
 
+// Recado deixado pra tela de login quando a sessão é derrubada no meio do uso.
+export const AVISO_LOGIN = "sentavos:aviso-login";
+
 export class ApiError extends Error {
   status: number;
   constructor(status: number, message: string) {
@@ -47,11 +50,24 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
     throw new ApiError(0, "Não consegui falar com a API. O backend está no ar?");
   }
 
-  // Token venceu ou foi revogado: derruba a sessão pra a tela de login aparecer,
-  // em vez de deixar o app mostrando erro em toda aba.
+  // Token venceu, foi revogado ou a API não consegue validar: derruba a sessão
+  // pra a tela de login aparecer, em vez de deixar erro em toda aba.
+  //
+  // O aviso fica guardado porque o signOut desmonta esta tela na hora: sem ele o
+  // usuário voltaria pro login sem explicação nenhuma e ficaria tentando de novo
+  // achando que errou a senha. Foi exatamente o que aconteceu quando a API só
+  // validava HS256 e o Supabase assinava com ES256.
   if (res.status === 401) {
+    try {
+      sessionStorage.setItem(
+        AVISO_LOGIN,
+        "A API recusou sua sessão. Se você acabou de entrar, é configuração do servidor, não sua senha."
+      );
+    } catch {
+      /* sessionStorage pode estar bloqueado */
+    }
     await supabase.auth.signOut();
-    throw new ApiError(401, "Sua sessão expirou. Entre de novo.");
+    throw new ApiError(401, "Sua sessão foi recusada. Entre de novo.");
   }
 
   if (!res.ok) {
