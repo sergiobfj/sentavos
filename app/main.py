@@ -115,7 +115,11 @@ def previous_month(year: int, month: int) -> tuple[int, int]:
     return (year - 1, 12) if month == 1 else (year, month - 1)
 
 
-@app.get("/")
+# HEAD junto com GET: é a rota de healthcheck, e quem checa saúde costuma usar
+# HEAD pra não baixar corpo à toa. O @app.get sozinho responderia 405 a eles —
+# que o host lê como serviço caído, mesmo com tudo funcionando. Foi o que o
+# Render fez na detecção de porta, e é o que um pinger externo faria depois.
+@app.api_route("/", methods=["GET", "HEAD"])
 async def root():
     return {"message": "API do Sentavos no ar"}
 

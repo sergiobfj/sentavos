@@ -86,7 +86,7 @@ def test_cota_de_falhas_e_menor_que_a_geral_na_pratica(anon_client, monkeypatch)
 
 
 def test_healthcheck_nao_gasta_cota(anon_client, monkeypatch):
-    """O Railway bate no / de minuto em minuto.
+    """O Render bate no / de 10 em 10 segundos.
 
     Se isso gastasse cota, o próprio healthcheck acabaria derrubando o serviço
     que veio checar.
@@ -128,3 +128,14 @@ def test_content_length_invalido_nao_derruba_a_api(client, valor):
     )
 
     assert r.status_code in (200, 400)
+
+
+def test_healthcheck_responde_get_e_head(anon_client):
+    """Quem monitora saúde costuma usar HEAD pra não baixar corpo à toa.
+
+    Sem HEAD declarado, a rota responderia 405 — que o host lê como serviço
+    caído, com tudo funcionando. O Render fez exatamente isso na detecção de
+    porta, e um pinger externo faria depois.
+    """
+    assert anon_client.get("/").status_code == 200
+    assert anon_client.head("/").status_code == 200
