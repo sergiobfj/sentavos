@@ -6,7 +6,8 @@ from fastapi import APIRouter, Depends, FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from sqlmodel import Session, SQLModel, and_, func, or_, select
 
-from app.auth import ConfiguracaoIncompleta, autenticar, require_user
+from app.auth import ConfiguracaoIncompleta, autenticar, exigir_escrita, require_user
+from app.escopo import buscar, consulta, exigir
 from app.database import create_db_and_tables, get_session
 from app.security import RateLimitMiddleware, SecurityHeadersMiddleware
 from app.models import (
@@ -33,6 +34,7 @@ from app.models import (
     Transaction,
     TransactionCreate,
     TransactionUpdate,
+    User,
     is_liability,
 )
 
@@ -139,9 +141,9 @@ class TokenDeAcesso(SQLModel):
 
 
 @app.post("/auth/login", response_model=TokenDeAcesso)
-def login(credenciais: Credenciais):
+def login(credenciais: Credenciais, session: Session = Depends(get_session)):
     try:
-        token = autenticar(credenciais.email, credenciais.senha)
+        token = autenticar(credenciais.email, credenciais.senha, session)
     except ConfiguracaoIncompleta:
         # 500 e não 401: o problema é o servidor, e mandar o usuário tentar de
         # novo seria mentira — nenhuma senha funcionaria.
@@ -152,12 +154,14 @@ def login(credenciais: Credenciais):
 
 
 @router.post("/transactions")
-def create_transaction(transaction: TransactionCreate, session: Session = Depends(get_session)):
-    category = session.get(Category, transaction.category_id)
+def create_transaction(transaction: TransactionCreate, session: Session = Depends(get_session),
+    dono: User = Depends(require_user)):
+    exigir_escrita(dono)
+    category = buscar(session, Category, transaction.category_id, dono)
     if not category:
         raise HTTPException(status_code=400, detail="Category not found")
 
-    db_transaction = Transaction.model_validate(transaction)
+    db_transaction = Transaction.model_validate(transaction, update={"user_id": dono.id})
     session.add(db_transaction)
     session.commit()
     session.refresh(db_transaction)
@@ -167,13 +171,14 @@ def create_transaction(transaction: TransactionCreate, session: Session = Depend
 @router.get("/transactions")
 def list_transactions(
     session: Session = Depends(get_session),
+    dono: User = Depends(require_user),
     year: int | None = Query(default=None, ge=1900, le=2999),
     month: int | None = Query(default=None, ge=1, le=12),
 ):
     if month is not None and year is None:
         raise HTTPException(status_code=400, detail="Informe o ano junto com o mês.")
 
-    query = select(Transaction)
+    query = consulta(Transaction, dono)
 
     if year is not None:
         if month is None:
@@ -188,21 +193,18 @@ def list_transactions(
 
 
 @router.get("/transactions/{transaction_id}")
-def get_transaction(transaction_id: int, session: Session = Depends(get_session)):
-    transaction = session.get(Transaction, transaction_id)
-
-    if not transaction:
-        raise HTTPException(status_code=404, detail="Transaction not found")
+def get_transaction(transaction_id: int, session: Session = Depends(get_session),
+    dono: User = Depends(require_user)):
+    transaction = exigir(session, Transaction, transaction_id, dono, "Transação")
 
     return transaction
 
 
 @router.delete("/transactions/{transaction_id}")
-def delete_transaction(transaction_id: int, session: Session = Depends(get_session)):
-    transaction = session.get(Transaction, transaction_id)
-
-    if not transaction:
-        raise HTTPException(status_code=404, detail="Transaction not found")
+def delete_transaction(transaction_id: int, session: Session = Depends(get_session),
+    dono: User = Depends(require_user)):
+    exigir_escrita(dono)
+    transaction = exigir(session, Transaction, transaction_id, dono, "Transação")
 
     session.delete(transaction)
     session.commit()
@@ -212,17 +214,16 @@ def delete_transaction(transaction_id: int, session: Session = Depends(get_sessi
 
 @router.patch("/transactions/{transaction_id}")
 def update_transaction(
-    transaction_id: int, transaction_data: TransactionUpdate, session: Session = Depends(get_session)
+    transaction_id: int, transaction_data: TransactionUpdate, session: Session = Depends(get_session),
+    dono: User = Depends(require_user)
 ):
-    transaction = session.get(Transaction, transaction_id)
-
-    if not transaction:
-        raise HTTPException(status_code=404, detail="Transaction not found")
+    exigir_escrita(dono)
+    transaction = exigir(session, Transaction, transaction_id, dono, "Transação")
 
     update_data = transaction_data.model_dump(exclude_unset=True)
 
     if "category_id" in update_data:
-        category = session.get(Category, update_data["category_id"])
+        category = exigir(session, Category, update_data["category_id"], dono, "Categoria")
         if not category:
             raise HTTPException(status_code=400, detail="Category not found")
 
@@ -237,8 +238,10 @@ def update_transaction(
 
 
 @router.post("/categories")
-def create_category(category: CategoryCreate, session: Session = Depends(get_session)):
-    db_category = Category.model_validate(category)
+def create_category(category: CategoryCreate, session: Session = Depends(get_session),
+    dono: User = Depends(require_user)):
+    exigir_escrita(dono)
+    db_category = Category.model_validate(category, update={"user_id": dono.id})
     session.add(db_category)
     session.commit()
     session.refresh(db_category)
@@ -246,29 +249,27 @@ def create_category(category: CategoryCreate, session: Session = Depends(get_ses
 
 
 @router.get("/categories")
-def list_categories(session: Session = Depends(get_session)):
-    categories = session.exec(select(Category)).all()
+def list_categories(session: Session = Depends(get_session),
+    dono: User = Depends(require_user)):
+    categories = session.exec(consulta(Category, dono)).all()
     return categories
 
 
 @router.get("/categories/{category_id}")
-def get_category(category_id: int, session: Session = Depends(get_session)):
-    category = session.get(Category, category_id)
-
-    if not category:
-        raise HTTPException(status_code=404, detail="Category not found")
+def get_category(category_id: int, session: Session = Depends(get_session),
+    dono: User = Depends(require_user)):
+    category = exigir(session, Category, category_id, dono, "Categoria")
 
     return category
 
 
 @router.patch("/categories/{category_id}")
 def update_category(
-    category_id: int, category_data: CategoryUpdate, session: Session = Depends(get_session)
+    category_id: int, category_data: CategoryUpdate, session: Session = Depends(get_session),
+    dono: User = Depends(require_user)
 ):
-    category = session.get(Category, category_id)
-
-    if not category:
-        raise HTTPException(status_code=404, detail="Category not found")
+    exigir_escrita(dono)
+    category = exigir(session, Category, category_id, dono, "Categoria")
 
     update_data = category_data.model_dump(exclude_unset=True)
 
@@ -283,16 +284,17 @@ def update_category(
 
 
 @router.delete("/categories/{category_id}")
-def delete_category(category_id: int, session: Session = Depends(get_session)):
-    category = session.get(Category, category_id)
-
-    if not category:
-        raise HTTPException(status_code=404, detail="Category not found")
+def delete_category(category_id: int, session: Session = Depends(get_session),
+    dono: User = Depends(require_user)):
+    exigir_escrita(dono)
+    category = exigir(session, Category, category_id, dono, "Categoria")
 
     # Lançamento é histórico: apagar a categoria junto seria destruir dado que
     # o usuário não pediu pra perder. Melhor recusar e deixar ele decidir.
     lancamentos = session.exec(
-        select(func.count()).select_from(Transaction).where(Transaction.category_id == category_id)
+        select(func.count())
+        .select_from(Transaction)
+        .where(Transaction.user_id == dono.id, Transaction.category_id == category_id)
     ).one()
 
     if lancamentos:
@@ -306,7 +308,7 @@ def delete_category(category_id: int, session: Session = Depends(get_session)):
 
     # Meta é planejamento, não histórico — pode sair junto. O flush garante que
     # ela vá embora antes da categoria, senão a FK barra no Postgres.
-    for budget in session.exec(select(Budget).where(Budget.category_id == category_id)).all():
+    for budget in session.exec(consulta(Budget, dono).where(Budget.category_id == category_id)).all():
         session.delete(budget)
     session.flush()
 
@@ -322,6 +324,7 @@ def get_budget_summary(
     year: int = Query(ge=1900, le=2999),
     month: int = Query(ge=1, le=12),
     session: Session = Depends(get_session),
+    dono: User = Depends(require_user),
 ):
     """Orçado x previsto x pago por categoria no mês.
 
@@ -338,7 +341,11 @@ def get_budget_summary(
                 func.coalesce(func.sum(Transaction.amount_planned), 0.0),
                 func.coalesce(func.sum(Transaction.amount_paid), 0.0),
             )
-            .where(Transaction.date >= start, Transaction.date < end)
+            .where(
+                Transaction.user_id == dono.id,
+                Transaction.date >= start,
+                Transaction.date < end,
+            )
             .group_by(Transaction.category_id)
         ).all()
     }
@@ -346,11 +353,11 @@ def get_budget_summary(
     metas = {
         budget.category_id: budget
         for budget in session.exec(
-            select(Budget).where(Budget.year == year, Budget.month == month)
+            consulta(Budget, dono).where(Budget.year == year, Budget.month == month)
         ).all()
     }
 
-    categories = session.exec(select(Category).order_by(Category.type, Category.name)).all()
+    categories = session.exec(consulta(Category, dono).order_by(Category.type, Category.name)).all()
 
     # Os três tipos sempre vêm nos totais, mesmo zerados, pra o front não
     # precisar checar chave faltando.
@@ -382,18 +389,20 @@ def get_budget_summary(
 
 
 @router.put("/budgets")
-def set_budget(budget: BudgetCreate, session: Session = Depends(get_session)):
+def set_budget(budget: BudgetCreate, session: Session = Depends(get_session),
+    dono: User = Depends(require_user)):
     """Define a meta da categoria no mês. Idempotente: cria ou sobrescreve.
 
     É PUT em vez de POST porque a tela de Orçamento só sabe "categoria + mês +
     valor" — ela não tem id de meta pra escolher entre criar e editar.
     """
-    category = session.get(Category, budget.category_id)
+    exigir_escrita(dono)
+    category = buscar(session, Category, budget.category_id, dono)
     if not category:
         raise HTTPException(status_code=400, detail="Category not found")
 
     db_budget = session.exec(
-        select(Budget).where(
+        consulta(Budget, dono).where(
             Budget.category_id == budget.category_id,
             Budget.year == budget.year,
             Budget.month == budget.month,
@@ -403,7 +412,7 @@ def set_budget(budget: BudgetCreate, session: Session = Depends(get_session)):
     if db_budget:
         db_budget.amount = budget.amount
     else:
-        db_budget = Budget.model_validate(budget)
+        db_budget = Budget.model_validate(budget, update={"user_id": dono.id})
 
     session.add(db_budget)
     session.commit()
@@ -415,13 +424,14 @@ def set_budget(budget: BudgetCreate, session: Session = Depends(get_session)):
 @router.get("/budgets")
 def list_budgets(
     session: Session = Depends(get_session),
+    dono: User = Depends(require_user),
     year: int | None = Query(default=None, ge=1900, le=2999),
     month: int | None = Query(default=None, ge=1, le=12),
 ):
     if month is not None and year is None:
         raise HTTPException(status_code=400, detail="Informe o ano junto com o mês.")
 
-    query = select(Budget)
+    query = consulta(Budget, dono)
 
     if year is not None:
         query = query.where(Budget.year == year)
@@ -433,12 +443,11 @@ def list_budgets(
 
 @router.patch("/budgets/{budget_id}")
 def update_budget(
-    budget_id: int, budget_data: BudgetUpdate, session: Session = Depends(get_session)
+    budget_id: int, budget_data: BudgetUpdate, session: Session = Depends(get_session),
+    dono: User = Depends(require_user)
 ):
-    budget = session.get(Budget, budget_id)
-
-    if not budget:
-        raise HTTPException(status_code=404, detail="Budget not found")
+    exigir_escrita(dono)
+    budget = exigir(session, Budget, budget_id, dono, "Meta")
 
     for key, value in budget_data.model_dump(exclude_unset=True).items():
         setattr(budget, key, value)
@@ -451,11 +460,10 @@ def update_budget(
 
 
 @router.delete("/budgets/{budget_id}")
-def delete_budget(budget_id: int, session: Session = Depends(get_session)):
-    budget = session.get(Budget, budget_id)
-
-    if not budget:
-        raise HTTPException(status_code=404, detail="Budget not found")
+def delete_budget(budget_id: int, session: Session = Depends(get_session),
+    dono: User = Depends(require_user)):
+    exigir_escrita(dono)
+    budget = exigir(session, Budget, budget_id, dono, "Meta")
 
     session.delete(budget)
     session.commit()
@@ -470,6 +478,7 @@ def get_asset_summary(
     year: int = Query(ge=1900, le=2999),
     month: int = Query(ge=1, le=12),
     session: Session = Depends(get_session),
+    dono: User = Depends(require_user),
 ):
     """Saldo de cada ativo no mês, com variação e patrimônio líquido.
 
@@ -481,7 +490,7 @@ def get_asset_summary(
     prev_target = month_index(*previous_month(year, month))
 
     snapshots = session.exec(
-        select(AssetSnapshot).where(
+        consulta(AssetSnapshot, dono).where(
             or_(
                 AssetSnapshot.year < year,
                 and_(AssetSnapshot.year == year, AssetSnapshot.month <= month),
@@ -505,7 +514,7 @@ def get_asset_summary(
         if idx <= prev_target:
             keep_latest(latest_prev, snap, idx)
 
-    assets = session.exec(select(Asset).order_by(Asset.asset_class, Asset.name)).all()
+    assets = session.exec(consulta(Asset, dono).order_by(Asset.asset_class, Asset.name)).all()
 
     items: list[AssetSummaryItem] = []
     by_class = {classe.value: AssetClassTotal() for classe in AssetClass}
@@ -563,15 +572,17 @@ def get_asset_summary(
 
 @router.put("/assets/snapshots")
 def set_asset_snapshot(
-    snapshot: AssetSnapshotCreate, session: Session = Depends(get_session)
+    snapshot: AssetSnapshotCreate, session: Session = Depends(get_session),
+    dono: User = Depends(require_user)
 ):
     """Lança o saldo do ativo no mês. Idempotente, pelo mesmo motivo do PUT de metas."""
-    asset = session.get(Asset, snapshot.asset_id)
+    exigir_escrita(dono)
+    asset = buscar(session, Asset, snapshot.asset_id, dono)
     if not asset:
         raise HTTPException(status_code=400, detail="Asset not found")
 
     db_snapshot = session.exec(
-        select(AssetSnapshot).where(
+        consulta(AssetSnapshot, dono).where(
             AssetSnapshot.asset_id == snapshot.asset_id,
             AssetSnapshot.year == snapshot.year,
             AssetSnapshot.month == snapshot.month,
@@ -581,7 +592,7 @@ def set_asset_snapshot(
     if db_snapshot:
         db_snapshot.value = snapshot.value
     else:
-        db_snapshot = AssetSnapshot.model_validate(snapshot)
+        db_snapshot = AssetSnapshot.model_validate(snapshot, update={"user_id": dono.id})
 
     session.add(db_snapshot)
     session.commit()
@@ -593,10 +604,11 @@ def set_asset_snapshot(
 @router.get("/assets/snapshots")
 def list_asset_snapshots(
     session: Session = Depends(get_session),
+    dono: User = Depends(require_user),
     asset_id: int | None = None,
     year: int | None = Query(default=None, ge=1900, le=2999),
 ):
-    query = select(AssetSnapshot)
+    query = consulta(AssetSnapshot, dono)
 
     if asset_id is not None:
         query = query.where(AssetSnapshot.asset_id == asset_id)
@@ -613,11 +625,10 @@ def update_asset_snapshot(
     snapshot_id: int,
     snapshot_data: AssetSnapshotUpdate,
     session: Session = Depends(get_session),
+    dono: User = Depends(require_user),
 ):
-    snapshot = session.get(AssetSnapshot, snapshot_id)
-
-    if not snapshot:
-        raise HTTPException(status_code=404, detail="Snapshot not found")
+    exigir_escrita(dono)
+    snapshot = exigir(session, AssetSnapshot, snapshot_id, dono, "Saldo")
 
     for key, value in snapshot_data.model_dump(exclude_unset=True).items():
         setattr(snapshot, key, value)
@@ -630,11 +641,10 @@ def update_asset_snapshot(
 
 
 @router.delete("/assets/snapshots/{snapshot_id}")
-def delete_asset_snapshot(snapshot_id: int, session: Session = Depends(get_session)):
-    snapshot = session.get(AssetSnapshot, snapshot_id)
-
-    if not snapshot:
-        raise HTTPException(status_code=404, detail="Snapshot not found")
+def delete_asset_snapshot(snapshot_id: int, session: Session = Depends(get_session),
+    dono: User = Depends(require_user)):
+    exigir_escrita(dono)
+    snapshot = exigir(session, AssetSnapshot, snapshot_id, dono, "Saldo")
 
     session.delete(snapshot)
     session.commit()
@@ -643,8 +653,10 @@ def delete_asset_snapshot(snapshot_id: int, session: Session = Depends(get_sessi
 
 
 @router.post("/assets")
-def create_asset(asset: AssetCreate, session: Session = Depends(get_session)):
-    db_asset = Asset.model_validate(asset)
+def create_asset(asset: AssetCreate, session: Session = Depends(get_session),
+    dono: User = Depends(require_user)):
+    exigir_escrita(dono)
+    db_asset = Asset.model_validate(asset, update={"user_id": dono.id})
     session.add(db_asset)
     session.commit()
     session.refresh(db_asset)
@@ -652,16 +664,16 @@ def create_asset(asset: AssetCreate, session: Session = Depends(get_session)):
 
 
 @router.get("/assets")
-def list_assets(session: Session = Depends(get_session)):
-    return session.exec(select(Asset).order_by(Asset.asset_class, Asset.name)).all()
+def list_assets(session: Session = Depends(get_session),
+    dono: User = Depends(require_user)):
+    return session.exec(consulta(Asset, dono).order_by(Asset.asset_class, Asset.name)).all()
 
 
 @router.patch("/assets/{asset_id}")
-def update_asset(asset_id: int, asset_data: AssetUpdate, session: Session = Depends(get_session)):
-    asset = session.get(Asset, asset_id)
-
-    if not asset:
-        raise HTTPException(status_code=404, detail="Asset not found")
+def update_asset(asset_id: int, asset_data: AssetUpdate, session: Session = Depends(get_session),
+    dono: User = Depends(require_user)):
+    exigir_escrita(dono)
+    asset = exigir(session, Asset, asset_id, dono, "Ativo")
 
     for key, value in asset_data.model_dump(exclude_unset=True).items():
         setattr(asset, key, value)
@@ -674,16 +686,15 @@ def update_asset(asset_id: int, asset_data: AssetUpdate, session: Session = Depe
 
 
 @router.delete("/assets/{asset_id}")
-def delete_asset(asset_id: int, session: Session = Depends(get_session)):
-    asset = session.get(Asset, asset_id)
-
-    if not asset:
-        raise HTTPException(status_code=404, detail="Asset not found")
+def delete_asset(asset_id: int, session: Session = Depends(get_session),
+    dono: User = Depends(require_user)):
+    exigir_escrita(dono)
+    asset = exigir(session, Asset, asset_id, dono, "Ativo")
 
     # Os saldos saem junto: sem isso a FK barra o delete e sobraria histórico
     # órfão de um ativo que não existe mais.
     snapshots = session.exec(
-        select(AssetSnapshot).where(AssetSnapshot.asset_id == asset_id)
+        consulta(AssetSnapshot, dono).where(AssetSnapshot.asset_id == asset_id)
     ).all()
     for snapshot in snapshots:
         session.delete(snapshot)

@@ -691,3 +691,33 @@ textarea { min-height: 76px; resize: vertical; }
 .budget-bar { display: flex; align-items: center; gap: var(--s3); padding-left: 52px; }
 .budget-bar .bar-track { flex: 1; }
 .budget-bar span { font-size: 11px; font-weight: 650; min-width: 34px; text-align: right; }
+
+/* ---------- Aviso de demonstração ----------
+   Fica no topo do conteúdo, não sobre ele: a conta demo é pra navegar, e um
+   balão flutuante atrapalharia exatamente o que ela existe pra mostrar. */
+.aviso-demo {
+  padding: var(--s3) var(--s4);
+  margin-bottom: var(--s4);
+  border-radius: var(--r-sm);
+  background: var(--gold-ghost);
+  border: 1px solid rgba(245, 179, 1, 0.28);
+  color: var(--gold-hi);
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+
+/* O campo de meta fica quieto até ser tocado.
+   Numa tela com 28 categorias, 28 caixas de input desenhadas ao mesmo tempo
+   competem com os números que a pessoa veio ler. Sem borda ele ainda é
+   claramente editável (está alinhado à direita, com placeholder), e a borda
+   aparece no foco, que é quando ela informa alguma coisa. */
+.budget-row .saldo-input input {
+  background: transparent;
+  border-color: transparent;
+  font-weight: 650;
+}
+.budget-row .saldo-input input:hover { border-color: var(--border); }
+.budget-row .saldo-input input:focus {
+  background: var(--surface-2);
+  outline: 2px solid var(--gold);
+}

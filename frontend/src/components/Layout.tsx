@@ -25,7 +25,12 @@ export default function Layout() {
   // O botão de novo lançamento não aparece onde ele não faria nada: em
   // Configurações não há o que lançar, e em Patrimônio o que se registra é
   // saldo, que tem fluxo próprio na tela.
-  const mostrarFab = pathname === "/" || pathname.startsWith("/orcamento");
+  // A conta de demonstração não escreve, então o botão de novo lançamento não
+  // aparece pra ela: oferecer uma ação que só pode terminar em erro é pior do
+  // que não oferecer.
+  const mostrarFab =
+    !sessao?.somenteLeitura &&
+    (pathname === "/" || pathname.startsWith("/orcamento"));
 
   return (
     <div className="app">
@@ -76,6 +81,12 @@ export default function Layout() {
         </header>
 
         <main className="main">
+          {sessao?.somenteLeitura && (
+            <div className="aviso-demo">
+              <b>Modo demonstração.</b> Você pode navegar por tudo, mas não
+              alterar — os dados são fictícios.
+            </div>
+          )}
           <Outlet />
         </main>
       </div>

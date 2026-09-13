@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import MoneyCell from "../components/MoneyCell";
 import TransactionForm from "../components/TransactionForm";
@@ -29,10 +29,17 @@ export default function Budget() {
   const [params, setParams] = useSearchParams();
   const tab: Tab = params.get("aba") === "lancamentos" ? "lancamentos" : "metas";
   const { data: categories } = useCategories();
-  // O botão + do shell chega aqui com ?novo=1. Sem ler esse parâmetro, ele
-  // abriria a aba de lançamentos e pararia ali — um toque a mais, justo na
-  // ação mais frequente do app.
-  const [creating, setCreating] = useState(params.get("novo") === "1");
+  const [creating, setCreating] = useState(false);
+
+  // O + do shell chega aqui mudando a URL para ?novo=1.
+  //
+  // Precisa ser efeito, e não valor inicial do useState: o inicializador roda
+  // só na primeira montagem, então tocar no + já estando em Orçamento mudava a
+  // URL e não abria nada — o componente não remonta numa navegação interna.
+  // Vindo da tela de Início funcionava, o que fazia o bug parecer intermitente.
+  useEffect(() => {
+    if (params.get("novo") === "1") setCreating(true);
+  }, [params]);
   const [editing, setEditing] = useState<Transaction | null>(null);
 
   function fecharCriacao() {
@@ -214,10 +221,26 @@ function Section({
 
   // Categoria sem meta e sem movimento é ruído: ela existe pra poder receber
   // uma meta, mas listar todas empurra as que importam pra fora da tela.
-  const comDado = items.filter((i) => i.budgeted > 0 || i.paid > 0 || i.planned > 0);
+  //
+  // A ordem também é escolhida, e não a que o banco devolveu (tipo + nome
+  // alfabético). Com 28 categorias, ordem alfabética faz "Academia" abrir a
+  // lista e a que estourou o orçamento aparecer lá embaixo — exatamente o
+  // contrário do que se abre a tela pra ver. Aqui: primeiro quem passou do
+  // teto, depois quem mais consumiu.
+  const ordenar = (a: BudgetSummaryItem, b: BudgetSummaryItem) => {
+    const estourouA = a.budgeted > 0 && a.paid > a.budgeted;
+    const estourouB = b.budgeted > 0 && b.paid > b.budgeted;
+    if (estourouA !== estourouB) return estourouA ? -1 : 1;
+    if (b.paid !== a.paid) return b.paid - a.paid;
+    return b.budgeted - a.budgeted;
+  };
+
+  const comDado = items
+    .filter((i) => i.budgeted > 0 || i.paid > 0 || i.planned > 0)
+    .sort(ordenar);
   const ociosas = items.length - comDado.length;
   const [mostrarTodas, setMostrarTodas] = useState(false);
-  const visiveis = mostrarTodas ? items : comDado;
+  const visiveis = mostrarTodas ? [...items].sort(ordenar) : comDado;
 
   return (
     <>

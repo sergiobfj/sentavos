@@ -15,6 +15,10 @@ const CHAVE = "sentavos:token";
 export interface Sessao {
   token: string;
   email: string;
+  nome: string;
+  // Conta de demonstração: navega mas não altera. Serve só pra esconder botão
+  // que daria erro — quem barra de verdade é a API, que não confia no cliente.
+  somenteLeitura: boolean;
   // Segundos desde a época, como vem no JWT.
   expiraEm: number;
 }
@@ -44,7 +48,11 @@ export function carregarSessao(): Sessao | null {
 
   const payload = decodificarPayload(token);
   const exp = typeof payload?.exp === "number" ? payload.exp : 0;
-  const email = typeof payload?.sub === "string" ? payload.sub : "";
+  // O sub virou o id da conta quando o app deixou de ter um usuário só; o
+  // e-mail passou a vir num campo próprio.
+  const email = typeof payload?.email === "string" ? payload.email : "";
+  const nome = typeof payload?.nome === "string" ? payload.nome : email;
+  const somenteLeitura = payload?.ro === true;
 
   // A checagem de validade aqui é conveniência, não segurança: ela evita mandar
   // um token obviamente vencido e levar 401 de volta. Quem decide de verdade é a
@@ -54,7 +62,7 @@ export function carregarSessao(): Sessao | null {
     return null;
   }
 
-  return { token, email, expiraEm: exp };
+  return { token, email, nome, somenteLeitura, expiraEm: exp };
 }
 
 export function guardarSessao(token: string): Sessao | null {

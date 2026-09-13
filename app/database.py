@@ -46,7 +46,24 @@ if ":6543" in DATABASE_URL:
 engine = create_engine(DATABASE_URL, **engine_options)
 
 def create_db_and_tables():
-    SQLModel.metadata.create_all(engine)
+    """Sobe o banco até o estado que o código espera.
+
+    Era `SQLModel.metadata.create_all`, que só cria tabela faltando e nunca
+    altera uma existente. Isso bastou enquanto o schema só crescia em tabelas
+    novas; parou de bastar quando `user_id` precisou entrar em cinco tabelas
+    que já tinham 330 linhas.
+
+    Rodar a migração no startup é seguro aqui porque a API roda numa instância
+    só. Com réplicas, duas subindo juntas disputariam o mesmo upgrade — aí o
+    lugar disto passa a ser um passo separado do deploy, antes de subir o app.
+    """
+    from alembic import command
+    from alembic.config import Config
+
+    raiz = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    cfg = Config(os.path.join(raiz, "alembic.ini"))
+    cfg.set_main_option("script_location", os.path.join(raiz, "migrations"))
+    command.upgrade(cfg, "head")
 
 def get_session():
     with Session(engine) as session:

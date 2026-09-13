@@ -62,6 +62,7 @@ from app.models import (  # noqa: E402
     Category,
     CategoryType,
     Transaction,
+    User,
 )
 
 MESES = {
@@ -461,7 +462,7 @@ def relatorio(plano: Plano) -> None:
 
 # ---------- Escrita ----------
 
-def aplicar(plano: Plano, limpar: bool) -> None:
+def aplicar(plano: Plano, limpar: bool, dono: User) -> None:
     datas = [l.data for l in plano.lancamentos]
     inicio, fim = min(datas), max(datas)
 
@@ -470,12 +471,18 @@ def aplicar(plano: Plano, limpar: bool) -> None:
             # Só o intervalo importado, e só o que a importação cria. Lançamento
             # que você digitou fora desse período continua onde está.
             antigas = s.exec(
-                select(Transaction).where(Transaction.date >= inicio, Transaction.date <= fim)
+                select(Transaction).where(
+                    Transaction.user_id == dono.id,
+                    Transaction.date >= inicio,
+                    Transaction.date <= fim,
+                )
             ).all()
             for t in antigas:
                 s.delete(t)
             nomes = [nome for nome, _, _ in ATIVOS.values()]
-            for ativo in s.exec(select(Asset).where(Asset.name.in_(nomes))).all():
+            for ativo in s.exec(
+                select(Asset).where(Asset.user_id == dono.id, Asset.name.in_(nomes))
+            ).all():
                 for snap in s.exec(
                     select(AssetSnapshot).where(AssetSnapshot.asset_id == ativo.id)
                 ).all():
@@ -484,7 +491,8 @@ def aplicar(plano: Plano, limpar: bool) -> None:
             print(f"   limpeza: {len(antigas)} lançamento(s) e os saldos dos ativos da planilha")
 
         existentes = {
-            (normalizar(c.name), c.type): c for c in s.exec(select(Category)).all()
+            (normalizar(c.name), c.type): c
+            for c in s.exec(select(Category).where(Category.user_id == dono.id)).all()
         }
 
         ids: dict[tuple[str, CategoryType], int] = {}
@@ -498,7 +506,7 @@ def aplicar(plano: Plano, limpar: bool) -> None:
                 reaproveitadas += 1
                 continue
             icone, cor = icone_e_cor(chave[0], chave[1], indice)
-            nova = Category(name=rotulo, type=chave[1], color=cor, icon=icone)
+            nova = Category(name=rotulo, type=chave[1], color=cor, icon=icone, user_id=dono.id)
             s.add(nova)
             s.flush()
             ids[chave] = nova.id
@@ -507,6 +515,7 @@ def aplicar(plano: Plano, limpar: bool) -> None:
 
         for l in plano.lancamentos:
             s.add(Transaction(
+                user_id=dono.id,
                 date=l.data,
                 description=l.descricao.strip(),
                 amount_planned=l.previsto,
@@ -518,15 +527,18 @@ def aplicar(plano: Plano, limpar: bool) -> None:
 
         ativos: dict[str, int] = {}
         for qual, (nome, classe, nota) in ATIVOS.items():
-            achado = s.exec(select(Asset).where(Asset.name == nome)).first()
+            achado = s.exec(
+                select(Asset).where(Asset.user_id == dono.id, Asset.name == nome)
+            ).first()
             if not achado:
-                achado = Asset(name=nome, asset_class=classe, note=nota)
+                achado = Asset(name=nome, asset_class=classe, note=nota, user_id=dono.id)
                 s.add(achado)
                 s.flush()
             ativos[qual] = achado.id
 
         for saldo in plano.saldos:
             s.add(AssetSnapshot(
+                user_id=dono.id,
                 asset_id=ativos[saldo.qual], year=saldo.ano,
                 month=saldo.mes, value=saldo.valor,
             ))
@@ -540,6 +552,7 @@ def main() -> int:
     p = argparse.ArgumentParser(description="Importa a planilha pro Sentavos.")
     p.add_argument("planilha")
     p.add_argument("--aplicar", action="store_true", help="escreve no banco")
+    p.add_argument("--email", help="e-mail da conta que vai receber os dados (exigido com --aplicar)")
     p.add_argument("--limpar", action="store_true",
                    help="apaga o período antes de escrever (pra reimportar sem duplicar)")
     p.add_argument("--recorrencia", type=int, default=3,

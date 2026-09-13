@@ -3,6 +3,40 @@ from sqlmodel import SQLModel, Field, UniqueConstraint
 from enum import Enum
 
 
+# ---------- Usuário ----------
+# O app nasceu de uma conta só, com e-mail e hash em variável de ambiente. Virou
+# tabela quando apareceram três contas: a principal, uma de demonstração pública
+# e a da namorada. O segredo que assina os tokens (SENTAVOS_JWT_SECRET) continua
+# no ambiente — ele é do servidor, não de uma pessoa.
+
+class User(SQLModel, table=True):
+    __tablename__ = "users"
+
+    id: int | None = Field(default=None, primary_key=True)
+    # Guardado em minúsculas pra a comparação do login não depender de como a
+    # pessoa digitou no teclado do celular.
+    email: str = Field(unique=True, index=True)
+    name: str
+    # Hash Argon2id. A senha em si não existe em lugar nenhum do sistema.
+    password_hash: str
+
+    # Conta de demonstração: lê tudo, não escreve nada. A senha dela é pública
+    # (vai no LinkedIn), então sem esta trava o primeiro visitante mal-
+    # intencionado apagaria o demo inteiro — e só se descobriria depois.
+    read_only: bool = Field(default=False)
+
+    created_at: dt.datetime = Field(
+        default_factory=lambda: dt.datetime.now(dt.timezone.utc)
+    )
+
+
+# Toda tabela de dados carrega o dono. Sem esta coluna as linhas seriam globais,
+# que é exatamente o que eram quando só existia uma conta.
+def dono() -> int:
+    return Field(foreign_key="users.id", index=True)
+
+
+
 class CategoryType(str, Enum):
     EXPENSE = "expense"
     INCOME = "income"
@@ -16,6 +50,7 @@ class CategoryBase(SQLModel):
 
 class Category(CategoryBase, table=True):
     __tablename__ = "categories"
+    user_id: int = dono()
     id: int | None = Field(default=None, primary_key=True)
 
 class CategoryCreate(CategoryBase):
@@ -37,6 +72,7 @@ class TransactionBase(SQLModel):
 
 class Transaction(TransactionBase, table=True):
     __tablename__ = "transactions"
+    user_id: int = dono()
     id: int | None = Field(default=None, primary_key=True)
 
 class TransactionCreate(TransactionBase):
@@ -67,8 +103,9 @@ class Budget(BudgetBase, table=True):
     # Uma meta por categoria por mês — o PUT depende disso pra decidir
     # entre criar e atualizar.
     __table_args__ = (
-        UniqueConstraint("category_id", "year", "month", name="uq_budget_category_period"),
+        UniqueConstraint("user_id", "category_id", "year", "month", name="uq_budget_category_period"),
     )
+    user_id: int = dono()
     id: int | None = Field(default=None, primary_key=True)
 
 class BudgetCreate(BudgetBase):
@@ -141,6 +178,7 @@ class AssetBase(SQLModel):
 
 class Asset(AssetBase, table=True):
     __tablename__ = "assets"
+    user_id: int = dono()
     id: int | None = Field(default=None, primary_key=True)
 
 class AssetCreate(AssetBase):
@@ -162,8 +200,9 @@ class AssetSnapshotBase(SQLModel):
 class AssetSnapshot(AssetSnapshotBase, table=True):
     __tablename__ = "asset_snapshots"
     __table_args__ = (
-        UniqueConstraint("asset_id", "year", "month", name="uq_snapshot_asset_period"),
+        UniqueConstraint("user_id", "asset_id", "year", "month", name="uq_snapshot_asset_period"),
     )
+    user_id: int = dono()
     id: int | None = Field(default=None, primary_key=True)
 
 class AssetSnapshotCreate(AssetSnapshotBase):
