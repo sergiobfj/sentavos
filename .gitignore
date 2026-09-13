@@ -23,3 +23,6 @@ wheels/
 *.xls
 *.ods
 *.csv
+
+# Backups de dado real: ficam na maquina, nunca no repositorio.
+backups/
