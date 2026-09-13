@@ -1,0 +1,21 @@
+# O .venv é da sua máquina (Windows) e quebraria dentro do container Linux.
+.venv
+frontend
+.git
+.github
+.claude
+.vscode
+.pytest_cache
+__pycache__
+**/__pycache__
+*.pyc
+
+# Segredo nunca entra na imagem: as variáveis vêm do painel do Railway.
+.env
+.env.*
+!.env.example
+
+*.db
+*.sqlite3
+README.md
+LICENSE

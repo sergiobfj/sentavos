@@ -322,10 +322,33 @@ input[type="color"] { padding: 4px; height: 42px; cursor: pointer; }
   .app { grid-template-columns: 1fr; }
   .sidebar {
     position: static; height: auto; flex-direction: row; align-items: center;
-    gap: 16px; padding: 14px 16px; border-right: none; border-bottom: 1px solid var(--border-soft);
-    overflow-x: auto;
+    gap: 12px; border-right: none; border-bottom: 1px solid var(--border-soft);
+    /* Instalado na tela inicial o app desenha sob a barra de status do celular
+       (viewport-fit=cover + status bar translúcida no iOS). Sem o env() aqui, o
+       logo e os ícones ficam embaixo do relógio e do entalhe. */
+    padding: calc(14px + env(safe-area-inset-top)) calc(16px + env(safe-area-inset-right))
+             14px calc(16px + env(safe-area-inset-left));
+    /* Quem rola é a nav, não a barra: se fosse a barra, o botão de sair sairia
+       da tela junto com os ícones e viraria inalcançável. */
+    overflow: visible;
   }
-  .sidebar .foot { display: none; }
-  .nav { flex-direction: row; }
+  /* Em 360px de largura não cabem logo + palavra + 5 ícones + sair. O símbolo
+     sozinho já identifica; a palavra é a primeira a sair. */
+  .brand .name { display: none; }
+  .brand { padding: 0; }
+
+  .nav { flex-direction: row; flex: 1; min-width: 0; overflow-x: auto; scrollbar-width: none; }
+  .nav::-webkit-scrollbar { display: none; }
+  .nav a { padding: 11px; }
   .nav a span.txt { display: none; }
+
+  /* O "Sair" volta no celular — sem ele não há como trocar de conta nem
+     encerrar a sessão no telefone. O e-mail é que não cabe. */
+  .sidebar .foot { margin-top: 0; margin-left: auto; padding: 0; flex: none; }
+  .sidebar .foot .who { display: none; }
+
+  .main {
+    padding: 24px calc(18px + env(safe-area-inset-right))
+             calc(80px + env(safe-area-inset-bottom)) calc(18px + env(safe-area-inset-left));
+  }
 }
