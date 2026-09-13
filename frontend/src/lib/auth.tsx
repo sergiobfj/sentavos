@@ -1,43 +1,64 @@
-import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
-import type { Session } from "@supabase/supabase-js";
-import { supabase } from "./supabase";
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useState,
+  type ReactNode,
+} from "react";
+import { carregarSessao, guardarSessao, limparSessao, type Sessao } from "./session";
 
 interface AuthValue {
-  session: Session | null;
+  sessao: Sessao | null;
   // Enquanto true, ainda não se sabe se há sessão salva — mostrar login aqui
   // faria a tela piscar em todo F5 de quem já está logado.
   loading: boolean;
-  signOut: () => Promise<void>;
+  entrar: (token: string) => void;
+  sair: () => void;
 }
 
 const AuthContext = createContext<AuthValue | null>(null);
 
+// Quando a API recusa o token no meio do uso, o api.ts avisa por aqui. É um
+// evento do navegador em vez de import direto porque o caminho contrário
+// (api.ts importando o contexto do React) criaria ciclo entre os dois módulos.
+export const EVENTO_SESSAO_EXPIRADA = "sentavos:sessao-expirada";
+
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [session, setSession] = useState<Session | null>(null);
+  const [sessao, setSessao] = useState<Sessao | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    let ativo = true;
+    setSessao(carregarSessao());
+    setLoading(false);
+  }, []);
 
-    supabase.auth.getSession().then(({ data }) => {
-      if (!ativo) return;
-      setSession(data.session);
-      setLoading(false);
-    });
+  const sair = useCallback(() => {
+    limparSessao();
+    setSessao(null);
+  }, []);
 
-    // Cobre login, logout, refresh de token e logout feito em outra aba.
-    const { data: sub } = supabase.auth.onAuthStateChange((_evento, novaSessao) => {
-      setSession(novaSessao);
-    });
+  // Cobre dois casos: a API derrubando a sessão (401) e o logout feito em outra
+  // aba, que dispara "storage" só nas outras abas — que é exatamente o que se
+  // quer, já que a aba que deslogou já se atualizou sozinha.
+  useEffect(() => {
+    const aoExpirar = () => sair();
+    const aoMudarStorage = () => setSessao(carregarSessao());
 
+    window.addEventListener(EVENTO_SESSAO_EXPIRADA, aoExpirar);
+    window.addEventListener("storage", aoMudarStorage);
     return () => {
-      ativo = false;
-      sub.subscription.unsubscribe();
+      window.removeEventListener(EVENTO_SESSAO_EXPIRADA, aoExpirar);
+      window.removeEventListener("storage", aoMudarStorage);
     };
+  }, [sair]);
+
+  const entrar = useCallback((token: string) => {
+    setSessao(guardarSessao(token));
   }, []);
 
   return (
-    <AuthContext.Provider value={{ session, loading, signOut: async () => void supabase.auth.signOut() }}>
+    <AuthContext.Provider value={{ sessao, loading, entrar, sair }}>
       {children}
     </AuthContext.Provider>
   );

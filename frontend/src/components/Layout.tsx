@@ -12,7 +12,7 @@ const links = [
 ];
 
 export default function Layout() {
-  const { session, signOut } = useAuth();
+  const { sessao, sair } = useAuth();
 
   return (
     <div className="app">
@@ -32,8 +32,8 @@ export default function Layout() {
           ))}
         </nav>
         <div className="foot">
-          <div className="who" title={session?.user.email ?? ""}>{session?.user.email}</div>
-          <button className="btn btn-ghost btn-sm" onClick={signOut}>Sair</button>
+          <div className="who" title={sessao?.email ?? ""}>{sessao?.email}</div>
+          <button className="btn btn-ghost btn-sm" onClick={sair}>Sair</button>
         </div>
       </aside>
       <main className="main">

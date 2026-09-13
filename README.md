@@ -6,7 +6,7 @@ Meu sistema de controle financeiro pessoal. Estou desenvolvendo porque cansei de
 usar planilha e nenhum outro app atende 100% do que eu preciso.
 
 É um app de **uma conta só** — a minha. Não tem cadastro, não tem multi-usuário:
-a API checa o `sub` do token contra um UUID fixo e recusa qualquer outro.
+existe um e-mail e uma senha configurados no servidor, e mais ninguém entra.
 
 ## As cinco abas
 
@@ -24,19 +24,27 @@ de saldo lançado à mão, mês a mês.
 
 ## Stack
 
-- **API** — FastAPI + SQLModel, Postgres (Supabase)
+- **API** — FastAPI + SQLModel, Postgres
 - **Front** — Vite + React + TypeScript
-- **Auth** — Supabase Auth; a API valida o JWT (HS256 legado ou ES256/RS256 via JWKS)
+- **Auth** — própria: Argon2id pra senha, JWT assinado pela própria API
+
+Sem dependência de serviço externo de autenticação. Já foi Supabase Auth, e saiu:
+projeto free hiberna após ~1 semana parado, e hibernar derrubava o login junto —
+ou seja, voltar de viagem e não conseguir abrir o próprio app. Auth de um usuário
+só é pequena o bastante pra morar no projeto.
 
 ## Rodando local
 
 ```bash
-# Backend — http://localhost:8000
-cp .env.example .env      # preencha DATABASE_URL, SUPABASE_URL, SENTAVOS_ALLOWED_USER_ID
+# 1. Gere suas credenciais (pede a senha escondida e imprime o que colar)
 uv sync
+uv run python -m app.criar_senha
+
+# 2. Backend — http://localhost:8000
+cp .env.example .env      # cole as três variáveis + DATABASE_URL
 uv run uvicorn app.main:app --reload
 
-# Frontend — http://localhost:5173
+# 3. Frontend — http://localhost:5173
 cd frontend
 npm install
 cp .env.example .env
@@ -47,122 +55,119 @@ Testes: `uv run pytest`
 
 ## Deploy
 
-Três peças: banco no **Supabase**, API no **Railway**, front na **Vercel**.
+Duas peças: API + banco no **Railway**, front na **Vercel**.
 
-### 1. API no Railway
+### 1. Gere as credenciais
 
-O `Dockerfile` e o `railway.json` já estão no repo — o Railway detecta os dois
-sozinho. Aponte o serviço pra raiz deste repositório e defina as variáveis:
+```bash
+uv run python -m app.criar_senha
+```
+
+Guarde a saída — são três variáveis do passo seguinte. A senha em si não fica
+salva em lugar nenhum; se esquecer, rode de novo e troque as variáveis.
+
+### 2. Railway
+
+New Project → Deploy from GitHub → este repo. O `Dockerfile` e o `railway.json`
+são detectados sozinhos.
+
+Depois, **New → Database → Add PostgreSQL** no mesmo projeto.
+
+Variáveis do serviço da API:
 
 | Variável | Valor |
 | --- | --- |
-| `DATABASE_URL` | Connection string do Supabase, **porta 6543** (o pooler) |
-| `SUPABASE_URL` | `https://seu-projeto.supabase.co` |
-| `SENTAVOS_ALLOWED_USER_ID` | Seu UUID em Authentication > Users |
-| `SUPABASE_JWT_SECRET` | Só se o projeto ainda usa HS256; senão deixe vazio |
-| `CORS_ORIGINS` | O domínio da Vercel, ex. `https://sentavos.vercel.app` |
+| `DATABASE_URL` | `${{Postgres.DATABASE_URL}}` — referência, não copie a string |
+| `SENTAVOS_EMAIL` | seu e-mail |
+| `SENTAVOS_SENHA_HASH` | o hash gerado no passo 1 |
+| `SENTAVOS_JWT_SECRET` | o segredo gerado no passo 1 |
+| `CORS_ORIGINS` | o domínio da Vercel (passo 4) |
 
 `PORT` o Railway injeta sozinho — não defina na mão.
 
-> **O `CORS_ORIGINS` é o passo que se esquece.** O padrão no código só cobre
-> localhost. Sem ele apontando pro domínio de produção, o navegador bloqueia toda
-> chamada e o app parece quebrado sem nenhum erro no log da API.
+Settings → Networking → **Generate Domain**. Abra a URL: tem que responder
+`{"message":"API do Sentavos no ar"}`.
 
-Como é ovo e galinha (a API precisa do domínio do front, o front precisa da URL
-da API), suba a API primeiro, faça o deploy do front, e só então volte e preencha
-o `CORS_ORIGINS` com o domínio que a Vercel gerou.
+As tabelas são criadas no primeiro boot, pelo `create_all`.
 
-### 2. Front na Vercel
+### 3. Vercel
 
 - **Root Directory**: `frontend`
 - Build e rewrite de SPA vêm do `frontend/vercel.json` — não precisa configurar.
+- Variável: `VITE_API_URL` = o domínio do Railway, **sem barra no final**.
 
-Variáveis: `VITE_API_URL` (o domínio do Railway), `VITE_SUPABASE_URL`,
-`VITE_SUPABASE_ANON_KEY`.
-
-> **Estas três são lidas na hora de compilar, não em runtime.** Definir depois do
-> build não resolve: tem que redeployar. Se faltarem, o app mostra uma tela
-> dizendo exatamente isso em vez de página branca.
+> **Ela é lida na hora de compilar, não em runtime.** Definir depois do build não
+> resolve: tem que redeployar. Se faltar, o app mostra uma tela dizendo isso em
+> vez de página branca.
 
 O `vercel.json` reescreve toda rota pro `index.html`. Sem isso, abrir
 `/orcamento` direto — atalho na tela inicial, link salvo ou um F5 — daria 404,
-porque não existe arquivo com esse nome no `dist/`. A Vercel só aplica o rewrite
-depois de não achar arquivo estático, então os assets continuam normais.
+porque não existe arquivo com esse nome no `dist/`. O bug **não reproduz local**:
+o `vite preview` já faz esse fallback sozinho.
 
-### 3. No celular
+### 4. Volte no Railway
 
-O app é instalável: abra no Chrome/Safari e use "Adicionar à tela inicial". Abre
-em tela cheia, com ícone próprio, sem barra do navegador.
+Preencha `CORS_ORIGINS` com o domínio que a Vercel gerou. É o passo que se
+esquece: sem ele o navegador bloqueia toda chamada e o app parece quebrado sem
+nenhum erro no log da API.
+
+### 5. No celular
+
+Abra no Chrome/Safari e use "Adicionar à tela inicial". Abre em tela cheia, com
+ícone próprio, sem barra do navegador.
 
 ### Primeiro acesso
 
 O banco nasce vazio e **lançamento exige categoria**. Antes de tudo, vá em
-Configurações e cadastre suas categorias — senão a aba de Orçamento fica sem
-nenhuma linha pra preencher.
+Configurações e cadastre suas categorias.
 
 ## Segurança
 
-O app é de **uma conta só**. Mostrar pra alguém não dá acesso a nada: mesmo que a
-pessoa crie conta no projeto Supabase e faça login, a API compara o `sub` do
-token com `SENTAVOS_ALLOWED_USER_ID` e responde 403.
-
-O que protege, em camadas:
+O app é de uma conta só. Mostrar pra alguém não dá acesso a nada.
 
 | Camada | O quê |
 | --- | --- |
-| **Token** | JWT do Supabase, assinatura verificada (ES256 via JWKS, ou HS256 legado). Lista fechada de algoritmos — `alg: none` não passa. |
-| **Emissor** | O `iss` tem que ser o *seu* projeto. Token válido de outro projeto Supabase não serve. |
-| **Dono** | O `sub` tem que bater com `SENTAVOS_ALLOWED_USER_ID`. Sem essa variável a API recusa tudo (falha fechada). |
+| **Senha** | Argon2id com salt aleatório. O servidor guarda o hash, nunca a senha. |
+| **Token** | JWT HS256 assinado pela API, com `iss`/`aud`/`exp` exigidos. Lista fechada de algoritmos — `alg: none` não passa. |
 | **Rotas** | Todas sob `APIRouter(dependencies=[Depends(require_user)])` — rota nova nasce protegida. |
-| **Cota** | Por IP: 240 req/min no geral e **10 respostas 401/403 a cada 5 min**, que é o que inviabiliza tentar token até acertar. |
+| **Força bruta** | Por IP: **10 respostas 401/403 a cada 5 min**, cota separada da geral (240 req/min). Depois disso nem a senha certa passa. |
+| **Tempo constante** | A senha é verificada mesmo com e-mail errado, e a mensagem de erro é a mesma nos dois casos — senão o tempo de resposta diria qual campo acertar. |
 | **Corpo** | Requisição acima de 256 KB é recusada com 413 antes de virar JSON. |
 | **Docs** | `/docs` e `/openapi.json` desligados em produção. |
 | **Cabeçalhos** | `nosniff`, `X-Frame-Options`, CSP e `Cache-Control: no-store` na API; CSP + HSTS + `Permissions-Policy` no front. |
+| **Container** | Roda como usuário não-root. |
 
-### O passo que não é código: `sql/001_fechar_acesso_direto.sql`
+### Se um aparelho sumir
 
-**Rode este arquivo no SQL Editor do Supabase antes de considerar o app seguro.**
+Defina `SENTAVOS_TOKEN_EPOCH` no Railway com o timestamp atual:
 
-O Supabase publica o schema `public` como API REST automática. As tabelas aqui
-foram criadas pelo `create_all`, não pelo painel — então nasceram **sem RLS**, e
-o GRANT padrão do Supabase dá acesso ao papel `anon`. Como a anon key está no
-bundle do front (é pública por design), isso significa que
-
-```
-curl 'https://<projeto>.supabase.co/rest/v1/transactions?select=*' -H "apikey: <anon key>"
+```bash
+python -c "import time; print(int(time.time()))"
 ```
 
-devolveria seus lançamentos **sem passar pela API**, contornando token, `iss` e
-allowlist de uma vez. O SQL liga RLS sem nenhuma policy ("ninguém pode nada") e
-revoga os GRANTs, inclusive os padrão — pra a próxima tabela que o `create_all`
-criar não nascer exposta de novo. A API não é afetada: ela conecta como dono da
-tabela, e dono não é submetido a RLS.
+Todo token emitido antes disso para de valer na hora. É o que substitui uma
+lista de sessões — que este app não tem de propósito, porque sessão no servidor
+seria estado pra manter, sincronizar e perder num redeploy.
 
-Confira rodando aquele `curl` antes e depois: tem que sair de "devolve dado" pra
-"permission denied".
+### Onde o token fica no navegador
 
-### No painel do Supabase
+`localStorage`, e não cookie `httpOnly`. O motivo é prático: front na Vercel e
+API no Railway são domínios diferentes, cookie entre domínios exige
+`SameSite=None`, e o Safari do iPhone bloqueia isso com força — quebraria
+exatamente o caso de uso que motivou tudo, que é abrir no celular.
 
-- **Authentication > Providers > Email**: desligue **"Enable signup"**. Sua conta
-  já existe; deixar aberto só permite que estranhos criem conta no seu projeto
-  (não acessam nada, mas enchem sua base e consomem cota de e-mail).
-- **Authentication > Rate limits**: o Supabase tem os limites dele pra tentativa
-  de login. Os limites da nossa API valem pras rotas de dados; o login em si
-  acontece no Supabase, então esse ajuste é lá.
-- **Authentication > Policies**: ative **leaked password protection** se estiver
-  disponível no seu plano.
+A troca é que um XSS conseguiria ler o token. O que reduz o risco: a CSP não
+deixa carregar script de fora nem inline, e o app não renderiza HTML de terceiros
+em lugar nenhum.
 
 ### Se algo quebrar depois do deploy, olhe a CSP primeiro
 
-A CSP do `frontend/vercel.json` é apertada. Dois sintomas e a correção:
-
-- **App abre mas não fala com a API** → `connect-src`. Ele libera
-  `*.supabase.co` e `*.up.railway.app`. Se você puser **domínio próprio** na
-  API, adicione-o ali.
+- **App abre mas não fala com a API** → `connect-src` no `frontend/vercel.json`.
+  Libera `*.up.railway.app`; com **domínio próprio**, adicione-o ali.
 - **App abre sem estilo** → `style-src 'self'`, que barra `<style>` injetado em
-  runtime. O build atual não tem nenhum (conferido) e o React aplica
-  `style={{}}` via CSSOM, que a CSP não governa — mas se um dia entrar uma
-  biblioteca que injeta CSS, o remédio é `style-src 'self' 'unsafe-inline'`.
+  runtime. O build atual não tem nenhum e o React aplica `style={{}}` via CSSOM,
+  que a CSP não governa — mas se entrar uma biblioteca que injeta CSS, o remédio
+  é `style-src 'self' 'unsafe-inline'`.
 
 O console do navegador nomeia exatamente a diretiva que bloqueou.
 
@@ -173,3 +178,5 @@ O console do navegador nomeia exatamente a diretiva que bloqueou.
   precisar de Alembic antes da primeira mudança de schema em produção.
 - **Backup automático** do Postgres.
 - **Cotação automática** de investimento — saldo é preenchido à mão, mês a mês.
+- **Troca de senha pela interface** — hoje é rodar o `criar_senha` e atualizar as
+  variáveis no host.

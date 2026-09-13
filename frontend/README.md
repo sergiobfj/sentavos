@@ -26,13 +26,15 @@ Abre em `http://localhost:5173`.
 
 ```
 src/
-  lib/        tipos, cliente da API, hooks de dados (React Query), formatação
-  components/ Layout (menu + logo) e Modal
-  pages/      Painel, Transações, Categorias
+  lib/        tipos, cliente da API, sessão/auth, hooks de dados, formatação
+  components/ Layout (menu + logo), Modal, formulários
+  pages/      Visão geral, Orçamento, Investimento, Patrimônio, Configurações, Login
 ```
 
 ## Deploy (Vercel)
 
-- Root do projeto: `frontend`
-- Build command: `npm run build` · Output: `dist`
-- Variável de ambiente: `VITE_API_URL` apontando pra API em produção.
+- Root Directory: `frontend`
+- Build e rewrite de SPA vêm do `vercel.json` — não precisa configurar na mão.
+- Variável: `VITE_API_URL` apontando pra API em produção, sem barra no final.
+
+Veja o README da raiz pro passo a passo completo.

@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
-import { supabase } from "../lib/supabase";
-import { AVISO_LOGIN } from "../lib/api";
+import { ApiError, AVISO_LOGIN, authApi } from "../lib/api";
+import { useAuth } from "../lib/auth";
 import logo from "../assets/logo.png";
 
 export default function Login() {
@@ -9,6 +9,7 @@ export default function Login() {
   const [erro, setErro] = useState<string | null>(null);
   const [aviso, setAviso] = useState<string | null>(null);
   const [entrando, setEntrando] = useState(false);
+  const { entrar } = useAuth();
 
   // Recado de quem foi derrubado por 401. Consumido na leitura pra não ficar
   // aparecendo em todo login seguinte.
@@ -29,24 +30,26 @@ export default function Login() {
     setErro(null);
     setEntrando(true);
 
-    const { error } = await supabase.auth.signInWithPassword({
-      email: email.trim(),
-      password: senha,
-    });
-
-    // Não distingue "e-mail não existe" de "senha errada" — é o que o Supabase
-    // devolve, e detalhar ajudaria quem está testando e-mails.
-    if (error) {
-      setErro(
-        error.message === "Invalid login credentials"
-          ? "E-mail ou senha incorretos."
-          : error.message
-      );
+    try {
+      const { access_token } = await authApi.login(email.trim(), senha);
+      // O entrar() troca a tela: o AuthProvider passa a ter sessão e o App
+      // renderiza o Layout no lugar deste componente. Não há setState depois
+      // daqui de propósito — a esta altura ele já saiu da árvore.
+      entrar(access_token);
+    } catch (e) {
+      // A API devolve a mesma mensagem pra e-mail errado e senha errada, e é
+      // assim que deve ser: distinguir os dois entregaria quais endereços têm
+      // conta. O que muda aqui é só separar "credencial errada" de "API fora
+      // do ar", porque a segunda não adianta o usuário tentar de novo.
+      const msg =
+        e instanceof ApiError
+          ? e.status === 0
+            ? "Não consegui falar com o servidor. Tente de novo em instantes."
+            : e.message
+          : "Não consegui entrar. Tente de novo.";
+      setErro(msg);
       setEntrando(false);
-      return;
     }
-    // Sessão pronta: o AuthProvider troca a tela sozinho, sem setState aqui
-    // (o componente já vai ter saído da árvore).
   }
 
   return (

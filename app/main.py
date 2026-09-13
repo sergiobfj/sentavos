@@ -4,9 +4,9 @@ import datetime as dt
 
 from fastapi import APIRouter, Depends, FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
-from sqlmodel import Session, and_, func, or_, select
+from sqlmodel import Session, SQLModel, and_, func, or_, select
 
-from app.auth import require_user
+from app.auth import ConfiguracaoIncompleta, autenticar, require_user
 from app.database import create_db_and_tables, get_session
 from app.security import RateLimitMiddleware, SecurityHeadersMiddleware
 from app.models import (
@@ -118,6 +118,33 @@ def previous_month(year: int, month: int) -> tuple[int, int]:
 @app.get("/")
 async def root():
     return {"message": "API do Sentavos no ar"}
+
+
+# ---------- Login ----------
+# Fora do `router` de propósito: é a única rota que não pode exigir token, já que
+# é ela quem entrega o token. Continua protegida pelo rate limit, que conta as
+# respostas 401 daqui na cota apertada de falhas.
+class Credenciais(SQLModel):
+    email: str
+    senha: str
+
+
+class TokenDeAcesso(SQLModel):
+    access_token: str
+    token_type: str = "bearer"
+
+
+@app.post("/auth/login", response_model=TokenDeAcesso)
+def login(credenciais: Credenciais):
+    try:
+        token = autenticar(credenciais.email, credenciais.senha)
+    except ConfiguracaoIncompleta:
+        # 500 e não 401: o problema é o servidor, e mandar o usuário tentar de
+        # novo seria mentira — nenhuma senha funcionaria.
+        raise HTTPException(
+            status_code=500, detail="Autenticação não configurada no servidor."
+        )
+    return TokenDeAcesso(access_token=token)
 
 
 @router.post("/transactions")

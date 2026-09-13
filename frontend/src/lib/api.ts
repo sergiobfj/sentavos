@@ -1,4 +1,5 @@
-import { accessToken, supabase } from "./supabase";
+import { EVENTO_SESSAO_EXPIRADA } from "./auth";
+import { carregarSessao, limparSessao } from "./session";
 import type { Period } from "./period";
 import type {
   Asset,
@@ -31,10 +32,15 @@ export class ApiError extends Error {
   }
 }
 
-async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
+/** `ehLogin` isenta a chamada do tratamento de 401 — veja o bloco lá embaixo. */
+async function request<T>(
+  path: string,
+  options: RequestInit = {},
+  ehLogin = false
+): Promise<T> {
   // Toda chamada passa por aqui, então o token entra num lugar só — não tem
   // como uma rota nova esquecer de mandar.
-  const token = await accessToken();
+  const token = carregarSessao()?.token ?? null;
 
   let res: Response;
   try {
@@ -50,23 +56,30 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
     throw new ApiError(0, "Não consegui falar com a API. O backend está no ar?");
   }
 
-  // Token venceu, foi revogado ou a API não consegue validar: derruba a sessão
-  // pra a tela de login aparecer, em vez de deixar erro em toda aba.
+  // Token venceu ou foi invalidado no servidor: derruba a sessão pra a tela de
+  // login aparecer, em vez de deixar erro em toda aba.
   //
-  // O aviso fica guardado porque o signOut desmonta esta tela na hora: sem ele o
-  // usuário voltaria pro login sem explicação nenhuma e ficaria tentando de novo
-  // achando que errou a senha. Foi exatamente o que aconteceu quando a API só
-  // validava HS256 e o Supabase assinava com ES256.
-  if (res.status === 401) {
+  // O aviso fica guardado porque a troca de tela é imediata: sem ele o usuário
+  // voltaria pro login sem explicação nenhuma e ficaria tentando de novo achando
+  // que errou a senha.
+  //
+  // O login é a exceção: ali o 401 significa "senha errada", não "sessão
+  // vencida". Sem esta isenção, errar a senha mostraria "sua sessão expirou" —
+  // uma mensagem que não explica nada pra quem nem chegou a entrar.
+  if (res.status === 401 && !ehLogin) {
     try {
       sessionStorage.setItem(
         AVISO_LOGIN,
-        "A API recusou sua sessão. Se você acabou de entrar, é configuração do servidor, não sua senha."
+        "Sua sessão expirou ou foi encerrada. Entre de novo."
       );
     } catch {
       /* sessionStorage pode estar bloqueado */
     }
-    await supabase.auth.signOut();
+    limparSessao();
+    // O AuthProvider escuta isto e derruba a tela pro login. Avisar por evento
+    // evita que este módulo precise importar o contexto do React — o que daria
+    // ciclo, já que o contexto importa daqui.
+    window.dispatchEvent(new Event(EVENTO_SESSAO_EXPIRADA));
     throw new ApiError(401, "Sua sessão foi recusada. Entre de novo.");
   }
 
@@ -84,6 +97,16 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   if (res.status === 204) return undefined as T;
   return res.json() as Promise<T>;
 }
+
+// ---------- Login ----------
+export const authApi = {
+  login: (email: string, senha: string) =>
+    request<{ access_token: string }>(
+      "/auth/login",
+      { method: "POST", body: JSON.stringify({ email, senha }) },
+      true
+    ),
+};
 
 // ---------- Transações ----------
 export const transactionsApi = {

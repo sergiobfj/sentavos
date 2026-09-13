@@ -19,10 +19,14 @@ SQL_ECHO = os.getenv("SQL_ECHO", "").lower() in {"1", "true", "yes"}
 
 engine_options = {"echo": SQL_ECHO, "pool_pre_ping": True}
 
-# A porta 6543 do Supabase é o pooler (pgBouncer em modo transaction). Manter um
+# A porta 6543 é a convenção de pooler (pgBouncer em modo transaction). Manter um
 # pool do SQLAlchemy em cima de outro pooler dá erro intermitente de conexão: o
 # pgBouncer recicla a conexão por baixo e a que está guardada aqui já morreu.
 # NullPool deixa o pooler cuidar disso, que é o trabalho dele.
+#
+# O Postgres do Railway atende na 5432 e não tem pooler na frente, então o
+# caminho normal (pool do SQLAlchemy) é o que roda. A regra fica porque não custa
+# nada e evita um bug obscuro se um dia entrar um pooler na jogada.
 if ":6543" in DATABASE_URL:
     engine_options["poolclass"] = NullPool
 

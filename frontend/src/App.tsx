@@ -7,22 +7,21 @@ import Assets from "./pages/Assets";
 import Settings from "./pages/Settings";
 import Login from "./pages/Login";
 import { useAuth } from "./lib/auth";
-import { supabaseConfigured } from "./lib/supabase";
 
 export default function App() {
-  const { session, loading } = useAuth();
+  const { sessao, loading } = useAuth();
 
   // Erra-se isso uma vez por deploy: melhor dizer o que falta do que servir uma
   // tela de login que nunca autentica.
-  if (!supabaseConfigured) {
+  if (!import.meta.env.VITE_API_URL) {
     return (
       <div className="login-shell">
         <div className="login-card">
           <h1 style={{ fontSize: 18, fontWeight: 750 }}>Configuração incompleta</h1>
           <p style={{ color: "var(--text-dim)", fontSize: 14, lineHeight: 1.6 }}>
-            Faltam <code>VITE_SUPABASE_URL</code> e/ou <code>VITE_SUPABASE_ANON_KEY</code> no
-            build. Elas são lidas na hora de compilar, então precisam estar no host
-            <b> antes</b> do build — definir depois não resolve sem recompilar.
+            Falta <code>VITE_API_URL</code> no build. Ela é lida na hora de compilar,
+            então precisa estar no host <b>antes</b> do build — definir depois não
+            resolve sem recompilar.
           </p>
           <p className="hint">Veja frontend/.env.example.</p>
         </div>
@@ -31,7 +30,7 @@ export default function App() {
   }
 
   // Sem isso a tela de login pisca em todo F5 de quem já está logado, no
-  // intervalo entre montar e o Supabase devolver a sessão salva.
+  // intervalo entre montar e o token guardado ser lido.
   if (loading) {
     return (
       <div className="login-shell">
@@ -40,7 +39,7 @@ export default function App() {
     );
   }
 
-  if (!session) return <Login />;
+  if (!sessao) return <Login />;
 
   return (
     <Routes>
