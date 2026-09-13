@@ -17,3 +17,9 @@ wheels/
 # Databases
 *.db
 *.sqlite3
+
+# Planilha pessoal: dado financeiro real, nao vai pro repositorio.
+*.xlsx
+*.xls
+*.ods
+*.csv
