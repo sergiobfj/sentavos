@@ -104,6 +104,16 @@ h1, h2, h3 { margin: 0; letter-spacing: -0.02em; line-height: 1.2; }
   flex-direction: column;
 }
 
+/* A barra lateral é só do desktop, e some por padrão.
+ *
+ * Esta linha parece supérflua e não é: o CSS do desktop mora inteiro dentro de
+ * um @media, então sem um `display: none` aqui a <aside> renderiza no celular
+ * sem estilo nenhum — logo em tamanho natural ocupando a tela toda e os links
+ * do menu soltos no meio do conteúdo. Foi exatamente o que aconteceu quando ela
+ * foi removida junto com o CSS legado.
+ */
+.sidebar { display: none; }
+
 .main {
   flex: 1;
   padding: var(--s4) var(--s4)
