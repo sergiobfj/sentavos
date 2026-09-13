@@ -20,31 +20,19 @@ export default function Settings() {
 
   return (
     <>
-      <div className="page-head">
-        <div>
-          <div className="eyebrow">Ajustes</div>
-          <h1>Configurações</h1>
-          <p>As peças que o resto do app usa.</p>
-        </div>
+      <div className="sec-title" style={{ marginTop: 0 }}>
+        <h2>Categorias</h2>
+        <button className="link" onClick={() => setCreating(true)}>+ Nova</button>
       </div>
 
-      <div className="section-head">
-        <div>
-          <h2>Categorias</h2>
-          <div className="hint" style={{ marginTop: 3 }}>Os potes onde cada centavo é separado.</div>
-        </div>
-        <button className="btn btn-primary" onClick={() => setCreating(true)}>+ Nova categoria</button>
-      </div>
-
-      {isLoading && <div className="panel"><div className="loading"><div className="spinner" />Carregando…</div></div>}
-      {error && <div className="panel"><div className="error-box">{(error as ApiError).message}</div></div>}
+      {isLoading && <div className="skel" style={{ height: 200, borderRadius: "var(--r)" }} />}
+      {error && <div className="error-box">{(error as ApiError).message}</div>}
 
       {categories && categories.length === 0 && (
-        <div className="panel">
-          <div className="empty">
-            <div className="big">🏷️</div>
-            Nenhuma categoria ainda. Crie a primeira para começar a lançar transações.
-          </div>
+        <div className="empty">
+          <div className="big">🏷️</div>
+          <div className="tit">Nenhuma categoria ainda</div>
+          <div>Crie a primeira para começar a lançar.</div>
         </div>
       )}
 

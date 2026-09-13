@@ -20,7 +20,7 @@ import {
 } from "../lib/types";
 
 export default function Assets() {
-  const { label, ym } = usePeriod();
+  const { ym } = usePeriod();
   const { data, isLoading, error } = useAssetSummary();
   const [creating, setCreating] = useState(false);
   const [editing, setEditing] = useState<AssetSummaryItem | null>(null);
@@ -35,54 +35,23 @@ export default function Assets() {
     return groups;
   }, [data]);
 
-  const head = (
-    <div className="page-head">
-      <div>
-        <div className="eyebrow">Estoque</div>
-        <h1>Patrimônio</h1>
-        <p>Tudo que você tem menos tudo que você deve, em {label}.</p>
-      </div>
-      {data && data.items.length > 0 && (
-        <button className="btn btn-primary" onClick={() => setCreating(true)}>
-          + Novo ativo
-        </button>
-      )}
-    </div>
-  );
-
-  if (isLoading) {
-    return (
-      <>
-        {head}
-        <div className="panel">
-          <div className="loading"><div className="spinner" />Carregando patrimônio…</div>
-        </div>
-      </>
-    );
-  }
-  if (error) {
-    return (
-      <>
-        {head}
-        <div className="panel"><div className="error-box">{(error as ApiError).message}</div></div>
-      </>
-    );
-  }
+  if (isLoading) return <Esqueleto />;
+  if (error) return <div className="error-box">{(error as ApiError).message}</div>;
 
   if (!data || data.items.length === 0) {
     return (
       <>
-        {head}
-        <div className="panel">
-          <div className="empty">
-            <div className="big">🏦</div>
-            Nenhum ativo cadastrado. Comece pela conta onde o dinheiro fica —
-            depois entram renda fixa, investimentos, bens e dívidas.
-            <div style={{ marginTop: 14 }}>
-              <button className="btn btn-primary" onClick={() => setCreating(true)}>
-                + Novo ativo
-              </button>
-            </div>
+        <div className="empty">
+          <div className="big">🏦</div>
+          <div className="tit">Nenhum ativo cadastrado</div>
+          <div>
+            Comece pela conta onde o dinheiro fica — depois entram renda fixa,
+            investimentos, bens e dívidas.
+          </div>
+          <div style={{ marginTop: "var(--s4)" }}>
+            <button className="btn btn-primary" onClick={() => setCreating(true)}>
+              Cadastrar ativo
+            </button>
           </div>
         </div>
         {creating && <AssetForm onClose={() => setCreating(false)} />}
@@ -90,28 +59,37 @@ export default function Assets() {
     );
   }
 
-  const change = data.net_worth - data.previous_net_worth;
+  const variacao = data.net_worth - data.previous_net_worth;
+  const temDividas = data.liabilities > 0;
 
   return (
     <>
-      {head}
+      <section className="hero">
+        <div className="rot">Patrimônio líquido</div>
+        <div className={`big tnum ${data.net_worth >= 0 ? "pos" : "neg"}`}>
+          {formatMoney(data.net_worth)}
+        </div>
+        {Math.abs(variacao) >= 0.01 && (
+          <div className={`delta ${variacao > 0 ? "pos" : "neg"}`}>
+            <span aria-hidden>{variacao > 0 ? "↑" : "↓"}</span>
+            {formatMoney(Math.abs(variacao))} no mês
+          </div>
+        )}
+      </section>
 
-      <div className="stat-grid">
-        <Stat
-          label="Patrimônio líquido"
-          value={data.net_worth}
-          tone={data.net_worth >= 0 ? "pos" : "neg"}
-          sub="Ativos − dívidas"
-        />
-        <Stat label="Ativos" value={data.assets} tone="gold" />
-        <Stat label="Dívidas" value={data.liabilities} tone="neg" />
-        <Stat
-          label="Variação no mês"
-          value={change}
-          tone={change >= 0 ? "pos" : "neg"}
-          sub={`Contra ${formatMoney(data.previous_net_worth)} no mês anterior`}
-          signed
-        />
+      {/* A linha de dívidas só aparece quando existe dívida. Um "R$ 0,00" fixo
+          ali ocuparia o mesmo espaço pra não informar nada. */}
+      <div className="duo" style={{ gridTemplateColumns: temDividas ? "1fr 1fr" : "1fr" }}>
+        <div className="card">
+          <div className="rot">Tudo que você tem</div>
+          <div className="val tnum">{formatMoney(data.assets)}</div>
+        </div>
+        {temDividas && (
+          <div className="card">
+            <div className="rot">Tudo que você deve</div>
+            <div className="val neg tnum">{formatMoney(data.liabilities)}</div>
+          </div>
+        )}
       </div>
 
       {ASSET_CLASS_ORDER.map((classe) => {
@@ -127,6 +105,14 @@ export default function Assets() {
           />
         );
       })}
+
+      <button
+        className="btn btn-block"
+        style={{ marginTop: "var(--s5)" }}
+        onClick={() => setCreating(true)}
+      >
+        + Novo ativo
+      </button>
 
       {creating && <AssetForm onClose={() => setCreating(false)} />}
       {editing && (
@@ -144,6 +130,25 @@ export default function Assets() {
   );
 }
 
+function Esqueleto() {
+  return (
+    <>
+      <div className="skel" style={{ height: 132, borderRadius: "var(--r-lg)" }} />
+      <div className="duo" style={{ gridTemplateColumns: "1fr 1fr" }}>
+        <div className="skel" style={{ height: 72 }} />
+        <div className="skel" style={{ height: 72 }} />
+      </div>
+      <div className="sec-title"><h2>Seus ativos</h2></div>
+      <div className="skel" style={{ height: 200, borderRadius: "var(--r)" }} />
+    </>
+  );
+}
+
+const ICONE_CLASSE: Record<string, string> = {
+  checking: "🏦", fixed_income: "📄", equity: "📊", crypto: "₿",
+  real_estate: "🏠", vehicle: "🚗", debt: "💳",
+};
+
 function ClassSection({
   classe,
   items,
@@ -156,43 +161,30 @@ function ClassSection({
   onEdit: (item: AssetSummaryItem) => void;
 }) {
   const total = items.reduce((acc, i) => acc + i.value, 0);
-  const isDebt = classe === "debt";
+  const ehDivida = classe === "debt";
 
   return (
-    <div className="panel" style={{ marginTop: 16 }}>
-      <div className="panel-head">
-        <div>
-          <h2>{ASSET_CLASS_LABEL[classe]}</h2>
-          {isDebt && (
-            <div className="hint" style={{ marginTop: 3 }}>
-              Sai subtraindo do patrimônio líquido
-            </div>
-          )}
-        </div>
-        <div className="num" style={{ fontSize: 13.5, color: isDebt ? "var(--expense)" : "var(--text-dim)" }}>
+    <>
+      <div className="sec-title">
+        <h2>{ASSET_CLASS_LABEL[classe]}</h2>
+        <span
+          className="tnum"
+          style={{ fontSize: 13, color: ehDivida ? "var(--neg)" : "var(--text-dim)" }}
+        >
           {formatMoney(total)}
-        </div>
+        </span>
       </div>
-
-      <div className="table-wrap">
-        <table>
-          <thead>
-            <tr>
-              <th>Ativo</th>
-              <th style={{ width: 150 }}>Saldo</th>
-              <th>Referência</th>
-              <th className="num">Variação</th>
-              <th></th>
-            </tr>
-          </thead>
-          <tbody>
-            {items.map((item) => (
-              <AssetRow key={item.asset_id} item={item} ym={ym} onEdit={() => onEdit(item)} />
-            ))}
-          </tbody>
-        </table>
+      <div className="list">
+        {items.map((item) => (
+          <AssetRow
+            key={item.asset_id}
+            item={item}
+            ym={ym}
+            onEdit={() => onEdit(item)}
+          />
+        ))}
       </div>
-    </div>
+    </>
   );
 }
 
@@ -209,21 +201,46 @@ function AssetRow({
   const setSnapshot = useSetAssetSnapshot();
   // Valor herdado de mês anterior não é editável aqui: o input fica vazio e o
   // saldo antigo vira placeholder, pra não parecer que o mês já foi preenchido.
-  const inherited = item.snapshot_id == null && item.as_of != null;
+  const herdado = item.snapshot_id == null && item.as_of != null;
 
   return (
-    <tr>
-      <td>
-        <div style={{ fontWeight: 600 }}>{item.name}</div>
-        {item.note && (
-          <div style={{ fontSize: 12.5, color: "var(--text-faint)" }}>{item.note}</div>
-        )}
-      </td>
-      <td>
+    <div className="row asset-row">
+      <button
+        className="avatar"
+        onClick={onEdit}
+        aria-label={`Editar ${item.name}`}
+        style={{
+          border: 0, cursor: "pointer",
+          background: `color-mix(in srgb, ${item.liability ? "var(--neg)" : "var(--gold)"} 20%, transparent)`,
+        }}
+      >
+        {ICONE_CLASSE[item.asset_class] ?? "💰"}
+      </button>
+
+      <div className="mid">
+        <div className="t">{item.name}</div>
+        <div className="s">
+          {/* O estado do saldo vira texto curto em vez de coluna própria. Num
+              celular, "de mai/2026" ao lado do nome diz o mesmo que uma coluna
+              "Referência" e não custa um quinto da largura da tela. */}
+          {item.as_of == null
+            ? "sem saldo"
+            : item.as_of === ym
+              ? "atualizado neste mês"
+              : `de ${formatYm(item.as_of)}`}
+          {item.change !== 0 && item.as_of != null && (
+            <span style={{ color: changeColor(item) }}>
+              {" · "}{formatSigned(item.change)}
+            </span>
+          )}
+        </div>
+      </div>
+
+      <div className="saldo-input">
         <MoneyCell
           saved={item.snapshot_id != null ? item.value : null}
           ariaLabel={`Saldo de ${item.name}`}
-          placeholder={inherited ? formatMoney(item.value) : "0,00"}
+          placeholder={herdado ? formatMoney(item.value) : "0,00"}
           pending={setSnapshot.isPending}
           onCommit={(amount) =>
             setSnapshot.mutate({
@@ -234,42 +251,33 @@ function AssetRow({
             })
           }
         />
-      </td>
-      <td>
-        {item.as_of == null ? (
-          <span style={{ fontSize: 12.5, color: "var(--text-faint)" }}>sem saldo</span>
-        ) : item.as_of === ym ? (
-          <span className="badge income">deste mês</span>
-        ) : (
-          <span className="badge" style={{ color: "var(--text-dim)", background: "var(--surface-3)" }}>
-            de {formatYm(item.as_of)}
-          </span>
-        )}
-      </td>
-      <td className="num" style={{ fontWeight: 650, color: changeColor(item) }}>
-        {item.change === 0 ? "—" : formatSigned(item.change)}
-      </td>
-      <td>
-        <div className="row-actions">
-          <button className="btn btn-ghost btn-sm" onClick={onEdit}>Editar</button>
-          <DeleteAssetButton id={item.asset_id} name={item.name} />
-        </div>
-      </td>
-    </tr>
+      </div>
+    </div>
   );
 }
 
-function DeleteAssetButton({ id, name }: { id: number; name: string }) {
+function DeleteAssetButton({
+  id,
+  name,
+  onDone,
+}: {
+  id: number;
+  name: string;
+  onDone: () => void;
+}) {
   const del = useDeleteAsset();
   return (
     <button
-      className="btn btn-ghost btn-sm btn-danger"
+      type="button"
+      className="btn btn-danger"
       disabled={del.isPending}
       onClick={() => {
-        if (confirm(`Excluir "${name}"? O histórico de saldos vai junto.`)) del.mutate(id);
+        if (confirm(`Excluir "${name}"? O histórico de saldos vai junto.`)) {
+          del.mutate(id, { onSuccess: onDone });
+        }
       }}
     >
-      Excluir
+      {del.isPending ? "Excluindo…" : "Excluir"}
     </button>
   );
 }
@@ -308,7 +316,11 @@ function AssetForm({ asset, onClose }: { asset?: Asset; onClose: () => void }) {
       onClose={onClose}
       footer={
         <>
-          <button type="button" className="btn btn-ghost" onClick={onClose}>Cancelar</button>
+          {isEdit ? (
+            <DeleteAssetButton id={asset!.id} name={asset!.name} onDone={onClose} />
+          ) : (
+            <button type="button" className="btn btn-ghost" onClick={onClose}>Cancelar</button>
+          )}
           <button
             type="submit"
             form="asset-form"
@@ -359,28 +371,6 @@ function AssetForm({ asset, onClose }: { asset?: Asset; onClose: () => void }) {
         {err && <div className="error-box" style={{ padding: 0, textAlign: "left" }}>{err.message}</div>}
       </form>
     </Modal>
-  );
-}
-
-function Stat({
-  label,
-  value,
-  tone,
-  sub,
-  signed,
-}: {
-  label: string;
-  value: number;
-  tone: "pos" | "neg" | "gold";
-  sub?: string;
-  signed?: boolean;
-}) {
-  return (
-    <div className="stat">
-      <div className="label">{label}</div>
-      <div className={`value ${tone}`}>{signed ? formatSigned(value) : formatMoney(value)}</div>
-      {sub && <div className="sub">{sub}</div>}
-    </div>
   );
 }
 

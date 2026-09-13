@@ -25,7 +25,6 @@ const SECTIONS: { type: CategoryType; title: string; hint: string }[] = [
 type Tab = "metas" | "lancamentos";
 
 export default function Budget() {
-  const { label } = usePeriod();
   // A sub-aba vive na URL pra sobreviver ao F5 e poder ser linkada de fora.
   const [params, setParams] = useSearchParams();
   const tab: Tab = params.get("aba") === "lancamentos" ? "lancamentos" : "metas";
@@ -64,32 +63,19 @@ export default function Budget() {
 
   if (categories && categories.length === 0) {
     return (
-      <>
-        <BudgetHead label={label} />
-        <div className="panel">
-          <div className="empty">
-            <div className="big">🎯</div>
-            Crie uma <b>categoria</b> pra começar a orçar.
-            <div style={{ marginTop: 14 }}>
-              <Link className="btn btn-primary" to="/configuracoes">Ir para configurações</Link>
-            </div>
-          </div>
+      <div className="empty">
+        <div className="big">🎯</div>
+        <div className="tit">Sem categorias ainda</div>
+        <div>Crie uma para começar a orçar.</div>
+        <div style={{ marginTop: "var(--s4)" }}>
+          <Link className="btn btn-primary" to="/configuracoes">Criar categoria</Link>
         </div>
-      </>
+      </div>
     );
   }
 
   return (
     <>
-      <BudgetHead
-        label={label}
-        action={
-          <button className="btn btn-primary" onClick={() => setCreating(true)}>
-            + Nova transação
-          </button>
-        }
-      />
-
       <div className="subtabs" role="tablist">
         <button
           role="tab"
@@ -125,19 +111,6 @@ export default function Budget() {
   );
 }
 
-function BudgetHead({ label, action }: { label: string; action?: React.ReactNode }) {
-  return (
-    <div className="page-head">
-      <div>
-        <div className="eyebrow">Planejamento</div>
-        <h1>Orçamento</h1>
-        <p>Quanto você planejou e quanto já foi, em {label}.</p>
-      </div>
-      {action}
-    </div>
-  );
-}
-
 // ---------- Metas ----------
 
 function Metas() {
@@ -155,16 +128,23 @@ function Metas() {
 
   if (isLoading) {
     return (
-      <div className="panel">
-        <div className="loading"><div className="spinner" />Carregando orçamento…</div>
-      </div>
+      <>
+        <div className="skel" style={{ height: 150, borderRadius: "var(--r-lg)" }} />
+        <div className="duo" style={{ gridTemplateColumns: "1fr 1fr" }}>
+          <div className="skel" style={{ height: 72 }} />
+          <div className="skel" style={{ height: 72 }} />
+        </div>
+        <div className="sec-title"><h2>Despesas</h2></div>
+        <div className="skel" style={{ height: 220, borderRadius: "var(--r)" }} />
+      </>
     );
   }
-  if (error) {
-    return <div className="panel"><div className="error-box">{(error as ApiError).message}</div></div>;
-  }
+  if (error) return <div className="error-box">{(error as ApiError).message}</div>;
 
   const totals = data?.totals;
+  const gasto = totals?.expense.paid ?? 0;
+  const orcadoDespesa = totals?.expense.budgeted ?? 0;
+  const estourou = orcadoDespesa > 0 && gasto > orcadoDespesa;
   // A sobra é o que o mês devolve se tudo for exatamente ao orçado.
   const leftover = totals
     ? totals.income.budgeted - totals.expense.budgeted - totals.investment.budgeted
@@ -172,21 +152,42 @@ function Metas() {
 
   return (
     <>
-      <div className="stat-grid">
-        <Stat label="Receita orçada" value={totals?.income.budgeted ?? 0} tone="pos" />
-        <Stat label="Despesa orçada" value={totals?.expense.budgeted ?? 0} tone="neg" />
-        <Stat
-          label="Já gasto"
-          value={totals?.expense.paid ?? 0}
-          tone="gold"
-          sub={usageLabel(totals?.expense.paid ?? 0, totals?.expense.budgeted ?? 0)}
-        />
-        <Stat
-          label="Sobra planejada"
-          value={leftover}
-          tone={leftover >= 0 ? "pos" : "neg"}
-          sub="Receita − despesa − investimento orçados"
-        />
+      {/* O heroi do orçamento é o quanto já foi, contra o teto. É a pergunta
+          que a tela responde; receita e sobra são contexto. */}
+      <section className="hero">
+        <div className="rot">Gasto em despesas</div>
+        <div className="big tnum">{formatMoney(gasto)}</div>
+        {orcadoDespesa > 0 ? (
+          <>
+            <div className="delta" style={estourou ? { color: "var(--neg)" } : undefined}>
+              de {formatMoney(orcadoDespesa)} orçado
+            </div>
+            <div className="bar-track" style={{ marginTop: "var(--s3)" }}>
+              <div
+                className={`bar-fill ${estourou ? "over" : ""}`}
+                style={{
+                  width: `${Math.min(100, (gasto / orcadoDespesa) * 100)}%`,
+                  background: estourou ? "var(--neg)" : gasto / orcadoDespesa >= 0.8 ? "var(--gold)" : "var(--pos)",
+                }}
+              />
+            </div>
+          </>
+        ) : (
+          <div className="delta">Nenhuma meta definida ainda</div>
+        )}
+      </section>
+
+      <div className="duo" style={{ gridTemplateColumns: "1fr 1fr" }}>
+        <div className="card">
+          <div className="rot">Receita orçada</div>
+          <div className="val pos tnum">{formatMoney(totals?.income.budgeted ?? 0)}</div>
+        </div>
+        <div className="card">
+          <div className="rot">Sobra planejada</div>
+          <div className={`val tnum ${leftover >= 0 ? "pos" : "neg"}`}>
+            {formatMoney(leftover)}
+          </div>
+        </div>
       </div>
 
       {SECTIONS.map(({ type, title, hint }) => {
@@ -200,7 +201,6 @@ function Metas() {
 
 function Section({
   title,
-  hint,
   type,
   items,
 }: {
@@ -209,108 +209,111 @@ function Section({
   type: CategoryType;
   items: BudgetSummaryItem[];
 }) {
-  const budgeted = items.reduce((acc, i) => acc + i.budgeted, 0);
-  const paid = items.reduce((acc, i) => acc + i.paid, 0);
+  const orcado = items.reduce((acc, i) => acc + i.budgeted, 0);
+  const pago = items.reduce((acc, i) => acc + i.paid, 0);
+
+  // Categoria sem meta e sem movimento é ruído: ela existe pra poder receber
+  // uma meta, mas listar todas empurra as que importam pra fora da tela.
+  const comDado = items.filter((i) => i.budgeted > 0 || i.paid > 0 || i.planned > 0);
+  const ociosas = items.length - comDado.length;
+  const [mostrarTodas, setMostrarTodas] = useState(false);
+  const visiveis = mostrarTodas ? items : comDado;
 
   return (
-    <div className="panel" style={{ marginTop: 16 }}>
-      <div className="panel-head">
-        <div>
-          <h2>{title}</h2>
-          <div className="hint" style={{ marginTop: 3 }}>{hint}</div>
-        </div>
-        <div className="num" style={{ fontSize: 13.5, color: "var(--text-dim)" }}>
-          {formatMoney(paid)} de {formatMoney(budgeted)}
-        </div>
+    <>
+      <div className="sec-title">
+        <h2>{title}</h2>
+        <span className="tnum" style={{ fontSize: 13, color: "var(--text-dim)" }}>
+          {formatMoney(pago)} de {formatMoney(orcado)}
+        </span>
       </div>
 
-      <div className="table-wrap">
-        <table>
-          <thead>
-            <tr>
-              <th>Categoria</th>
-              <th style={{ width: 150 }}>Orçado</th>
-              <th className="num">Previsto</th>
-              <th className="num">{type === "income" ? "Recebido" : "Pago"}</th>
-              <th style={{ width: 190 }}>Uso</th>
-              <th className="num">{type === "income" ? "A receber" : "Resta"}</th>
-            </tr>
-          </thead>
-          <tbody>
-            {items.map((item) => (
-              <BudgetRow key={item.category_id} item={item} />
-            ))}
-          </tbody>
-        </table>
+      <div className="list">
+        {visiveis.map((item) => (
+          <BudgetRow key={item.category_id} item={item} />
+        ))}
       </div>
-    </div>
+
+      {ociosas > 0 && (
+        <button
+          className="btn btn-ghost btn-sm btn-block"
+          style={{ marginTop: "var(--s2)" }}
+          onClick={() => setMostrarTodas((v) => !v)}
+        >
+          {mostrarTodas
+            ? "Esconder as sem movimento"
+            : `Mostrar mais ${ociosas} ${type === "income" ? "receita" : "categoria"}${ociosas > 1 ? "s" : ""} sem movimento`}
+        </button>
+      )}
+    </>
   );
 }
 
 function BudgetRow({ item }: { item: BudgetSummaryItem }) {
-  const remaining = item.budgeted - item.paid;
-  const over = item.budgeted > 0 && remaining < 0;
+  const resta = item.budgeted - item.paid;
+  const estourou = item.budgeted > 0 && resta < 0;
   // Estourar receita é bom, estourar despesa não — a cor segue o tipo.
-  const overIsGood = item.category_type === "income";
+  const estourarEhBom = item.category_type === "income";
+  const razao = item.budgeted > 0 ? item.paid / item.budgeted : 0;
+  const pct = Math.round(razao * 100);
 
-  return (
-    <tr>
-      <td>
-        <span className="chip">
-          <span className="dot" style={{ background: item.color }} />
-          {item.icon} {item.category_name}
-        </span>
-      </td>
-      <td>
-        <MetaInput item={item} />
-      </td>
-      <td className="num" style={{ color: "var(--text-dim)" }}>
-        {item.planned ? formatMoney(item.planned) : "—"}
-      </td>
-      <td className="num" style={{ fontWeight: 650 }}>
-        {item.paid ? formatMoney(item.paid) : "—"}
-      </td>
-      <td>
-        <Usage item={item} />
-      </td>
-      <td
-        className="num"
-        style={{
-          fontWeight: 650,
-          color: !item.budgeted
-            ? "var(--text-faint)"
-            : over
-              ? overIsGood ? "var(--income)" : "var(--expense)"
-              : "var(--text-dim)",
-        }}
-      >
-        {item.budgeted ? formatMoney(remaining) : "—"}
-      </td>
-    </tr>
-  );
-}
-
-function Usage({ item }: { item: BudgetSummaryItem }) {
-  if (!item.budgeted) {
-    return <span style={{ fontSize: 12.5, color: "var(--text-faint)" }}>sem meta</span>;
-  }
-
-  const ratio = item.paid / item.budgeted;
-  const pct = Math.round(ratio * 100);
-  const over = ratio > 1;
-  const color = over
-    ? item.category_type === "income" ? "var(--income)" : "var(--expense)"
-    : ratio >= 0.8
+  const corBarra = estourou
+    ? estourarEhBom ? "var(--pos)" : "var(--neg)"
+    : razao >= 0.8
       ? "var(--gold)"
       : item.color;
 
   return (
-    <div className="usage">
-      <div className="bar-track slim">
-        {/* Passou de 100% a barra fica cheia; o número ao lado conta o resto. */}
-        <div className="bar-fill" style={{ width: `${Math.min(100, pct)}%`, background: color }} />
+    <div className="row budget-row">
+      <div className="budget-top">
+        <div
+          className="avatar"
+          style={{ background: `color-mix(in srgb, ${item.color} 22%, transparent)` }}
+        >
+          {item.icon}
+        </div>
+        <div className="mid">
+          <div className="t">{item.category_name}</div>
+          <div className="s">
+            {item.paid > 0 ? (
+              <>
+                <b style={{ color: "var(--text)" }}>{formatMoney(item.paid)}</b>
+                {item.budgeted > 0 && (
+                  <>
+                    {" · "}
+                    <span style={estourou ? { color: estourarEhBom ? "var(--pos)" : "var(--neg)" } : undefined}>
+                      {estourou ? `passou ${formatMoney(-resta)}` : `resta ${formatMoney(resta)}`}
+                    </span>
+                  </>
+                )}
+              </>
+            ) : item.planned > 0 ? (
+              <>previsto {formatMoney(item.planned)}</>
+            ) : (
+              "sem movimento"
+            )}
+          </div>
+        </div>
+        <div className="saldo-input">
+          <MetaInput item={item} />
+        </div>
       </div>
-      <span className="pct" style={over ? { color } : undefined}>{pct}%</span>
+
+      {/* A barra só aparece quando há meta: sem teto, "quanto por cento" não
+          tem denominador e a barra seria decoração. */}
+      {item.budgeted > 0 && (
+        <div className="budget-bar">
+          <div className="bar-track">
+            <div
+              className={`bar-fill ${estourou ? "over" : ""}`}
+              style={{ width: `${Math.min(100, pct)}%`, background: corBarra }}
+            />
+          </div>
+          <span className="tnum" style={{ color: estourou ? corBarra : "var(--text-faint)" }}>
+            {pct}%
+          </span>
+        </div>
+      )}
     </div>
   );
 }
@@ -349,8 +352,8 @@ function Lancamentos({
   const { data: transactions, isLoading, error } = useTransactions();
 
   return (
-    <div className="panel">
-      {isLoading && <div className="loading"><div className="spinner" />Carregando…</div>}
+    <>
+      {isLoading && <div className="skel" style={{ height: 260, borderRadius: "var(--r)" }} />}
       {error && <div className="error-box">{(error as ApiError).message}</div>}
 
       {transactions && transactions.length > 0 && (
@@ -364,36 +367,14 @@ function Lancamentos({
       {!isLoading && !error && transactions?.length === 0 && (
         <div className="empty">
           <div className="big">🧾</div>
-          Nenhuma transação em {label}.
+          <div className="tit">Nada lançado em {label}</div>
+          <div>Toque no <b>+</b> para registrar.</div>
         </div>
       )}
-    </div>
+    </>
   );
 }
 
 // ---------- Auxiliares ----------
 
-function Stat({
-  label,
-  value,
-  tone,
-  sub,
-}: {
-  label: string;
-  value: number;
-  tone: "pos" | "neg" | "gold";
-  sub?: string;
-}) {
-  return (
-    <div className="stat">
-      <div className="label">{label}</div>
-      <div className={`value ${tone}`}>{formatMoney(value)}</div>
-      {sub && <div className="sub">{sub}</div>}
-    </div>
-  );
-}
 
-function usageLabel(paid: number, budgeted: number): string {
-  if (!budgeted) return "Nenhuma meta definida ainda";
-  return `${Math.round((paid / budgeted) * 100)}% do orçado`;
-}

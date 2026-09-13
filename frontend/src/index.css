@@ -404,6 +404,24 @@ h1, h2, h3 { margin: 0; letter-spacing: -0.02em; line-height: 1.2; }
 }
 .breakdown-item .btop .v { color: var(--text-dim); font-variant-numeric: tabular-nums; }
 
+/* ---------- Barra empilhada ----------
+   Uma faixa com todas as fatias, em vez de uma barra por linha. Ocupa a altura
+   de um item só e mostra a proporção entre as partes — que é a pergunta que
+   composição responde. Barras separadas mostram cada fatia contra o máximo, o
+   que não é a mesma coisa. */
+.seg {
+  display: flex; height: 10px; border-radius: var(--r-pill);
+  overflow: hidden; background: var(--surface-3);
+}
+.seg > div { height: 100%; }
+.seg > div + div { border-left: 2px solid var(--surface); }
+.seg-legend {
+  display: flex; flex-wrap: wrap; gap: var(--s3);
+  margin-top: var(--s2); font-size: 11.5px; color: var(--text-dim);
+}
+.seg-legend span { display: inline-flex; align-items: center; gap: 5px; }
+.seg-legend i { width: 8px; height: 8px; border-radius: var(--r-pill); flex: none; }
+
 /* --------------------------------------------------------------- Botões --- */
 
 .btn {
@@ -442,19 +460,6 @@ h1, h2, h3 { margin: 0; letter-spacing: -0.02em; line-height: 1.2; }
   font-size: 11px; font-weight: 700; background: var(--surface-3); color: var(--text-dim);
 }
 
-/* ---------- Abas internas ---------- */
-.subtabs {
-  display: flex; gap: var(--s1); padding: var(--s1);
-  background: var(--surface); border: 1px solid var(--border-soft);
-  border-radius: var(--r-pill); margin-bottom: var(--s4);
-}
-.subtabs button {
-  flex: 1; min-height: 38px; border: 0; border-radius: var(--r-pill);
-  background: none; font-size: 13px; font-weight: 650; color: var(--text-dim);
-  cursor: pointer;
-}
-.subtabs button.on,
-.subtabs button.active { background: var(--surface-3); color: var(--text); }
 
 /* ------------------------------------------------------------ Formulário -- */
 
@@ -576,42 +581,36 @@ textarea { min-height: 76px; resize: vertical; }
 .login-card .brand .name b { color: var(--gold); }
 .login-tag { text-align: center; color: var(--text-dim); font-size: 13.5px; margin: 0; }
 
-/* --------------------------------------------------------------- Legado ---
-   Classes das telas ainda não migradas. Ficam até cada uma passar pela nova
-   linguagem; remover antes disso só deixaria tela quebrada no caminho. */
+/* ------------------------------------------------------- Restos em uso ----
+   O que sobrou das telas antigas e ainda tem uso: a grade de categorias em
+   Configurações e as sub-abas do Orçamento. O resto do bloco legado (painéis,
+   tabelas, cabeçalhos de página, grade de stats) saiu junto com a última tela
+   que os usava. */
 
-.panel { background: var(--surface); border: 1px solid var(--border-soft); border-radius: var(--r); }
-.panel-head {
-  display: flex; align-items: center; justify-content: space-between;
-  gap: var(--s3); padding: var(--s4); border-bottom: 1px solid var(--border-soft);
+.subtabs {
+  display: flex; gap: var(--s1); padding: var(--s1);
+  background: var(--surface); border: 1px solid var(--border-soft);
+  border-radius: var(--r-pill); margin-bottom: var(--s4);
 }
-.panel-head h2 { font-size: 15px; }
-.panel-body { padding: var(--s4); }
-.page-head { margin-bottom: var(--s5); }
-.page-head h1 { font-size: 22px; margin: 4px 0; }
-.page-head p { margin: 0; color: var(--text-dim); font-size: 13.5px; }
-.section-head { display: flex; align-items: center; justify-content: space-between; gap: var(--s3); margin-bottom: var(--s3); }
-.stat-grid { display: grid; grid-template-columns: 1fr 1fr; gap: var(--s3); }
-.stat { background: var(--surface); border: 1px solid var(--border-soft); border-radius: var(--r); padding: var(--s4); }
-.stat .label { font-size: 11.5px; font-weight: 650; color: var(--text-dim); }
-.stat .value { font-size: 19px; font-weight: 750; margin-top: 5px; letter-spacing: -0.02em; }
-.stat .value.pos { color: var(--pos); }
-.stat .value.neg { color: var(--neg); }
-.stat .value.gold { color: var(--gold); }
-.stat .sub { font-size: 11px; color: var(--text-faint); margin-top: 4px; }
-.two-col { display: flex; flex-direction: column; gap: var(--s4); }
-.table-wrap { overflow-x: auto; }
-table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
-th, td { padding: var(--s3) var(--s2); text-align: left; border-bottom: 1px solid var(--border-soft); }
-th { font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-faint); font-weight: 700; }
-td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
-.cat-grid { display: grid; grid-template-columns: 1fr; gap: var(--s3); }
-.cat-card { display: flex; align-items: center; gap: var(--s3); background: var(--surface); border: 1px solid var(--border-soft); border-radius: var(--r); padding: var(--s3) var(--s4); }
-.cat-icon { width: 40px; height: 40px; border-radius: var(--r-pill); display: grid; place-items: center; font-size: 18px; flex: none; }
+.subtabs button {
+  flex: 1; min-height: 38px; border: 0; border-radius: var(--r-pill);
+  background: none; font-size: 13px; font-weight: 650; color: var(--text-dim);
+  cursor: pointer;
+}
+.subtabs button.on,
+.subtabs button.active { background: var(--surface-3); color: var(--text); }
+
+.cat-grid { display: grid; grid-template-columns: 1fr; gap: var(--s2); }
+.cat-card {
+  display: flex; align-items: center; gap: var(--s3);
+  background: var(--surface); border: 1px solid var(--border-soft);
+  border-radius: var(--r); padding: var(--s3) var(--s4); min-height: 60px;
+}
+.cat-icon {
+  width: 40px; height: 40px; border-radius: var(--r-pill);
+  display: grid; place-items: center; font-size: 18px; flex: none;
+}
 .row-actions { display: flex; gap: var(--s2); margin-left: auto; }
-.money-cell input { min-height: 42px; text-align: right; }
-.usage { font-size: 11.5px; color: var(--text-faint); }
-.sidebar, .topbar { display: none; }
 
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: 0.01ms !important; transition: none !important; }
@@ -662,3 +661,23 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
   .overlay { justify-content: center; align-items: center; padding: var(--s5); }
   .modal { border-radius: var(--r-lg); max-width: 480px; width: 100%; animation: fade 0.15s ease; }
 }
+
+/* ---------- Linha de ativo ----------
+   O saldo se edita na própria linha: atualizar patrimônio é um ritual mensal
+   de digitar cinco números, e mandar abrir um formulário pra cada um
+   transformaria dois minutos em dez. */
+.asset-row { cursor: default; }
+.asset-row .saldo-input { width: 116px; flex: none; }
+.asset-row .saldo-input input {
+  min-height: 40px; padding: var(--s2); font-size: 15px; text-align: right;
+}
+
+/* ---------- Linha de orçamento ----------
+   Duas faixas: a de cima identifica e deixa editar a meta, a de baixo mostra
+   o quanto dela já foi. Empilhar é o que permite manter a barra de progresso
+   no celular — em colunas ela teria uns 40px e não mostraria nada. */
+.budget-row { flex-direction: column; align-items: stretch; gap: var(--s2); cursor: default; }
+.budget-top { display: flex; align-items: center; gap: var(--s3); }
+.budget-bar { display: flex; align-items: center; gap: var(--s3); padding-left: 52px; }
+.budget-bar .bar-track { flex: 1; }
+.budget-bar span { font-size: 11px; font-weight: 650; min-width: 34px; text-align: right; }

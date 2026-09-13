@@ -1,10 +1,10 @@
 import { useMemo } from "react";
-import { useDeleteTransaction } from "../lib/queries";
-import { formatDate, formatMoney } from "../lib/format";
+import { formatDiaMes, formatMoney } from "../lib/format";
 import type { Category, Transaction } from "../lib/types";
 
-// Só a tabela: quem chama cuida de loading, erro e do formulário. Assim a
-// lista serve tanto a aba de Lançamentos quanto qualquer resumo futuro.
+// Só a lista: quem chama cuida de loading, erro e do formulário. Tocar na
+// linha abre a edição — no celular não cabe um botão "Editar" por linha, e a
+// linha inteira é um alvo bem maior que ele.
 
 export default function TransactionList({
   transactions,
@@ -27,70 +27,42 @@ export default function TransactionList({
   );
 
   return (
-    <div className="table-wrap">
-      <table>
-        <thead>
-          <tr>
-            <th>Data</th>
-            <th>Descrição</th>
-            <th>Categoria</th>
-            <th className="num">Previsto</th>
-            <th className="num">Pago</th>
-            <th></th>
-          </tr>
-        </thead>
-        <tbody>
-          {sorted.map((t) => {
-            const cat = catMap.get(t.category_id);
-            return (
-              <tr key={t.id}>
-                <td style={{ color: "var(--text-dim)", whiteSpace: "nowrap" }}>{formatDate(t.date)}</td>
-                <td>
-                  <div style={{ fontWeight: 600 }}>{t.description}</div>
-                  {t.note && <div style={{ fontSize: 12.5, color: "var(--text-faint)" }}>{t.note}</div>}
-                </td>
-                <td>
-                  {cat ? (
-                    <span className="chip">
-                      <span className="dot" style={{ background: cat.color }} />
-                      {cat.icon} {cat.name}
-                    </span>
-                  ) : (
-                    <span style={{ color: "var(--text-faint)" }}>—</span>
-                  )}
-                </td>
-                <td className="num" style={{ color: "var(--text-dim)" }}>
-                  {t.amount_planned != null ? formatMoney(t.amount_planned) : "—"}
-                </td>
-                <td className="num" style={{ fontWeight: 650 }}>
-                  {t.amount_paid != null ? formatMoney(t.amount_paid) : "—"}
-                </td>
-                <td>
-                  <div className="row-actions">
-                    <button className="btn btn-ghost btn-sm" onClick={() => onEdit(t)}>Editar</button>
-                    <DeleteButton id={t.id} label={t.description} />
-                  </div>
-                </td>
-              </tr>
-            );
-          })}
-        </tbody>
-      </table>
-    </div>
-  );
-}
+    <div className="list">
+      {sorted.map((t) => {
+        const cat = catMap.get(t.category_id);
+        const valor = t.amount_paid ?? t.amount_planned ?? 0;
+        // Sem valor pago é promessa, não movimento: marcar isso evita ler o
+        // mês como fechado quando metade ainda não saiu da conta.
+        const soPrevisto = t.amount_paid == null;
+        const tom =
+          cat?.type === "income" ? "pos" : cat?.type === "expense" ? "neg" : "inv";
+        const sinal = cat?.type === "income" ? "+" : cat?.type === "expense" ? "−" : "";
 
-function DeleteButton({ id, label }: { id: number; label: string }) {
-  const del = useDeleteTransaction();
-  return (
-    <button
-      className="btn btn-ghost btn-sm btn-danger"
-      disabled={del.isPending}
-      onClick={() => {
-        if (confirm(`Excluir "${label}"?`)) del.mutate(id);
-      }}
-    >
-      Excluir
-    </button>
+        return (
+          <button className="row" key={t.id} onClick={() => onEdit(t)}>
+            <div
+              className="avatar"
+              style={{
+                background: `color-mix(in srgb, ${cat?.color ?? "#666"} 22%, transparent)`,
+              }}
+            >
+              {cat?.icon ?? "•"}
+            </div>
+            <div className="mid">
+              <div className="t">{t.description}</div>
+              <div className="s">
+                {formatDiaMes(t.date)}
+                {cat && <> · {cat.name}</>}
+                {t.note && <> · {t.note}</>}
+              </div>
+            </div>
+            <div className={`amt tnum ${soPrevisto ? "" : tom}`}>
+              {sinal}{formatMoney(Math.abs(valor))}
+              {soPrevisto && <span className="sub">previsto</span>}
+            </div>
+          </button>
+        );
+      })}
+    </div>
   );
 }

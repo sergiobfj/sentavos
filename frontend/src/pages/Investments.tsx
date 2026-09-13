@@ -1,9 +1,14 @@
 import { useMemo } from "react";
 import { Link } from "react-router-dom";
-import { useAssetSummary, useBudgetSummary, useCategories, useTransactions } from "../lib/queries";
+import {
+  useAssetSummary,
+  useBudgetSummary,
+  useCategories,
+  useTransactions,
+} from "../lib/queries";
 import { usePeriod } from "../lib/period";
 import { ApiError } from "../lib/api";
-import { formatDate, formatMoney, formatYm } from "../lib/format";
+import { formatDiaMes, formatMoney, formatYm } from "../lib/format";
 import {
   ASSET_CLASS_LABEL,
   ASSET_CLASS_ORDER,
@@ -17,9 +22,9 @@ import {
 // "investimento". Se ela tivesse números próprios, começaria a divergir das
 // outras duas telas sobre o mesmo dinheiro.
 
-const CLASS_COLOR: Record<string, string> = {
-  fixed_income: "var(--income)",
-  equity: "var(--investment)",
+const COR_CLASSE: Record<string, string> = {
+  fixed_income: "var(--pos)",
+  equity: "var(--inv)",
   crypto: "var(--gold)",
 };
 
@@ -30,10 +35,9 @@ export default function Investments() {
   const transactions = useTransactions();
   const categories = useCategories();
 
-  const isLoading = assets.isLoading || budget.isLoading;
-  const error = (assets.error || budget.error) as ApiError | null;
+  const erro = (assets.error || budget.error) as ApiError | null;
 
-  const items = useMemo(
+  const itens = useMemo(
     () =>
       (assets.data?.items ?? [])
         .filter((i) => INVESTMENT_CLASSES.includes(i.asset_class))
@@ -41,8 +45,6 @@ export default function Investments() {
     [assets.data]
   );
 
-  // Os aportes do mês: lançamentos em categoria de tipo investimento. É a mesma
-  // fonte que alimenta o "Investido" do painel e do orçamento.
   const aportes = useMemo(() => {
     const investCats = new Set(
       (categories.data ?? []).filter((c) => c.type === "investment").map((c) => c.id)
@@ -52,285 +54,194 @@ export default function Investments() {
       .sort((a, b) => b.date.localeCompare(a.date));
   }, [transactions.data, categories.data]);
 
-  const head = (
-    <div className="page-head">
-      <div>
-        <div className="eyebrow">Carteira</div>
-        <h1>Investimento</h1>
-        <p>Quanto você já guardou e quanto isso virou, em {label}.</p>
-      </div>
-    </div>
-  );
+  if (assets.isLoading || budget.isLoading) return <Esqueleto />;
+  if (erro) return <div className="error-box">{erro.message}</div>;
 
-  if (isLoading) {
-    return (
-      <>
-        {head}
-        <div className="panel">
-          <div className="loading"><div className="spinner" />Carregando carteira…</div>
-        </div>
-      </>
-    );
-  }
-  if (error) {
-    return (
-      <>
-        {head}
-        <div className="panel"><div className="error-box">{error.message}</div></div>
-      </>
-    );
-  }
-
-  const total = items.reduce((acc, i) => acc + i.value, 0);
-  const previous = items.reduce((acc, i) => acc + i.previous, 0);
-  const change = total - previous;
+  const total = itens.reduce((acc, i) => acc + i.value, 0);
+  const anterior = itens.reduce((acc, i) => acc + i.previous, 0);
+  const variacao = total - anterior;
   const aporte = budget.data?.totals.investment.paid ?? 0;
 
   // Rendimento é o que sobrou da variação depois de descontar o que você
   // colocou. Só faz sentido com um mês anterior pra comparar: no primeiro mês
   // o saldo inteiro apareceria como "rendimento", o que seria falso.
-  const hasBaseline = previous > 0;
-  const rendimento = change - aporte;
+  const temBase = anterior > 0;
+  const rendimento = variacao - aporte;
 
-  if (items.length === 0) {
+  if (itens.length === 0) {
     return (
-      <>
-        {head}
-        <div className="panel">
-          <div className="empty">
-            <div className="big">📈</div>
-            Nenhum investimento cadastrado ainda. Esta aba lê os ativos de
-            <b> renda fixa</b>, <b>renda variável</b> e <b>cripto</b> do Patrimônio.
-            {aporte > 0 && (
-              <div style={{ marginTop: 10, color: "var(--text-dim)" }}>
-                Você já aportou {formatMoney(aporte)} em {label} — cadastre onde esse
-                dinheiro está pra acompanhar o rendimento.
-              </div>
-            )}
-            <div style={{ marginTop: 14 }}>
-              <Link className="btn btn-primary" to="/patrimonio">Ir para patrimônio</Link>
-            </div>
-          </div>
+      <div className="empty">
+        <div className="big">📈</div>
+        <div className="tit">Nada investido ainda</div>
+        <div>
+          Esta aba lê os ativos de renda fixa, renda variável e cripto do
+          Patrimônio.
+          {aporte > 0 && (
+            <>
+              {" "}Você já aportou <b>{formatMoney(aporte)}</b> em {label} — cadastre
+              onde esse dinheiro está.
+            </>
+          )}
         </div>
-      </>
+        <div style={{ marginTop: "var(--s4)" }}>
+          <Link className="btn btn-primary" to="/patrimonio">Ir para patrimônio</Link>
+        </div>
+      </div>
     );
   }
 
   return (
     <>
-      {head}
-
-      <div className="stat-grid">
-        <Stat label="Total investido" value={total} tone="gold" />
-        <Stat
-          label="Aporte no mês"
-          value={aporte}
-          tone="pos"
-          sub="Lançamentos de categoria investimento"
-        />
-        <Stat
-          label="Variação no mês"
-          value={change}
-          tone={change >= 0 ? "pos" : "neg"}
-          signed
-          sub={hasBaseline ? `Contra ${formatMoney(previous)} no mês anterior` : "Sem mês anterior"}
-        />
-        {hasBaseline ? (
-          <Stat
-            label="Rendimento estimado"
-            value={rendimento}
-            tone={rendimento >= 0 ? "pos" : "neg"}
-            signed
-            sub="Variação − aporte"
-          />
-        ) : (
-          <div className="stat">
-            <div className="label">Rendimento estimado</div>
-            <div className="value" style={{ color: "var(--text-faint)" }}>—</div>
-            <div className="sub">Precisa de um mês anterior com saldo pra comparar</div>
+      <section className="hero">
+        <div className="rot">Total investido</div>
+        <div className="big tnum">{formatMoney(total)}</div>
+        {temBase && Math.abs(variacao) >= 0.01 && (
+          <div className={`delta ${variacao > 0 ? "pos" : "neg"}`}>
+            <span aria-hidden>{variacao > 0 ? "↑" : "↓"}</span>
+            {formatMoney(Math.abs(variacao))} no mês
           </div>
         )}
-      </div>
+      </section>
 
-      <div className="two-col">
-        <div className="panel">
-          <div className="panel-head">
-            <h2>Onde está o dinheiro</h2>
-            <div className="num" style={{ fontSize: 13.5, color: "var(--text-dim)" }}>
-              {formatMoney(total)}
+      {/* Dois números, não quatro. O total já está no cartão acima, e a
+          "variação" virou o selo dele — repetir os dois como cartão próprio era
+          dizer a mesma coisa três vezes. */}
+      <div className="duo" style={{ gridTemplateColumns: "1fr 1fr" }}>
+        <div className="card">
+          <div className="rot">Aportado no mês</div>
+          <div className="val inv tnum">{formatMoney(aporte)}</div>
+        </div>
+        <div className="card">
+          <div className="rot">Rendimento</div>
+          {temBase ? (
+            <div className={`val tnum ${rendimento >= 0 ? "pos" : "neg"}`}>
+              {rendimento > 0 ? "+" : ""}{formatMoney(rendimento)}
             </div>
-          </div>
-          <div className="table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>Ativo</th>
-                  <th className="num">Saldo</th>
-                  <th className="num">Fatia</th>
-                  <th className="num">Variação</th>
-                  <th>Referência</th>
-                </tr>
-              </thead>
-              <tbody>
-                {items.map((item) => (
-                  <tr key={item.asset_id}>
-                    <td>
-                      <div style={{ fontWeight: 600 }}>{item.name}</div>
-                      <div style={{ fontSize: 12.5, color: "var(--text-faint)" }}>
-                        {ASSET_CLASS_LABEL[item.asset_class]}
-                      </div>
-                    </td>
-                    <td className="num" style={{ fontWeight: 650 }}>{formatMoney(item.value)}</td>
-                    <td className="num" style={{ color: "var(--text-dim)" }}>
-                      {total > 0 ? `${Math.round((item.value / total) * 100)}%` : "—"}
-                    </td>
-                    <td
-                      className="num"
-                      style={{
-                        fontWeight: 650,
-                        color:
-                          item.change === 0
-                            ? "var(--text-faint)"
-                            : item.change > 0
-                              ? "var(--income)"
-                              : "var(--expense)",
-                      }}
-                    >
-                      {item.change === 0 ? "—" : formatSigned(item.change)}
-                    </td>
-                    <td>
-                      {item.as_of == null ? (
-                        <span style={{ fontSize: 12.5, color: "var(--text-faint)" }}>sem saldo</span>
-                      ) : item.as_of === ym ? (
-                        <span className="badge income">deste mês</span>
-                      ) : (
-                        <span
-                          className="badge"
-                          style={{ color: "var(--text-dim)", background: "var(--surface-3)" }}
-                        >
-                          de {formatYm(item.as_of)}
-                        </span>
-                      )}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
-
-        <div className="panel">
-          <div className="panel-head"><h2>Composição</h2></div>
-          <div className="panel-body">
-            <Allocation items={items} total={total} />
-          </div>
+          ) : (
+            // Sem mês anterior o número seria o saldo inteiro travestido de
+            // lucro. Melhor um traço honesto do que um número bonito e falso.
+            <div className="val" style={{ color: "var(--text-faint)" }}>—</div>
+          )}
         </div>
       </div>
 
-      <div className="panel" style={{ marginTop: 16 }}>
-        <div className="panel-head">
-          <div>
+      <div className="sec-title">
+        <h2>Onde está</h2>
+        <Link to="/patrimonio">Editar</Link>
+      </div>
+
+      {/* Barra empilhada só quando há mais de um tipo de aplicação. Com uma só,
+          ela seria uma faixa de 100% de uma cor — enfeite ocupando espaço. */}
+      <Composicao itens={itens} total={total} />
+
+      <div className="list">
+        {itens.map((item) => (
+          <div className="row" key={item.asset_id} style={{ cursor: "default" }}>
+            <div
+              className="avatar"
+              style={{
+                background: `color-mix(in srgb, ${COR_CLASSE[item.asset_class] ?? "var(--gold)"} 22%, transparent)`,
+              }}
+            >
+              {item.asset_class === "crypto" ? "₿" : item.asset_class === "equity" ? "📊" : "🏦"}
+            </div>
+            <div className="mid">
+              <div className="t">{item.name}</div>
+              <div className="s">
+                {ASSET_CLASS_LABEL[item.asset_class]}
+                {total > 0 && <> · {Math.round((item.value / total) * 100)}%</>}
+                {/* Saldo herdado de mês anterior: sem avisar, o número parece
+                    atual e a pessoa confia num dado que não atualizou. */}
+                {item.as_of && item.as_of !== ym && <> · de {formatYm(item.as_of)}</>}
+              </div>
+            </div>
+            <div className="amt tnum">{formatMoney(item.value)}</div>
+          </div>
+        ))}
+      </div>
+
+      {aportes.length > 0 && (
+        <>
+          <div className="sec-title">
             <h2>Aportes de {label}</h2>
-            <div className="hint" style={{ marginTop: 3 }}>
-              De onde vem o número do aporte
-            </div>
+            <Link to="/orcamento?aba=lancamentos">Ver todos</Link>
           </div>
-          <Link className="btn btn-ghost btn-sm" to="/orcamento?aba=lancamentos">
-            Ver lançamentos
-          </Link>
-        </div>
-        {aportes.length === 0 ? (
-          <div className="empty">
-            Nenhum aporte lançado em {label}. Aporte é transação em categoria de
-            tipo <b>investimento</b>.
+          <div className="list">
+            {/* Três e não a lista inteira: aqui o aporte é contexto do número
+                lá de cima, não o assunto da tela. Quem quer todos vai na aba
+                de lançamentos, que é onde eles moram. */}
+            {aportes.slice(0, 3).map((t) => (
+              <div className="row" key={t.id} style={{ cursor: "default" }}>
+                <div
+                  className="avatar"
+                  style={{ background: "color-mix(in srgb, var(--inv) 20%, transparent)" }}
+                >
+                  🏦
+                </div>
+                <div className="mid">
+                  <div className="t">{t.description}</div>
+                  <div className="s">{formatDiaMes(t.date)}</div>
+                </div>
+                <div className="amt inv tnum">{formatMoney(t.amount_paid)}</div>
+              </div>
+            ))}
           </div>
-        ) : (
-          <div className="table-wrap">
-            <table>
-              <tbody>
-                {aportes.map((t) => (
-                  <tr key={t.id}>
-                    <td style={{ whiteSpace: "nowrap", color: "var(--text-dim)", width: 140 }}>
-                      {formatDate(t.date)}
-                    </td>
-                    <td style={{ fontWeight: 600 }}>{t.description}</td>
-                    <td className="num" style={{ fontWeight: 650, color: "var(--gold)" }}>
-                      {formatMoney(t.amount_paid)}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </div>
+        </>
+      )}
     </>
   );
 }
 
-function Allocation({ items, total }: { items: AssetSummaryItem[]; total: number }) {
-  const byClass = useMemo(() => {
+function Composicao({ itens, total }: { itens: AssetSummaryItem[]; total: number }) {
+  const porClasse = useMemo(() => {
     const acc = new Map<AssetClass, number>();
-    for (const item of items) {
+    for (const item of itens) {
       acc.set(item.asset_class, (acc.get(item.asset_class) ?? 0) + item.value);
     }
     return ASSET_CLASS_ORDER.filter((c) => acc.has(c)).map((c) => ({
       classe: c,
-      value: acc.get(c) ?? 0,
+      valor: acc.get(c) ?? 0,
     }));
-  }, [items]);
+  }, [itens]);
 
-  if (total <= 0) {
-    return <div className="empty">Sem saldo lançado pra calcular a composição.</div>;
-  }
+  if (total <= 0 || porClasse.length < 2) return null;
 
   return (
-    <>
-      {byClass.map(({ classe, value }) => (
-        <div className="breakdown-item" key={classe}>
-          <div className="btop">
-            <span>{ASSET_CLASS_LABEL[classe]}</span>
-            <span className="v">
-              {Math.round((value / total) * 100)}% · {formatMoney(value)}
-            </span>
-          </div>
-          <div className="bar-track">
-            <div
-              className="bar-fill"
-              style={{
-                width: `${(value / total) * 100}%`,
-                background: CLASS_COLOR[classe] ?? "var(--gold)",
-              }}
-            />
-          </div>
-        </div>
-      ))}
-    </>
-  );
-}
-
-function Stat({
-  label,
-  value,
-  tone,
-  sub,
-  signed,
-}: {
-  label: string;
-  value: number;
-  tone: "pos" | "neg" | "gold";
-  sub?: string;
-  signed?: boolean;
-}) {
-  return (
-    <div className="stat">
-      <div className="label">{label}</div>
-      <div className={`value ${tone}`}>{signed ? formatSigned(value) : formatMoney(value)}</div>
-      {sub && <div className="sub">{sub}</div>}
+    <div style={{ marginBottom: "var(--s3)" }}>
+      <div className="seg">
+        {porClasse.map(({ classe, valor }) => (
+          <div
+            key={classe}
+            style={{
+              width: `${(valor / total) * 100}%`,
+              background: COR_CLASSE[classe] ?? "var(--gold)",
+            }}
+            title={`${ASSET_CLASS_LABEL[classe]}: ${formatMoney(valor)}`}
+          />
+        ))}
+      </div>
+      <div className="seg-legend">
+        {porClasse.map(({ classe, valor }) => (
+          <span key={classe}>
+            <i style={{ background: COR_CLASSE[classe] ?? "var(--gold)" }} />
+            {ASSET_CLASS_LABEL[classe]} {Math.round((valor / total) * 100)}%
+          </span>
+        ))}
+      </div>
     </div>
   );
 }
 
-function formatSigned(value: number): string {
-  return `${value > 0 ? "+" : ""}${formatMoney(value)}`;
+function Esqueleto() {
+  return (
+    <>
+      <div className="skel" style={{ height: 132, borderRadius: "var(--r-lg)" }} />
+      <div className="duo" style={{ gridTemplateColumns: "1fr 1fr" }}>
+        <div className="skel" style={{ height: 72 }} />
+        <div className="skel" style={{ height: 72 }} />
+      </div>
+      <div className="sec-title"><h2>Onde está</h2></div>
+      <div className="skel" style={{ height: 160, borderRadius: "var(--r)" }} />
+    </>
+  );
 }

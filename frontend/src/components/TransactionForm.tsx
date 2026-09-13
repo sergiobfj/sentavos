@@ -1,6 +1,10 @@
 import { useState } from "react";
 import Modal from "./Modal";
-import { useCreateTransaction, useUpdateTransaction } from "../lib/queries";
+import {
+  useCreateTransaction,
+  useDeleteTransaction,
+  useUpdateTransaction,
+} from "../lib/queries";
 import { usePeriod } from "../lib/period";
 import { ApiError } from "../lib/api";
 import { parseMoney, todayIso } from "../lib/format";
@@ -61,7 +65,19 @@ export default function TransactionForm({
       onClose={onClose}
       footer={
         <>
-          <button type="button" className="btn btn-ghost" onClick={onClose}>Cancelar</button>
+          {/* Editando, o "Cancelar" dá lugar ao "Excluir". Ele saiu da linha da
+              lista porque lá ficava a um toque do próprio lançamento — e no
+              celular, um botão de apagar encostado no alvo que se quer tocar é
+              um acidente esperando acontecer. Fechar, aqui, é tocar fora. */}
+          {isEdit ? (
+            <ExcluirTransacao
+              id={transaction!.id}
+              descricao={transaction!.description}
+              onDone={onClose}
+            />
+          ) : (
+            <button type="button" className="btn btn-ghost" onClick={onClose}>Cancelar</button>
+          )}
           <button type="submit" form="tx-form" className="btn btn-primary" disabled={pending || !form.description.trim()}>
             {pending ? "Salvando…" : "Salvar"}
           </button>
@@ -110,5 +126,29 @@ export default function TransactionForm({
         {err && <div className="error-box" style={{ padding: 0, textAlign: "left" }}>{err.message}</div>}
       </form>
     </Modal>
+  );
+}
+
+function ExcluirTransacao({
+  id,
+  descricao,
+  onDone,
+}: {
+  id: number;
+  descricao: string;
+  onDone: () => void;
+}) {
+  const del = useDeleteTransaction();
+  return (
+    <button
+      type="button"
+      className="btn btn-danger"
+      disabled={del.isPending}
+      onClick={() => {
+        if (confirm(`Excluir "${descricao}"?`)) del.mutate(id, { onSuccess: onDone });
+      }}
+    >
+      {del.isPending ? "Excluindo…" : "Excluir"}
+    </button>
   );
 }
