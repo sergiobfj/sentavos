@@ -1,0 +1,32 @@
+# Blueprint do Render. Ao criar o serviço a partir do repo, ele lê este arquivo e
+# já monta tudo — não precisa preencher formulário.
+#
+# O banco NÃO está aqui de propósito. O Postgres free do Render é apagado depois
+# de 30 dias, o que num app de finanças significa perder o histórico inteiro sem
+# aviso. O banco fica no Neon, que é free e não expira; a DATABASE_URL dele entra
+# como variável abaixo.
+
+services:
+  - type: web
+    name: sentavos-api
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    plan: free
+
+    # Rota aberta e barata, e isenta da cota de rate limit justamente pra o
+    # healthcheck não derrubar o serviço que veio checar.
+    healthCheckPath: /
+
+    envVars:
+      # sync: false = "pergunte no painel, não guarde no repositório". É o que
+      # impede segredo de virar commit. O Render pede cada uma na criação.
+      - key: DATABASE_URL
+        sync: false
+      - key: SENTAVOS_EMAIL
+        sync: false
+      - key: SENTAVOS_SENHA_HASH
+        sync: false
+      - key: SENTAVOS_JWT_SECRET
+        sync: false
+      - key: CORS_ORIGINS
+        sync: false

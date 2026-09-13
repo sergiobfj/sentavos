@@ -24,7 +24,7 @@ de saldo lançado à mão, mês a mês.
 
 ## Stack
 
-- **API** — FastAPI + SQLModel, Postgres
+- **API** — FastAPI + SQLModel, Postgres (Neon)
 - **Front** — Vite + React + TypeScript
 - **Auth** — própria: Argon2id pra senha, JWT assinado pela própria API
 
@@ -55,7 +55,13 @@ Testes: `uv run pytest`
 
 ## Deploy
 
-Duas peças: API + banco no **Railway**, front na **Vercel**.
+Três peças, todas no plano gratuito: banco no **Neon**, API no **Render**, front
+na **Vercel**.
+
+> **Por que o banco não fica no Render.** O Postgres free dele é apagado depois de
+> 30 dias. Num app de finanças isso é perder o histórico inteiro sem aviso. O Neon
+> é free e não expira — ele suspende o compute quando fica ocioso, mas acorda em
+> milissegundos e de forma transparente.
 
 ### 1. Gere as credenciais
 
@@ -63,38 +69,56 @@ Duas peças: API + banco no **Railway**, front na **Vercel**.
 uv run python -m app.criar_senha
 ```
 
-Guarde a saída — são três variáveis do passo seguinte. A senha em si não fica
-salva em lugar nenhum; se esquecer, rode de novo e troque as variáveis.
+Guarde a saída: são três das variáveis do passo 3. A senha em si não fica salva
+em lugar nenhum; se esquecer, rode de novo e troque as variáveis.
 
-### 2. Railway
+### 2. Banco no Neon
 
-New Project → Deploy from GitHub → este repo. O `Dockerfile` e o `railway.json`
-são detectados sozinhos.
+**neon.tech** → crie um projeto → copie a **connection string** (a "pooled", que
+tem `-pooler` no host). É a sua `DATABASE_URL`.
 
-Depois, **New → Database → Add PostgreSQL** no mesmo projeto.
+Ela já vem com `?sslmode=require`. Mantenha.
 
-Variáveis do serviço da API:
+### 3. API no Render
+
+**render.com** → **New** → **Blueprint** → aponte pro repo. Ele lê o
+`render.yaml` e monta o serviço sozinho; só vai pedir as cinco variáveis:
 
 | Variável | Valor |
 | --- | --- |
-| `DATABASE_URL` | `${{Postgres.DATABASE_URL}}` — referência, não copie a string |
+| `DATABASE_URL` | a connection string do Neon |
 | `SENTAVOS_EMAIL` | seu e-mail |
-| `SENTAVOS_SENHA_HASH` | o hash gerado no passo 1 |
-| `SENTAVOS_JWT_SECRET` | o segredo gerado no passo 1 |
-| `CORS_ORIGINS` | o domínio da Vercel (passo 4) |
+| `SENTAVOS_SENHA_HASH` | o hash do passo 1 (começa com `$argon2id$`) |
+| `SENTAVOS_JWT_SECRET` | o segredo do passo 1 |
+| `CORS_ORIGINS` | `http://localhost:5173` por enquanto — trocado no passo 5 |
 
-`PORT` o Railway injeta sozinho — não defina na mão.
+`PORT` o Render injeta sozinho — não defina na mão.
 
-Settings → Networking → **Generate Domain**. Abra a URL: tem que responder
-`{"message":"API do Sentavos no ar"}`.
+O primeiro build demora alguns minutos (é Docker). Quando terminar, abra a URL
+`https://sentavos-api.onrender.com`. Tem que responder:
 
-As tabelas são criadas no primeiro boot, pelo `create_all`.
+```json
+{"message":"API do Sentavos no ar"}
+```
 
-### 3. Vercel
+As tabelas são criadas nesse primeiro boot, pelo `create_all`.
+
+Teste o login antes de seguir:
+
+```bash
+curl -X POST https://SEU-APP.onrender.com/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"email":"seu@email.com","senha":"sua-senha"}'
+```
+
+Tem que voltar um `access_token`. Se voltar **401**, o hash foi colado cortado
+(ele tem `$` no meio). Se voltar **500**, falta alguma das três variáveis.
+
+### 4. Front na Vercel
 
 - **Root Directory**: `frontend`
 - Build e rewrite de SPA vêm do `frontend/vercel.json` — não precisa configurar.
-- Variável: `VITE_API_URL` = o domínio do Railway, **sem barra no final**.
+- Variável: `VITE_API_URL` = a URL do Render, **sem barra no final**.
 
 > **Ela é lida na hora de compilar, não em runtime.** Definir depois do build não
 > resolve: tem que redeployar. Se faltar, o app mostra uma tela dizendo isso em
@@ -105,13 +129,13 @@ O `vercel.json` reescreve toda rota pro `index.html`. Sem isso, abrir
 porque não existe arquivo com esse nome no `dist/`. O bug **não reproduz local**:
 o `vite preview` já faz esse fallback sozinho.
 
-### 4. Volte no Railway
+### 5. Volte no Render
 
-Preencha `CORS_ORIGINS` com o domínio que a Vercel gerou. É o passo que se
-esquece: sem ele o navegador bloqueia toda chamada e o app parece quebrado sem
-nenhum erro no log da API.
+Troque `CORS_ORIGINS` pelo domínio que a Vercel gerou. É o passo que se esquece:
+sem ele o navegador bloqueia toda chamada e o app parece quebrado sem nenhum erro
+no log da API.
 
-### 5. No celular
+### 6. No celular
 
 Abra no Chrome/Safari e use "Adicionar à tela inicial". Abre em tela cheia, com
 ícone próprio, sem barra do navegador.
@@ -120,6 +144,21 @@ Abra no Chrome/Safari e use "Adicionar à tela inicial". Abre em tela cheia, com
 
 O banco nasce vazio e **lançamento exige categoria**. Antes de tudo, vá em
 Configurações e cadastre suas categorias.
+
+### O cold start do Render free
+
+O serviço hiberna após ~15 minutos parado, e a primeira chamada depois disso
+demora **~50 segundos** enquanto o container sobe. Na prática: você abre o app,
+digita a senha, e ela parece travada por um tempo desconfortável.
+
+Não é bug e não tem conserto no plano gratuito. As saídas, quando incomodar:
+
+- **Render Starter (US$ 7/mês)** — acaba com a hibernação.
+- **Um pinger externo** (UptimeRobot e afins) batendo no `/` a cada 10 minutos
+  mantém acordado. Funciona, mas consome as 750 horas/mês do free tier — que dão
+  exatamente um serviço rodando 24/7, sem folga pra um segundo.
+
+O banco no Neon não tem esse problema: ele acorda sozinho em milissegundos.
 
 ## Segurança
 
@@ -139,7 +178,7 @@ O app é de uma conta só. Mostrar pra alguém não dá acesso a nada.
 
 ### Se um aparelho sumir
 
-Defina `SENTAVOS_TOKEN_EPOCH` no Railway com o timestamp atual:
+Defina `SENTAVOS_TOKEN_EPOCH` no Render com o timestamp atual:
 
 ```bash
 python -c "import time; print(int(time.time()))"
@@ -152,7 +191,7 @@ seria estado pra manter, sincronizar e perder num redeploy.
 ### Onde o token fica no navegador
 
 `localStorage`, e não cookie `httpOnly`. O motivo é prático: front na Vercel e
-API no Railway são domínios diferentes, cookie entre domínios exige
+API no Render são domínios diferentes, cookie entre domínios exige
 `SameSite=None`, e o Safari do iPhone bloqueia isso com força — quebraria
 exatamente o caso de uso que motivou tudo, que é abrir no celular.
 
@@ -163,7 +202,7 @@ em lugar nenhum.
 ### Se algo quebrar depois do deploy, olhe a CSP primeiro
 
 - **App abre mas não fala com a API** → `connect-src` no `frontend/vercel.json`.
-  Libera `*.up.railway.app`; com **domínio próprio**, adicione-o ali.
+  Libera `*.onrender.com`; com **domínio próprio**, adicione-o ali.
 - **App abre sem estilo** → `style-src 'self'`, que barra `<style>` injetado em
   runtime. O build atual não tem nenhum e o React aplica `style={{}}` via CSSOM,
   que a CSP não governa — mas se entrar uma biblioteca que injeta CSS, o remédio

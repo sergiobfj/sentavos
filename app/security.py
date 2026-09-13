@@ -109,7 +109,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
     """Limita requisições por IP, com cota separada pra falha de credencial.
 
     O estado é em memória, o que é honesto pro tamanho do problema: uma única
-    instância no Railway. Se um dia rodar replicado, cada réplica passa a ter a
+    instância. Se um dia rodar replicado, cada réplica passa a ter a
     sua própria contagem e o teto real vira N vezes maior — aí é hora de trocar
     por Redis. Guardar em memória não é descuido, é a escolha certa pra uma
     instância só, e este comentário é o aviso de quando ela deixa de valer.
@@ -117,8 +117,8 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
 
     def __init__(self, app, isento: set[str] | None = None):
         super().__init__(app)
-        # O healthcheck do Railway bate de minuto em minuto e não pode gastar
-        # cota: se gastasse, ele mesmo derrubaria o serviço que veio checar.
+        # O healthcheck do host bate de minuto em minuto e não pode gastar cota:
+        # se gastasse, ele mesmo derrubaria o serviço que veio checar.
         self.isento = isento or {"/"}
         self._ultima_limpeza = time.monotonic()
 
