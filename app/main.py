@@ -8,6 +8,7 @@ from sqlmodel import Session, and_, func, or_, select
 
 from app.auth import require_user
 from app.database import create_db_and_tables, get_session
+from app.security import RateLimitMiddleware, SecurityHeadersMiddleware
 from app.models import (
     Asset,
     AssetClass,
@@ -43,21 +44,53 @@ async def lifespan(app: FastAPI):
     yield
 
 
-app = FastAPI(lifespan=lifespan)
+# /docs e /openapi.json ficam desligados por padrão. Eles não expõem dado, mas
+# entregam o mapa completo da API — toda rota, todo campo, todo formato — pra
+# quem só tem a URL. Num app pessoal isso é só ajuda pra quem está sondando.
+# Pra abrir num apuro: DOCS_ABERTOS=1 no host, e desligue depois.
+DOCS_ABERTOS = os.getenv("DOCS_ABERTOS", "").lower() in {"1", "true", "yes"}
 
-# Origens liberadas pro front. Em produção, sobrescreva via CORS_ORIGINS no .env.
-cors_origins = os.getenv(
-    "CORS_ORIGINS",
-    "http://localhost:5173,http://localhost:3000,http://127.0.0.1:5173,http://127.0.0.1:3000",
-).split(",")
+app = FastAPI(
+    lifespan=lifespan,
+    docs_url="/docs" if DOCS_ABERTOS else None,
+    redoc_url="/redoc" if DOCS_ABERTOS else None,
+    openapi_url="/openapi.json" if DOCS_ABERTOS else None,
+)
+
+# Ordem importa: o Starlette executa os middlewares na ordem inversa do
+# add_middleware. Registrando rate limit por último, ele roda primeiro — e é o
+# que se quer, porque quem estourou a cota deve ser recusado antes de gastar
+# qualquer trabalho do servidor.
+app.add_middleware(SecurityHeadersMiddleware)
+
+# Origens liberadas pro front. Em produção, defina CORS_ORIGINS com o domínio da
+# Vercel. O strip() não é firula: "a, b" com espaço depois da vírgula viraria a
+# origem " b", que nunca casa com nada, e o navegador bloquearia tudo sem dizer
+# por quê. É o tipo de erro que custa uma tarde.
+cors_origins = [
+    origem.strip()
+    for origem in os.getenv(
+        "CORS_ORIGINS",
+        "http://localhost:5173,http://localhost:3000,http://127.0.0.1:5173,http://127.0.0.1:3000",
+    ).split(",")
+    if origem.strip()
+]
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=cors_origins,
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    # O front manda o token no cabeçalho Authorization, não em cookie. Sem
+    # cookie, allow_credentials não serve pra nada aqui — e ligado ele afrouxa
+    # o que o navegador permite a outra origem fazer. Fica desligado.
+    allow_credentials=False,
+    # Lista fechada em vez de "*": o que não está aqui é verbo que a API não
+    # usa, e anunciar que aceita não ajuda ninguém além de quem sonda.
+    allow_methods=["GET", "POST", "PATCH", "PUT", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type"],
+    max_age=600,
 )
+
+app.add_middleware(RateLimitMiddleware)
 
 
 # Toda rota de dados vive neste router, que exige token. Colar o Depends em cada

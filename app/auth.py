@@ -51,6 +51,20 @@ def _jwks_url() -> str | None:
     return f"{base}/auth/v1/.well-known/jwks.json" if base else None
 
 
+def _emissor_esperado() -> str | None:
+    """Quem tem direito de emitir token pra esta API.
+
+    Sem esta checagem, a única coisa separando um estranho das suas finanças
+    seria o `sub` — e `sub` é um UUID que aparece em qualquer lugar onde o
+    usuário se autentique. Com ela, o token precisa vir do *seu* projeto.
+
+    Só é exigido quando SUPABASE_URL está definida, que é o caso em produção;
+    o caminho legado HS256, sem essa variável, segue como estava.
+    """
+    base = (os.getenv("SUPABASE_URL") or "").rstrip("/")
+    return f"{base}/auth/v1" if base else None
+
+
 def require_user(
     credentials: HTTPAuthorizationCredentials | None = Depends(bearer),
 ) -> str:
@@ -111,6 +125,8 @@ def require_user(
                 detail="Não consegui verificar a sessão agora. Tente em instantes.",
             )
 
+    emissor = _emissor_esperado()
+
     try:
         payload = jwt.decode(
             token,
@@ -118,7 +134,11 @@ def require_user(
             algorithms=[alg],
             # O Supabase emite aud="authenticated" pra usuário logado.
             audience="authenticated",
+            # Quando há emissor esperado, o PyJWT exige que o iss bata. Isso
+            # recusa token válido de outro projeto Supabase antes de olhar o sub.
+            **({"issuer": emissor} if emissor else {}),
             leeway=FOLGA_DE_RELOGIO_SEGUNDOS,
+            options={"require": ["exp", "sub"] + (["iss"] if emissor else [])},
         )
     except jwt.PyJWTError as e:
         # Assinatura errada, expirado e malformado caem todos aqui: pro cliente

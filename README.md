@@ -100,6 +100,72 @@ O banco nasce vazio e **lançamento exige categoria**. Antes de tudo, vá em
 Configurações e cadastre suas categorias — senão a aba de Orçamento fica sem
 nenhuma linha pra preencher.
 
+## Segurança
+
+O app é de **uma conta só**. Mostrar pra alguém não dá acesso a nada: mesmo que a
+pessoa crie conta no projeto Supabase e faça login, a API compara o `sub` do
+token com `SENTAVOS_ALLOWED_USER_ID` e responde 403.
+
+O que protege, em camadas:
+
+| Camada | O quê |
+| --- | --- |
+| **Token** | JWT do Supabase, assinatura verificada (ES256 via JWKS, ou HS256 legado). Lista fechada de algoritmos — `alg: none` não passa. |
+| **Emissor** | O `iss` tem que ser o *seu* projeto. Token válido de outro projeto Supabase não serve. |
+| **Dono** | O `sub` tem que bater com `SENTAVOS_ALLOWED_USER_ID`. Sem essa variável a API recusa tudo (falha fechada). |
+| **Rotas** | Todas sob `APIRouter(dependencies=[Depends(require_user)])` — rota nova nasce protegida. |
+| **Cota** | Por IP: 240 req/min no geral e **10 respostas 401/403 a cada 5 min**, que é o que inviabiliza tentar token até acertar. |
+| **Corpo** | Requisição acima de 256 KB é recusada com 413 antes de virar JSON. |
+| **Docs** | `/docs` e `/openapi.json` desligados em produção. |
+| **Cabeçalhos** | `nosniff`, `X-Frame-Options`, CSP e `Cache-Control: no-store` na API; CSP + HSTS + `Permissions-Policy` no front. |
+
+### O passo que não é código: `sql/001_fechar_acesso_direto.sql`
+
+**Rode este arquivo no SQL Editor do Supabase antes de considerar o app seguro.**
+
+O Supabase publica o schema `public` como API REST automática. As tabelas aqui
+foram criadas pelo `create_all`, não pelo painel — então nasceram **sem RLS**, e
+o GRANT padrão do Supabase dá acesso ao papel `anon`. Como a anon key está no
+bundle do front (é pública por design), isso significa que
+
+```
+curl 'https://<projeto>.supabase.co/rest/v1/transactions?select=*' -H "apikey: <anon key>"
+```
+
+devolveria seus lançamentos **sem passar pela API**, contornando token, `iss` e
+allowlist de uma vez. O SQL liga RLS sem nenhuma policy ("ninguém pode nada") e
+revoga os GRANTs, inclusive os padrão — pra a próxima tabela que o `create_all`
+criar não nascer exposta de novo. A API não é afetada: ela conecta como dono da
+tabela, e dono não é submetido a RLS.
+
+Confira rodando aquele `curl` antes e depois: tem que sair de "devolve dado" pra
+"permission denied".
+
+### No painel do Supabase
+
+- **Authentication > Providers > Email**: desligue **"Enable signup"**. Sua conta
+  já existe; deixar aberto só permite que estranhos criem conta no seu projeto
+  (não acessam nada, mas enchem sua base e consomem cota de e-mail).
+- **Authentication > Rate limits**: o Supabase tem os limites dele pra tentativa
+  de login. Os limites da nossa API valem pras rotas de dados; o login em si
+  acontece no Supabase, então esse ajuste é lá.
+- **Authentication > Policies**: ative **leaked password protection** se estiver
+  disponível no seu plano.
+
+### Se algo quebrar depois do deploy, olhe a CSP primeiro
+
+A CSP do `frontend/vercel.json` é apertada. Dois sintomas e a correção:
+
+- **App abre mas não fala com a API** → `connect-src`. Ele libera
+  `*.supabase.co` e `*.up.railway.app`. Se você puser **domínio próprio** na
+  API, adicione-o ali.
+- **App abre sem estilo** → `style-src 'self'`, que barra `<style>` injetado em
+  runtime. O build atual não tem nenhum (conferido) e o React aplica
+  `style={{}}` via CSSOM, que a CSP não governa — mas se um dia entrar uma
+  biblioteca que injeta CSS, o remédio é `style-src 'self' 'unsafe-inline'`.
+
+O console do navegador nomeia exatamente a diretiva que bloqueou.
+
 ## Ainda não tem
 
 - **Migrações.** O `create_all` no startup cria tabela que falta, mas nunca altera

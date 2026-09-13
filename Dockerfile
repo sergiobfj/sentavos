@@ -28,6 +28,13 @@ COPY app ./app
 
 ENV PATH="/srv/.venv/bin:$PATH"
 
+# Roda como usuário comum. Se algum dia uma falha der execução de código dentro
+# do container, root faz muito mais estrago do que um usuário que nem consegue
+# escrever no próprio código da aplicação — que é por isso que o chown deixa os
+# arquivos com o dono anterior e só a pasta de trabalho acessível pra leitura.
+RUN useradd --create-home --uid 10001 sentavos && chown -R root:root /srv
+USER sentavos
+
 # Forma shell (sem colchetes) porque o $PORT precisa ser expandido pelo shell: o
 # Railway sorteia a porta a cada deploy e injeta na variável. Em colchetes, o
 # uvicorn receberia a string "$PORT" crua e não subiria.

@@ -28,6 +28,12 @@ ROTAS = [
 def configured_fixture(monkeypatch):
     monkeypatch.setenv("SUPABASE_JWT_SECRET", SECRET)
     monkeypatch.setenv("SENTAVOS_ALLOWED_USER_ID", USER_ID)
+    # Este arquivo cobre o caminho legado HS256, que é o de um projeto *sem*
+    # SUPABASE_URL. Sem apagar a variável, o load_dotenv() do database.py deixa
+    # aqui o valor do .env real da máquina — e o teste passaria ou falharia
+    # conforme o que estivesse no arquivo de quem rodou, o que é pior que
+    # falhar sempre. Foi isso que quebrou quando a checagem de iss entrou.
+    monkeypatch.delenv("SUPABASE_URL", raising=False)
 
 
 def token(sub=USER_ID, secret=SECRET, expira_em_minutos=10, aud="authenticated"):

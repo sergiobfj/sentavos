@@ -7,6 +7,21 @@ from sqlmodel.pool import StaticPool
 from app.auth import require_user
 from app.database import get_session
 from app.main import app
+from app.security import zerar_limites
+
+
+@pytest.fixture(autouse=True)
+def limites_zerados():
+    """O rate limit conta por IP, e no TestClient todo teste vem do mesmo IP.
+
+    Sem zerar, a suíte de auth — que provoca 401 de propósito — gastaria a cota
+    de falhas e os testes seguintes receberiam 429 no lugar do status que estão
+    verificando. Autouse porque a alternativa (lembrar de pedir a fixture) falha
+    exatamente no teste novo que alguém escrever daqui a seis meses.
+    """
+    zerar_limites()
+    yield
+    zerar_limites()
 
 @pytest.fixture(name="session")
 def session_fixture():

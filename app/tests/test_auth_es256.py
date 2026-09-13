@@ -49,9 +49,20 @@ def es256_fixture(monkeypatch):
     auth._cliente_jwks.cache_clear()
 
 
-def token_es256(privada, sub=USER_ID, minutos=10, aud="authenticated", iat_offset=0):
+# O mesmo projeto que a fixture configura em SUPABASE_URL. O token do Supabase
+# real carrega iss, então o forjado aqui também precisa — senão o teste voltaria
+# a provar a cadeia contra um token que a produção nunca emite, que é exatamente
+# o erro que criou este arquivo.
+EMISSOR = "https://projeto-de-teste.supabase.co/auth/v1"
+
+
+def token_es256(
+    privada, sub=USER_ID, minutos=10, aud="authenticated", iat_offset=0, iss=EMISSOR
+):
     agora = dt.datetime.now(dt.timezone.utc)
     corpo = {"sub": sub, "aud": aud, "exp": agora + dt.timedelta(minutes=minutos)}
+    if iss is not None:
+        corpo["iss"] = iss
     if iat_offset:
         corpo["iat"] = agora + dt.timedelta(seconds=iat_offset)
     return jwt.encode(corpo, privada, algorithm="ES256", headers={"kid": KID})
@@ -215,3 +226,28 @@ def test_jwks_fora_do_ar_da_503_e_nao_200(anon_client, monkeypatch):
     auth._cliente_jwks.cache_clear()
 
     assert r.status_code == 503
+
+
+def test_token_de_outro_projeto_supabase_da_401(anon_client, es256):
+    """Assinatura boa, sub certo, projeto errado.
+
+    Cenário real: o Sentavos é mostrado pra alguém que tem um projeto Supabase
+    dele. Se a API só olhasse assinatura e sub, bastaria o outro projeto emitir
+    um token com este sub pra entrar. O iss é o que amarra o token ao *seu*
+    projeto.
+    """
+    intruso = token_es256(es256, iss="https://outro-projeto.supabase.co/auth/v1")
+
+    r = anon_client.get("/transactions", headers={"Authorization": f"Bearer {intruso}"})
+
+    assert r.status_code == 401
+
+
+def test_token_sem_iss_da_401(anon_client, es256):
+    """Omitir o campo não pode ser um jeito de pular a checagem dele."""
+    r = anon_client.get(
+        "/transactions",
+        headers={"Authorization": f"Bearer {token_es256(es256, iss=None)}"},
+    )
+
+    assert r.status_code == 401
