@@ -1,354 +1,664 @@
-:root {
-  /* Marca Sentavos — dourado sobre grafite */
-  --bg: #0f0d08;
-  --bg-glow: #1b160b;
-  --surface: #1a160e;
-  --surface-2: #211c12;
-  --surface-3: #2a2417;
-  --border: #322c1d;
-  --border-soft: #26210f;
+/* ===========================================================================
+   Sentavos — sistema de design
+   ===========================================================================
 
-  --text: #f1ecdf;
-  --text-dim: #a99b7e;
-  --text-faint: #756a54;
+   Escrito mobile-first: o que está fora de @media é o celular, e o desktop
+   entra como exceção lá embaixo. Não é preferência de estilo — é que o app é
+   usado no telefone, e CSS escrito "desktop primeiro" acaba virando uma pilha
+   de override que desfaz decisões em vez de tomá-las.
+
+   Três regras que guiam o resto:
+
+   1. O polegar manda. Navegação e ações primárias ficam nos 40% de baixo da
+      tela. Nada essencial no topo, que é onde a mão não alcança.
+   2. Um número herói por tela. Quatro números do mesmo tamanho não respondem
+      "como estou" — obrigam a ler os quatro e fazer a conta na cabeça.
+   3. Alvo de toque nunca abaixo de 44px. Vale pra botão, linha de lista e
+      aba; abaixo disso erra-se o toque e o app parece quebrado.
+   =========================================================================== */
+
+:root {
+  /* ---------- Marca: grafite e dourado ---------- */
+  --bg: #0d0b07;
+  --surface: #17140d;
+  --surface-2: #1f1b12;
+  --surface-3: #282216;
+  --border: #2c2619;
+  --border-soft: #211c12;
+
+  --text: #f4efe3;
+  --text-dim: #a89a7d;
+  --text-faint: #6f6553;
 
   --gold: #f5b301;
   --gold-hi: #ffd34e;
   --gold-deep: #b67e00;
+  --gold-ghost: rgba(245, 179, 1, 0.12);
 
-  --expense: #ef5350;
-  --income: #35b36b;
-  --investment: #6b8afd;
+  /* Verde/vermelho de entrada e saída. Mais claros que o vermelho padrão de
+     erro: sobre fundo escuro, um vermelho saturado vibra e cansa a vista num
+     app que se abre todo dia. */
+  --pos: #3ecf8e;
+  --neg: #ff6b6b;
+  --inv: #7c9bff;
 
-  --radius: 14px;
-  --radius-sm: 10px;
-  --shadow: 0 20px 50px -30px rgba(0, 0, 0, 0.9);
-  --sans: "Segoe UI Variable Text", "Segoe UI", system-ui, -apple-system, Roboto, Arial, sans-serif;
+  /* Compatibilidade com as telas ainda não migradas. */
+  --income: var(--pos);
+  --expense: var(--neg);
+  --investment: var(--inv);
+  --bg-glow: #1b160b;
+
+  /* ---------- Escala de espaço: múltiplos de 4 ----------
+     Ter uma escala em vez de números soltos é o que faz telas diferentes
+     parecerem o mesmo app. */
+  --s1: 4px;  --s2: 8px;   --s3: 12px; --s4: 16px;
+  --s5: 20px; --s6: 24px;  --s7: 32px; --s8: 40px;
+
+  --r-sm: 12px;
+  --r: 16px;
+  --r-lg: 22px;
+  --r-pill: 999px;
+
+  --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.35);
+  --shadow-2: 0 10px 28px -14px rgba(0, 0, 0, 0.85);
+  --shadow-fab: 0 12px 28px -10px rgba(245, 179, 1, 0.5);
+
+  --sans: "Segoe UI Variable Text", "Segoe UI", system-ui, -apple-system, Roboto,
+    "Helvetica Neue", Arial, sans-serif;
+
+  /* Altura real da pílula flutuante (52 de alvo + 8 de respiro em cima e
+     embaixo). Serve pra reservar espaço no fim do conteúdo: sem isso o último
+     lançamento da lista fica escondido atrás da barra e parece que sumiu. */
+  --tab-h: 68px;
 }
 
 * { box-sizing: border-box; }
-
 html, body, #root { height: 100%; }
 
 body {
   margin: 0;
   font-family: var(--sans);
   color: var(--text);
-  background:
-    radial-gradient(900px 500px at 100% -8%, rgba(245, 179, 1, 0.08), transparent 60%),
-    var(--bg);
+  background: var(--bg);
   -webkit-font-smoothing: antialiased;
-  line-height: 1.5;
+  line-height: 1.45;
+  /* Trava o "puxar pra atualizar" e o balanço elástico: num app instalado na
+     tela inicial, eles denunciam que aquilo é um site. */
+  overscroll-behavior-y: none;
 }
 
 a { color: inherit; text-decoration: none; }
-button { font-family: inherit; }
-h1, h2, h3 { margin: 0; letter-spacing: -0.02em; }
+button { font-family: inherit; color: inherit; }
+h1, h2, h3 { margin: 0; letter-spacing: -0.02em; line-height: 1.2; }
+::selection { background: var(--gold); color: #17140d; }
 
-::selection { background: var(--gold); color: #1a160e; }
+/* Número de dinheiro sempre com dígito de largura fixa: sem isso a coluna de
+   valores "dança" a cada centavo que muda. */
+.tnum { font-variant-numeric: tabular-nums; font-feature-settings: "tnum"; }
 
-/* ---------- App shell ---------- */
+/* ---------------------------------------------------------------- Shell --- */
+
 .app {
-  display: grid;
-  grid-template-columns: 244px 1fr;
-  min-height: 100vh;
-}
-
-.sidebar {
-  border-right: 1px solid var(--border-soft);
-  padding: 26px 18px;
+  min-height: 100%;
   display: flex;
   flex-direction: column;
-  gap: 28px;
+}
+
+.main {
+  flex: 1;
+  padding: var(--s4) var(--s4)
+    calc(var(--tab-h) + var(--s8) + env(safe-area-inset-bottom));
+  padding-left: calc(var(--s4) + env(safe-area-inset-left));
+  padding-right: calc(var(--s4) + env(safe-area-inset-right));
+  max-width: 640px;
+  width: 100%;
+  margin: 0 auto;
+}
+
+/* ---------- Barra superior ----------
+   Carrega só o que muda de contexto (o mês) e o que é raro (configurações).
+   Nenhuma ação frequente mora aqui: é a parte da tela que a mão não alcança. */
+.appbar {
   position: sticky;
   top: 0;
-  height: 100vh;
-  background: linear-gradient(180deg, var(--bg-glow), transparent 40%);
-}
-.brand { display: flex; align-items: center; gap: 12px; padding: 0 8px; }
-.brand img { width: 34px; height: auto; }
-.brand .name { font-size: 22px; font-weight: 800; letter-spacing: -0.03em; }
-.brand .name b { color: var(--gold); }
-
-.nav { display: flex; flex-direction: column; gap: 4px; }
-.nav a {
-  display: flex; align-items: center; gap: 12px;
-  padding: 11px 14px; border-radius: var(--radius-sm);
-  color: var(--text-dim); font-weight: 600; font-size: 14.5px;
-  transition: background 0.15s, color 0.15s;
-}
-.nav a:hover { background: var(--surface); color: var(--text); }
-.nav a.active { background: var(--surface-2); color: var(--text); }
-.nav a.active .ico { color: var(--gold); }
-.nav .ico { width: 18px; height: 18px; flex: none; color: var(--text-faint); }
-.nav a.active .ico, .nav a:hover .ico { color: var(--gold); }
-
-.sidebar .foot {
-  margin-top: auto; padding: 0 8px; font-size: 12px; color: var(--text-faint);
-  display: flex; flex-direction: column; gap: 6px; align-items: flex-start;
-}
-/* O e-mail não pode empurrar a largura da barra lateral. */
-.sidebar .foot .who {
-  max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-}
-
-.main { padding: 34px clamp(20px, 4vw, 46px) 80px; max-width: 1200px; }
-
-/* ---------- Page header ---------- */
-.page-head {
-  display: flex; align-items: flex-end; justify-content: space-between;
-  gap: 20px; margin-bottom: 28px; flex-wrap: wrap;
-}
-.page-head .eyebrow {
-  font-size: 12px; letter-spacing: 0.2em; text-transform: uppercase;
-  color: var(--gold-deep); font-weight: 700; margin-bottom: 6px;
-}
-.page-head h1 { font-size: clamp(24px, 3.4vw, 34px); font-weight: 800; }
-.page-head p { margin: 6px 0 0; color: var(--text-dim); font-size: 14.5px; }
-
-/* ---------- Buttons ---------- */
-.btn {
-  display: inline-flex; align-items: center; gap: 8px;
-  padding: 10px 16px; border-radius: var(--radius-sm);
-  border: 1px solid var(--border); background: var(--surface-2); color: var(--text);
-  font-weight: 650; font-size: 14px; cursor: pointer;
-  transition: background 0.15s, border-color 0.15s, transform 0.05s;
-}
-.btn:hover { background: var(--surface-3); border-color: #3d3524; }
-.btn:active { transform: translateY(1px); }
-.btn-primary {
-  background: linear-gradient(180deg, var(--gold-hi), var(--gold));
-  color: #241a02; border-color: transparent; font-weight: 750;
-}
-.btn-primary:hover { background: linear-gradient(180deg, #ffdd73, var(--gold-hi)); }
-.btn-ghost { background: transparent; border-color: transparent; color: var(--text-dim); padding: 8px 10px; }
-.btn-ghost:hover { background: var(--surface-2); color: var(--text); }
-.btn-danger { color: var(--expense); }
-.btn-danger:hover { background: rgba(239, 83, 80, 0.12); border-color: rgba(239, 83, 80, 0.4); }
-.btn-sm { padding: 6px 10px; font-size: 13px; }
-.btn:disabled { opacity: 0.5; cursor: not-allowed; }
-
-/* ---------- Cards / stats ---------- */
-.stat-grid {
-  display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
-  gap: 16px; margin-bottom: 28px;
-}
-.stat {
-  background: var(--surface); border: 1px solid var(--border-soft);
-  border-radius: var(--radius); padding: 20px 22px; box-shadow: var(--shadow);
-}
-.stat .label { font-size: 12.5px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.08em; font-weight: 650; }
-.stat .value { font-size: 27px; font-weight: 800; margin-top: 10px; font-variant-numeric: tabular-nums; }
-.stat .value.pos { color: var(--income); }
-.stat .value.neg { color: var(--expense); }
-.stat .value.gold { color: var(--gold); }
-.stat .sub { font-size: 12.5px; color: var(--text-faint); margin-top: 6px; }
-
-.panel {
-  background: var(--surface); border: 1px solid var(--border-soft);
-  border-radius: var(--radius); box-shadow: var(--shadow); overflow: hidden;
-}
-.panel .panel-head { padding: 18px 22px; border-bottom: 1px solid var(--border-soft); display: flex; justify-content: space-between; align-items: center; }
-.panel .panel-head h2 { font-size: 16px; font-weight: 700; }
-.panel .panel-body { padding: 8px 0; }
-
-.two-col { display: grid; grid-template-columns: 1.6fr 1fr; gap: 16px; align-items: start; }
-@media (max-width: 900px) { .two-col { grid-template-columns: 1fr; } }
-
-/* ---------- Table ---------- */
-.table-wrap { overflow-x: auto; }
-table { width: 100%; border-collapse: collapse; font-size: 14px; }
-thead th {
-  text-align: left; padding: 12px 22px; color: var(--text-faint);
-  font-size: 11.5px; text-transform: uppercase; letter-spacing: 0.08em; font-weight: 700;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  gap: var(--s3);
+  padding: calc(var(--s3) + env(safe-area-inset-top)) var(--s4) var(--s3);
+  background: color-mix(in srgb, var(--bg) 88%, transparent);
+  backdrop-filter: blur(12px);
   border-bottom: 1px solid var(--border-soft);
 }
-tbody td { padding: 13px 22px; border-bottom: 1px solid var(--border-soft); vertical-align: middle; }
-tbody tr:last-child td { border-bottom: none; }
-tbody tr { transition: background 0.12s; }
-tbody tr:hover { background: var(--surface-2); }
-td.num { text-align: right; font-variant-numeric: tabular-nums; }
-.row-actions { display: flex; gap: 4px; justify-content: flex-end; opacity: 0; transition: opacity 0.12s; }
-tbody tr:hover .row-actions { opacity: 1; }
 
-/* ---------- Chips / badges ---------- */
-.chip {
-  display: inline-flex; align-items: center; gap: 7px;
-  padding: 4px 10px; border-radius: 999px; font-size: 12.5px; font-weight: 650;
+.appbar .brand-mark { width: 26px; height: 26px; flex: none; }
+
+/* O seletor de mês é o próprio título: tocar nele abre a escolha. Poupa uma
+   linha de tela e deixa óbvio que o mês é navegável. */
+.month-btn {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  background: none;
+  border: 0;
+  padding: var(--s2) var(--s2) var(--s2) 0;
+  font-size: 17px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  cursor: pointer;
+  text-align: left;
+}
+.month-btn .chev { color: var(--gold); font-size: 12px; transition: transform 0.2s; }
+.month-btn[aria-expanded="true"] .chev { transform: rotate(180deg); }
+.month-btn .hoje {
+  font-size: 11px; font-weight: 700; color: var(--gold);
+  background: var(--gold-ghost); border-radius: var(--r-pill);
+  padding: 2px var(--s2); letter-spacing: 0.02em;
+}
+
+.icon-btn {
+  width: 44px; height: 44px; flex: none;
+  display: grid; place-items: center;
+  border-radius: var(--r-pill);
+  background: none; border: 0; cursor: pointer;
+  color: var(--text-dim);
+}
+.icon-btn:active { background: var(--surface-2); }
+.icon-btn svg { width: 21px; height: 21px; }
+
+/* ---------- Escolha de mês ---------- */
+.month-sheet {
+  position: fixed; inset: 0; z-index: 60;
+  display: flex; flex-direction: column; justify-content: flex-end;
+  background: rgba(0, 0, 0, 0.6);
+  animation: fade 0.15s ease;
+}
+.month-sheet .card {
+  background: var(--surface);
+  border-top-left-radius: var(--r-lg);
+  border-top-right-radius: var(--r-lg);
+  padding: var(--s5) var(--s4) calc(var(--s5) + env(safe-area-inset-bottom));
+  animation: rise 0.22s cubic-bezier(0.2, 0.9, 0.3, 1);
+}
+.month-sheet .ano {
+  display: flex; align-items: center; justify-content: space-between;
+  margin-bottom: var(--s4);
+}
+.month-sheet .ano b { font-size: 17px; }
+.month-sheet .meses {
+  display: grid; grid-template-columns: repeat(3, 1fr); gap: var(--s2);
+}
+.month-sheet .meses button {
+  padding: var(--s3) 0; border-radius: var(--r-sm);
+  background: var(--surface-2); border: 1px solid transparent;
+  font-size: 14px; font-weight: 600; cursor: pointer; text-transform: capitalize;
+}
+.month-sheet .meses button.on {
+  background: var(--gold-ghost); border-color: var(--gold); color: var(--gold-hi);
+}
+
+@keyframes fade { from { opacity: 0; } }
+@keyframes rise { from { transform: translateY(18px); } }
+
+/* ---------- Barra de abas ----------
+   Flutuante, em pílula, descolada das bordas. Não é só estética: solta da
+   borda ela escapa da faixa onde o gesto de "voltar" do sistema mora, e o
+   conteúdo aparece correndo por baixo do vidro, o que dá profundidade e
+   avisa que a página continua.
+
+   São 4 e não 5: Configurações mora no ⚙️ do topo, já que se abre uma vez por
+   mês e não merece um quinto do espaço mais valioso da tela. */
+.tabbar {
+  position: fixed;
+  z-index: 40;
+  left: max(var(--s4), env(safe-area-inset-left));
+  right: max(var(--s4), env(safe-area-inset-right));
+  bottom: calc(var(--s3) + env(safe-area-inset-bottom));
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: var(--s1);
+  padding: var(--s2);
+  border-radius: var(--r-pill);
+  background: color-mix(in srgb, var(--surface-2) 82%, transparent);
+  backdrop-filter: blur(20px) saturate(140%);
+  -webkit-backdrop-filter: blur(20px) saturate(140%);
+  /* A borda clara de cima simula luz batendo na quina da pílula — é o que
+     separa o vidro do fundo quando os dois são escuros. */
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  box-shadow:
+    0 18px 40px -12px rgba(0, 0, 0, 0.85),
+    0 2px 8px -2px rgba(0, 0, 0, 0.6);
+}
+.tabbar a {
+  position: relative;
+  min-height: 52px;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 2px;
+  border-radius: var(--r-pill);
+  color: var(--text-faint);
+  font-size: 10px; font-weight: 650; letter-spacing: 0.01em;
+  -webkit-tap-highlight-color: transparent;
+  transition: color 0.2s, background 0.2s;
+}
+.tabbar a svg { width: 21px; height: 21px; }
+
+/* A aba ativa ganha fundo dourado próprio dentro da pílula. Num fundo
+   arredondado não cabe o tracinho que barra colada na borda usaria — e o
+   preenchimento marca o estado sem depender só da cor do ícone. */
+.tabbar a.active { color: var(--gold-hi); background: var(--gold-ghost); }
+.tabbar a:active { transform: scale(0.95); }
+
+/* ---------- Botão flutuante ----------
+   Fica acima da pílula, alinhado à direita. Os dois flutuam, então a distância
+   entre eles é o que impede o polegar de errar um pelo outro. */
+.fab {
+  position: fixed;
+  right: max(var(--s4), env(safe-area-inset-right));
+  bottom: calc(var(--tab-h) + var(--s5) + env(safe-area-inset-bottom));
+  z-index: 45;
+  width: 56px; height: 56px;
+  border-radius: var(--r-pill);
+  border: 0;
+  display: grid; place-items: center;
+  background: linear-gradient(145deg, var(--gold-hi), var(--gold-deep));
+  color: #1a1508;
+  box-shadow: var(--shadow-fab);
+  cursor: pointer;
+  transition: transform 0.12s;
+}
+.fab:active { transform: scale(0.93); }
+.fab svg { width: 25px; height: 25px; stroke-width: 2.6; }
+
+/* ----------------------------------------------------------------- Tipo --- */
+
+.eyebrow {
+  font-size: 11px; font-weight: 750; letter-spacing: 0.1em;
+  text-transform: uppercase; color: var(--text-faint);
+}
+.sec-title {
+  display: flex; align-items: baseline; justify-content: space-between;
+  gap: var(--s3);
+  margin: var(--s6) 0 var(--s3);
+}
+.sec-title h2 { font-size: 15px; font-weight: 700; }
+.sec-title a, .sec-title button.link {
+  font-size: 13px; font-weight: 650; color: var(--gold);
+  background: none; border: 0; cursor: pointer; padding: var(--s1) 0;
+}
+
+/* ---------------------------------------------------------------- Cards --- */
+
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--r);
+  box-shadow: var(--shadow-1);
+}
+.card-pad { padding: var(--s4); }
+
+/* ---------- Cartão herói ----------
+   O número que responde "como estou" sozinho. Grande porque é o único que
+   merece ser lido de longe; tudo o mais na tela é contexto dele. */
+.hero {
+  position: relative;
+  overflow: hidden;
+  border-radius: var(--r-lg);
+  padding: var(--s5);
+  background:
+    radial-gradient(120% 130% at 100% 0%, rgba(245, 179, 1, 0.16), transparent 60%),
+    linear-gradient(160deg, var(--surface-2), var(--surface));
   border: 1px solid var(--border);
+  box-shadow: var(--shadow-2);
 }
-.chip .dot { width: 9px; height: 9px; border-radius: 50%; flex: none; }
+.hero .rot {
+  font-size: 12.5px; font-weight: 650; color: var(--text-dim);
+  display: flex; align-items: center; gap: var(--s2);
+}
+.hero .big {
+  font-size: 34px; font-weight: 800; letter-spacing: -0.035em;
+  margin-top: var(--s2); line-height: 1.05;
+}
+.hero .big.pos { color: var(--pos); }
+.hero .big.neg { color: var(--neg); }
+.hero .delta {
+  margin-top: var(--s2);
+  display: inline-flex; align-items: center; gap: var(--s1);
+  font-size: 12.5px; font-weight: 650;
+  padding: 3px var(--s2); border-radius: var(--r-pill);
+  background: var(--surface-3); color: var(--text-dim);
+}
+.hero .delta.pos { color: var(--pos); }
+.hero .delta.neg { color: var(--neg); }
+
+/* ---------- Par de números secundários ---------- */
+.duo { display: grid; grid-template-columns: 1fr 1fr; gap: var(--s3); margin-top: var(--s3); }
+.duo .card { padding: var(--s4); }
+.duo .rot { font-size: 11.5px; font-weight: 650; color: var(--text-dim); display: flex; align-items: center; gap: 6px; }
+.duo .val { font-size: 19px; font-weight: 750; letter-spacing: -0.02em; margin-top: 5px; }
+.duo .val.pos { color: var(--pos); }
+.duo .val.neg { color: var(--neg); }
+.duo .val.inv { color: var(--inv); }
+
+/* --------------------------------------------------------------- Listas --- */
+/* Linha de lista no lugar de tabela: tabela precisa de largura pra fazer
+   sentido, e no celular ela ou estoura a tela ou espreme cada coluna até
+   ninguém conseguir ler. */
+
+.list { display: flex; flex-direction: column; }
+.list .row {
+  display: flex; align-items: center; gap: var(--s3);
+  min-height: 60px;
+  padding: var(--s3) var(--s4);
+  background: var(--surface);
+  border-bottom: 1px solid var(--border-soft);
+  width: 100%; text-align: left;
+  border-left: 0; border-right: 0; border-top: 0;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.list .row:first-child { border-top-left-radius: var(--r); border-top-right-radius: var(--r); }
+.list .row:last-child { border-bottom: 0; border-bottom-left-radius: var(--r); border-bottom-right-radius: var(--r); }
+.list .row:active { background: var(--surface-2); }
+
+/* O ícone da categoria num círculo da cor dela: é o que deixa a lista
+   escaneável sem ler — a cor identifica antes da palavra. */
+.avatar {
+  width: 40px; height: 40px; flex: none;
+  border-radius: var(--r-pill);
+  display: grid; place-items: center;
+  font-size: 18px; line-height: 1;
+}
+.list .row .mid { flex: 1; min-width: 0; }
+.list .row .mid .t {
+  font-size: 14.5px; font-weight: 650;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.list .row .mid .s {
+  font-size: 12px; color: var(--text-dim); margin-top: 1px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.list .row .amt { font-size: 15px; font-weight: 700; letter-spacing: -0.02em; text-align: right; flex: none; }
+.list .row .amt.pos { color: var(--pos); }
+.list .row .amt.neg { color: var(--neg); }
+.list .row .amt.inv { color: var(--inv); }
+.list .row .amt .sub { display: block; font-size: 11px; font-weight: 600; color: var(--text-faint); margin-top: 1px; }
+
+/* ---------------------------------------------------------- Progresso ----- */
+
+.bar-track { height: 7px; border-radius: var(--r-pill); background: var(--surface-3); overflow: hidden; }
+.bar-fill { height: 100%; border-radius: var(--r-pill); transition: width 0.4s cubic-bezier(0.2, 0.9, 0.3, 1); }
+/* Estourou o orçado: listras avisam sem depender só da cor. */
+.bar-fill.over {
+  background-image: repeating-linear-gradient(
+    45deg, transparent, transparent 5px, rgba(0, 0, 0, 0.22) 5px, rgba(0, 0, 0, 0.22) 10px
+  );
+}
+
+.breakdown-item { padding: var(--s3) 0; }
+.breakdown-item + .breakdown-item { border-top: 1px solid var(--border-soft); }
+.breakdown-item .btop {
+  display: flex; justify-content: space-between; align-items: center;
+  gap: var(--s3); margin-bottom: var(--s2); font-size: 13.5px; font-weight: 600;
+}
+.breakdown-item .btop .v { color: var(--text-dim); font-variant-numeric: tabular-nums; }
+
+/* --------------------------------------------------------------- Botões --- */
+
+.btn {
+  min-height: 44px;
+  display: inline-flex; align-items: center; justify-content: center; gap: var(--s2);
+  padding: 0 var(--s4);
+  border-radius: var(--r-sm);
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  font-size: 14px; font-weight: 650;
+  cursor: pointer;
+  transition: background 0.15s, transform 0.1s;
+  -webkit-tap-highlight-color: transparent;
+}
+.btn:active { transform: scale(0.98); }
+.btn:disabled { opacity: 0.45; cursor: not-allowed; }
+.btn-primary {
+  background: linear-gradient(145deg, var(--gold-hi), var(--gold));
+  border-color: var(--gold-deep); color: #1a1508; font-weight: 750;
+}
+.btn-ghost { background: transparent; border-color: transparent; color: var(--text-dim); }
+.btn-ghost:active { background: var(--surface-2); }
+.btn-danger { background: transparent; border-color: rgba(255, 107, 107, 0.35); color: var(--neg); }
+.btn-sm { min-height: 36px; padding: 0 var(--s3); font-size: 13px; }
+.btn-block { width: 100%; }
+
+.chip {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 4px var(--s2); border-radius: var(--r-pill);
+  background: var(--surface-2); font-size: 12px; font-weight: 600;
+}
+.chip .dot { width: 8px; height: 8px; border-radius: var(--r-pill); flex: none; }
+
 .badge {
-  display: inline-flex; align-items: center; gap: 6px; font-size: 11.5px; font-weight: 700;
-  padding: 3px 9px; border-radius: 7px; text-transform: uppercase; letter-spacing: 0.04em;
+  display: inline-block; padding: 2px var(--s2); border-radius: var(--r-pill);
+  font-size: 11px; font-weight: 700; background: var(--surface-3); color: var(--text-dim);
 }
-.badge.expense { color: var(--expense); background: rgba(239, 83, 80, 0.13); }
-.badge.income { color: var(--income); background: rgba(53, 179, 107, 0.14); }
-.badge.investment { color: var(--investment); background: rgba(107, 138, 253, 0.14); }
 
-/* ---------- Category grid ---------- */
-.cat-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 14px; }
-.cat-card {
-  background: var(--surface); border: 1px solid var(--border-soft); border-radius: var(--radius);
-  padding: 18px; display: flex; flex-direction: column; gap: 12px; box-shadow: var(--shadow);
-  transition: border-color 0.15s, transform 0.15s;
+/* ---------- Abas internas ---------- */
+.subtabs {
+  display: flex; gap: var(--s1); padding: var(--s1);
+  background: var(--surface); border: 1px solid var(--border-soft);
+  border-radius: var(--r-pill); margin-bottom: var(--s4);
 }
-.cat-card:hover { transform: translateY(-2px); }
-.cat-card .top { display: flex; align-items: center; gap: 12px; }
-/* overflow:hidden porque o ícone deveria ser um emoji, mas nada impede um
-   texto longo ali — sem isso ele vaza por cima do badge do tipo. */
-.cat-icon {
-  width: 44px; height: 44px; border-radius: 12px; display: grid; place-items: center;
-  font-size: 22px; flex: none; overflow: hidden;
+.subtabs button {
+  flex: 1; min-height: 38px; border: 0; border-radius: var(--r-pill);
+  background: none; font-size: 13px; font-weight: 650; color: var(--text-dim);
+  cursor: pointer;
 }
-.cat-card .cname { font-weight: 700; font-size: 15.5px; }
-.cat-card .actions { display: flex; gap: 4px; margin-top: 2px; }
+.subtabs button.on,
+.subtabs button.active { background: var(--surface-3); color: var(--text); }
 
-/* ---------- Modal ---------- */
-.overlay {
-  position: fixed; inset: 0; background: rgba(6, 5, 2, 0.66); backdrop-filter: blur(3px);
-  display: grid; place-items: center; padding: 20px; z-index: 50;
-}
-.modal {
-  background: var(--surface); border: 1px solid var(--border); border-radius: 18px;
-  width: 100%; max-width: 480px; box-shadow: 0 40px 90px -40px #000; overflow: hidden;
-}
-.modal .m-head { padding: 20px 24px; border-bottom: 1px solid var(--border-soft); display: flex; justify-content: space-between; align-items: center; }
-.modal .m-head h3 { font-size: 18px; font-weight: 750; }
-.modal .m-body { padding: 22px 24px; display: flex; flex-direction: column; gap: 16px; }
-.modal .m-foot { padding: 16px 24px; border-top: 1px solid var(--border-soft); display: flex; justify-content: flex-end; gap: 10px; }
+/* ------------------------------------------------------------ Formulário -- */
 
-/* ---------- Forms ---------- */
-.field { display: flex; flex-direction: column; gap: 6px; }
-.field.row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
-label { font-size: 13px; font-weight: 650; color: var(--text-dim); }
+.field { margin-bottom: var(--s4); }
+.field label {
+  display: block; font-size: 12.5px; font-weight: 650;
+  color: var(--text-dim); margin-bottom: 6px;
+}
 input, select, textarea {
-  background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--radius-sm);
-  padding: 10px 12px; color: var(--text); font-size: 14px; font-family: inherit; width: 100%;
-  transition: border-color 0.15s, box-shadow 0.15s;
+  width: 100%;
+  min-height: 48px;
+  padding: var(--s3);
+  border-radius: var(--r-sm);
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  color: var(--text);
+  /* 16px é o mínimo que impede o iOS de dar zoom ao focar o campo — abaixo
+     disso ele amplia a página e o usuário precisa fechar o zoom na mão. */
+  font-size: 16px;
+  font-family: inherit;
 }
 input:focus, select:focus, textarea:focus {
-  outline: none; border-color: var(--gold);
-  box-shadow: 0 0 0 3px rgba(245, 179, 1, 0.16);
+  outline: 2px solid var(--gold); outline-offset: -1px; border-color: transparent;
 }
-textarea { resize: vertical; min-height: 64px; }
-input[type="color"] { padding: 4px; height: 42px; cursor: pointer; }
-.hint { font-size: 12px; color: var(--text-faint); }
+textarea { min-height: 76px; resize: vertical; }
+.row2 { display: grid; grid-template-columns: 1fr 1fr; gap: var(--s3); }
+.hint { font-size: 12px; color: var(--text-faint); margin: 0; }
 
-/* ---------- States ---------- */
-.empty, .loading, .error-box {
-  padding: 40px 24px; text-align: center; color: var(--text-dim);
+/* --------------------------------------------------------------- Modais --- */
+/* No celular sobe do rodapé (folha), no desktop centraliza. Folha é o padrão
+   nativo e cai perto do polegar; diálogo centralizado no telefone obriga a
+   mão a subir até o meio da tela. */
+
+.overlay {
+  position: fixed; inset: 0; z-index: 70;
+  background: rgba(0, 0, 0, 0.62);
+  display: flex; flex-direction: column; justify-content: flex-end;
+  animation: fade 0.15s ease;
 }
-.error-box { color: var(--expense); }
-.empty .big { font-size: 34px; margin-bottom: 10px; }
+.modal {
+  background: var(--surface);
+  border-top-left-radius: var(--r-lg); border-top-right-radius: var(--r-lg);
+  max-height: 92vh; display: flex; flex-direction: column;
+  animation: rise 0.24s cubic-bezier(0.2, 0.9, 0.3, 1);
+}
+.modal .m-head {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: var(--s4); border-bottom: 1px solid var(--border-soft);
+}
+.modal .m-head h3 { font-size: 16px; }
+.modal .m-body { padding: var(--s4); overflow-y: auto; -webkit-overflow-scrolling: touch; }
+.modal .m-foot {
+  display: flex; gap: var(--s3); padding: var(--s4);
+  padding-bottom: calc(var(--s4) + env(safe-area-inset-bottom));
+  border-top: 1px solid var(--border-soft);
+}
+.modal .m-foot .btn { flex: 1; }
+
+/* --------------------------------------------------------------- Estados -- */
+
+.empty {
+  text-align: center; padding: var(--s8) var(--s4);
+  color: var(--text-dim); font-size: 14px;
+}
+.empty .big { font-size: 40px; margin-bottom: var(--s3); opacity: 0.55; }
+.empty .tit { font-weight: 700; color: var(--text); margin-bottom: 6px; font-size: 15px; }
+
+.loading {
+  display: flex; align-items: center; justify-content: center; gap: var(--s3);
+  padding: var(--s8); color: var(--text-dim); font-size: 14px;
+}
 .spinner {
-  width: 26px; height: 26px; border: 3px solid var(--border); border-top-color: var(--gold);
-  border-radius: 50%; margin: 0 auto 14px; animation: spin 0.7s linear infinite;
+  width: 18px; height: 18px; border-radius: var(--r-pill);
+  border: 2px solid var(--surface-3); border-top-color: var(--gold);
+  animation: spin 0.7s linear infinite;
 }
 @keyframes spin { to { transform: rotate(360deg); } }
 
-.bar-track { height: 8px; border-radius: 6px; background: var(--surface-3); overflow: hidden; }
-.bar-fill { height: 100%; border-radius: 6px; }
-
-/* ---------- Login ---------- */
-.login-shell { min-height: 100vh; display: grid; place-items: center; padding: 24px; }
-.login-card {
-  background: var(--surface); border: 1px solid var(--border-soft); border-radius: 18px;
-  padding: 32px; width: 100%; max-width: 380px; box-shadow: var(--shadow);
-  display: flex; flex-direction: column; gap: 16px;
+.error-box {
+  padding: var(--s4); border-radius: var(--r-sm);
+  background: rgba(255, 107, 107, 0.1); border: 1px solid rgba(255, 107, 107, 0.3);
+  color: var(--neg); font-size: 13.5px;
 }
-.login-card .login-tag {
-  text-align: center; color: var(--text-faint); font-size: 13px; margin: 0 0 6px;
-}
-.login-card .btn-primary { justify-content: center; margin-top: 4px; }
 .aviso-box {
-  background: rgba(245, 179, 1, 0.1); border: 1px solid rgba(245, 179, 1, 0.35);
-  color: var(--gold-hi); border-radius: var(--radius-sm);
-  padding: 10px 12px; font-size: 13px; line-height: 1.5;
+  padding: var(--s3); border-radius: var(--r-sm);
+  background: var(--gold-ghost); border: 1px solid rgba(245, 179, 1, 0.3);
+  color: var(--gold-hi); font-size: 13px; line-height: 1.5;
 }
 
-/* ---------- Sub-abas ---------- */
-.subtabs { display: flex; gap: 4px; margin-bottom: 18px; flex-wrap: wrap; }
-.subtabs button {
-  background: transparent; border: 1px solid transparent; border-radius: var(--radius-sm);
-  padding: 8px 14px; color: var(--text-dim); font-size: 14px; font-weight: 650;
-  font-family: inherit; cursor: pointer; transition: background 0.12s, color 0.12s;
+/* Esqueleto em vez de spinner onde o formato do conteúdo já é conhecido: a
+   tela não "pula" quando o dado chega. */
+.skel {
+  background: linear-gradient(90deg, var(--surface-2) 25%, var(--surface-3) 37%, var(--surface-2) 63%);
+  background-size: 400% 100%;
+  animation: shimmer 1.3s ease infinite;
+  border-radius: var(--r-sm);
 }
-.subtabs button:hover { background: var(--surface); color: var(--text); }
-.subtabs button.active { background: var(--surface-2); border-color: var(--border); color: var(--text); }
+@keyframes shimmer { from { background-position: 100% 0; } to { background-position: 0 0; } }
 
-/* Cabeçalho de seção dentro de uma página (sem o peso do .page-head) */
-.section-head {
-  display: flex; justify-content: space-between; align-items: flex-end;
-  gap: 16px; margin-bottom: 14px; flex-wrap: wrap;
+/* ---------------------------------------------------------------- Login --- */
+
+.login-shell {
+  min-height: 100%; display: grid; place-items: center;
+  padding: var(--s5);
+  background:
+    radial-gradient(700px 380px at 50% -10%, rgba(245, 179, 1, 0.1), transparent 65%),
+    var(--bg);
 }
-.section-head h2 { font-size: 16px; font-weight: 700; }
-
-/* ---------- Orçamento ---------- */
-.bar-track.slim { height: 6px; }
-.usage { display: flex; align-items: center; gap: 10px; min-width: 150px; }
-.usage .bar-track { flex: 1; }
-.usage .pct {
-  font-size: 12.5px; color: var(--text-dim); font-variant-numeric: tabular-nums;
-  width: 40px; text-align: right; flex: none;
+.login-card {
+  width: 100%; max-width: 380px;
+  display: flex; flex-direction: column; gap: var(--s4);
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--r-lg); padding: var(--s6);
+  box-shadow: var(--shadow-2);
 }
-/* width auto vence o width:100% genérico dos inputs */
-.money-cell { width: 130px; padding: 7px 10px; font-variant-numeric: tabular-nums; }
+.login-card .brand { display: flex; align-items: center; justify-content: center; gap: var(--s3); }
+.login-card .brand img { width: 38px; }
+.login-card .brand .name { font-size: 23px; font-weight: 800; letter-spacing: -0.03em; }
+.login-card .brand .name b { color: var(--gold); }
+.login-tag { text-align: center; color: var(--text-dim); font-size: 13.5px; margin: 0; }
 
-.breakdown-item { padding: 12px 22px; display: flex; flex-direction: column; gap: 8px; }
-.breakdown-item .btop { display: flex; justify-content: space-between; font-size: 13.5px; }
-.breakdown-item .btop .v { font-variant-numeric: tabular-nums; color: var(--text-dim); }
+/* --------------------------------------------------------------- Legado ---
+   Classes das telas ainda não migradas. Ficam até cada uma passar pela nova
+   linguagem; remover antes disso só deixaria tela quebrada no caminho. */
+
+.panel { background: var(--surface); border: 1px solid var(--border-soft); border-radius: var(--r); }
+.panel-head {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: var(--s3); padding: var(--s4); border-bottom: 1px solid var(--border-soft);
+}
+.panel-head h2 { font-size: 15px; }
+.panel-body { padding: var(--s4); }
+.page-head { margin-bottom: var(--s5); }
+.page-head h1 { font-size: 22px; margin: 4px 0; }
+.page-head p { margin: 0; color: var(--text-dim); font-size: 13.5px; }
+.section-head { display: flex; align-items: center; justify-content: space-between; gap: var(--s3); margin-bottom: var(--s3); }
+.stat-grid { display: grid; grid-template-columns: 1fr 1fr; gap: var(--s3); }
+.stat { background: var(--surface); border: 1px solid var(--border-soft); border-radius: var(--r); padding: var(--s4); }
+.stat .label { font-size: 11.5px; font-weight: 650; color: var(--text-dim); }
+.stat .value { font-size: 19px; font-weight: 750; margin-top: 5px; letter-spacing: -0.02em; }
+.stat .value.pos { color: var(--pos); }
+.stat .value.neg { color: var(--neg); }
+.stat .value.gold { color: var(--gold); }
+.stat .sub { font-size: 11px; color: var(--text-faint); margin-top: 4px; }
+.two-col { display: flex; flex-direction: column; gap: var(--s4); }
+.table-wrap { overflow-x: auto; }
+table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+th, td { padding: var(--s3) var(--s2); text-align: left; border-bottom: 1px solid var(--border-soft); }
+th { font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-faint); font-weight: 700; }
+td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+.cat-grid { display: grid; grid-template-columns: 1fr; gap: var(--s3); }
+.cat-card { display: flex; align-items: center; gap: var(--s3); background: var(--surface); border: 1px solid var(--border-soft); border-radius: var(--r); padding: var(--s3) var(--s4); }
+.cat-icon { width: 40px; height: 40px; border-radius: var(--r-pill); display: grid; place-items: center; font-size: 18px; flex: none; }
+.row-actions { display: flex; gap: var(--s2); margin-left: auto; }
+.money-cell input { min-height: 42px; text-align: right; }
+.usage { font-size: 11.5px; color: var(--text-faint); }
+.sidebar, .topbar { display: none; }
 
 @media (prefers-reduced-motion: reduce) {
-  * { animation-duration: 0.01ms !important; transition: none !important; }
+  *, *::before, *::after { animation-duration: 0.01ms !important; transition: none !important; }
 }
 
-/* ---------- Barra de período ---------- */
-.topbar {
-  display: flex; justify-content: flex-end; align-items: center;
-  gap: 10px; margin-bottom: 22px; flex-wrap: wrap;
-}
-.month-picker {
-  display: flex; align-items: center; gap: 6px;
-  background: var(--surface); border: 1px solid var(--border-soft);
-  border-radius: var(--radius-sm); padding: 6px 8px;
-}
-/* width auto vence o width:100% genérico dos selects */
-.month-picker select { width: auto; padding: 6px 8px; font-weight: 650; }
-.month-picker .btn { font-size: 17px; line-height: 1; padding: 4px 9px; }
+/* ================================================================ Desktop ==
+   Acima de 900px a barra de abas dá lugar à lateral: no mouse não existe zona
+   do polegar, e a largura sobrando comporta navegação sempre visível. */
 
-/* ---------- Responsive shell ---------- */
-@media (max-width: 720px) {
-  .app { grid-template-columns: 1fr; }
+@media (min-width: 900px) {
+  .app { display: grid; grid-template-columns: 240px 1fr; }
+
   .sidebar {
-    position: static; height: auto; flex-direction: row; align-items: center;
-    gap: 12px; border-right: none; border-bottom: 1px solid var(--border-soft);
-    /* Instalado na tela inicial o app desenha sob a barra de status do celular
-       (viewport-fit=cover + status bar translúcida no iOS). Sem o env() aqui, o
-       logo e os ícones ficam embaixo do relógio e do entalhe. */
-    padding: calc(14px + env(safe-area-inset-top)) calc(16px + env(safe-area-inset-right))
-             14px calc(16px + env(safe-area-inset-left));
-    /* Quem rola é a nav, não a barra: se fosse a barra, o botão de sair sairia
-       da tela junto com os ícones e viraria inalcançável. */
-    overflow: visible;
+    display: flex; flex-direction: column; gap: var(--s6);
+    padding: var(--s6) var(--s4);
+    border-right: 1px solid var(--border-soft);
+    position: sticky; top: 0; height: 100vh;
+    background: linear-gradient(180deg, rgba(245, 179, 1, 0.05), transparent 35%);
   }
-  /* Em 360px de largura não cabem logo + palavra + 5 ícones + sair. O símbolo
-     sozinho já identifica; a palavra é a primeira a sair. */
-  .brand .name { display: none; }
-  .brand { padding: 0; }
-
-  .nav { flex-direction: row; flex: 1; min-width: 0; overflow-x: auto; scrollbar-width: none; }
-  .nav::-webkit-scrollbar { display: none; }
-  .nav a { padding: 11px; }
-  .nav a span.txt { display: none; }
-
-  /* O "Sair" volta no celular — sem ele não há como trocar de conta nem
-     encerrar a sessão no telefone. O e-mail é que não cabe. */
-  .sidebar .foot { margin-top: 0; margin-left: auto; padding: 0; flex: none; }
-  .sidebar .foot .who { display: none; }
-
-  .main {
-    padding: 24px calc(18px + env(safe-area-inset-right))
-             calc(80px + env(safe-area-inset-bottom)) calc(18px + env(safe-area-inset-left));
+  .sidebar .brand { display: flex; align-items: center; gap: var(--s3); padding: 0 var(--s2); }
+  .sidebar .brand img { width: 32px; }
+  .sidebar .brand .name { font-size: 21px; font-weight: 800; letter-spacing: -0.03em; }
+  .sidebar .brand .name b { color: var(--gold); }
+  .sidebar .nav { display: flex; flex-direction: column; gap: 2px; }
+  .sidebar .nav a {
+    display: flex; align-items: center; gap: var(--s3);
+    padding: var(--s3); border-radius: var(--r-sm);
+    color: var(--text-dim); font-size: 14px; font-weight: 600;
   }
+  .sidebar .nav a svg { width: 19px; height: 19px; }
+  .sidebar .nav a:hover { background: var(--surface); color: var(--text); }
+  .sidebar .nav a.active { background: var(--surface-2); color: var(--text); }
+  .sidebar .nav a.active svg { color: var(--gold); }
+  .sidebar .foot { margin-top: auto; display: flex; flex-direction: column; gap: var(--s2); align-items: flex-start; padding: 0 var(--s2); }
+  .sidebar .foot .who { font-size: 11.5px; color: var(--text-faint); max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+  .tabbar { display: none; }
+  .appbar { padding-top: var(--s4); padding-bottom: var(--s4); }
+  .main { padding: var(--s6) var(--s7) var(--s8); max-width: 900px; margin: 0; }
+  .fab { right: var(--s7); bottom: var(--s7); }
+
+  .duo { grid-template-columns: repeat(3, 1fr); }
+  .two-col { display: grid; grid-template-columns: 1.3fr 1fr; align-items: start; }
+  .cat-grid { grid-template-columns: repeat(2, 1fr); }
+  .hero .big { font-size: 40px; }
+
+  /* No desktop o modal volta a ser diálogo centralizado. */
+  .overlay { justify-content: center; align-items: center; padding: var(--s5); }
+  .modal { border-radius: var(--r-lg); max-width: 480px; width: 100%; animation: fade 0.15s ease; }
 }

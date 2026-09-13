@@ -2,14 +2,26 @@ import { useMemo } from "react";
 import { Link } from "react-router-dom";
 import { useCategories, useTransactions } from "../lib/queries";
 import { usePeriod } from "../lib/period";
+import { shiftPeriod } from "../lib/period";
+import { transactionsApi } from "../lib/api";
+import { useQuery } from "@tanstack/react-query";
 import { ApiError } from "../lib/api";
-import { formatDate, formatMoney } from "../lib/format";
-import type { Category, CategoryType } from "../lib/types";
+import { formatMoney, formatDiaMes } from "../lib/format";
+import type { Category, CategoryType, Transaction } from "../lib/types";
 
 export default function Dashboard() {
-  const { label } = usePeriod();
+  const { period } = usePeriod();
   const { data: transactions, isLoading, error } = useTransactions();
   const { data: categories } = useCategories();
+
+  // O mês anterior existe só pra comparação do cartão herói. Sem ele o número
+  // grande diria "quanto sobrou" sem dizer se isso é bom — e "R$ 1.200" só
+  // significa alguma coisa ao lado do mês passado.
+  const anterior = shiftPeriod(period, -1);
+  const { data: transacoesAnteriores } = useQuery({
+    queryKey: ["transactions", anterior],
+    queryFn: () => transactionsApi.list(anterior),
+  });
 
   const catMap = useMemo(() => {
     const m = new Map<number, Category>();
@@ -17,139 +29,207 @@ export default function Dashboard() {
     return m;
   }, [categories]);
 
-  const stats = useMemo(() => {
-    const totals: Record<CategoryType, number> = { income: 0, expense: 0, investment: 0 };
-    for (const t of transactions ?? []) {
-      const cat = catMap.get(t.category_id);
-      if (!cat) continue;
-      totals[cat.type] += t.amount_paid ?? 0;
-    }
-    return { ...totals, balance: totals.income - totals.expense - totals.investment };
-  }, [transactions, catMap]);
+  const stats = useMemo(() => somar(transactions, catMap), [transactions, catMap]);
+  const statsAnt = useMemo(
+    () => somar(transacoesAnteriores, catMap),
+    [transacoesAnteriores, catMap]
+  );
 
-  const recent = useMemo(
-    () => [...(transactions ?? [])].sort((a, b) => b.date.localeCompare(a.date)).slice(0, 6),
+  const recentes = useMemo(
+    () =>
+      [...(transactions ?? [])]
+        .sort((a, b) => b.date.localeCompare(a.date) || b.id - a.id)
+        .slice(0, 6),
     [transactions]
   );
 
-  const byExpense = useMemo(() => {
+  const porCategoria = useMemo(() => {
     const acc = new Map<number, number>();
     for (const t of transactions ?? []) {
       const cat = catMap.get(t.category_id);
       if (cat?.type !== "expense") continue;
       acc.set(cat.id, (acc.get(cat.id) ?? 0) + (t.amount_paid ?? 0));
     }
-    const rows = [...acc.entries()]
-      .map(([id, value]) => ({ cat: catMap.get(id)!, value }))
-      .filter((r) => r.cat && r.value > 0)
-      .sort((a, b) => b.value - a.value);
-    const max = rows[0]?.value ?? 1;
-    return { rows: rows.slice(0, 6), max };
+    const linhas = [...acc.entries()]
+      .map(([id, valor]) => ({ cat: catMap.get(id)!, valor }))
+      .filter((r) => r.cat && r.valor > 0)
+      .sort((a, b) => b.valor - a.valor);
+    return { linhas: linhas.slice(0, 5), max: linhas[0]?.valor ?? 1 };
   }, [transactions, catMap]);
 
-  if (isLoading) {
-    return <div className="panel"><div className="loading"><div className="spinner" />Carregando painel…</div></div>;
-  }
-  if (error) {
-    return <div className="panel"><div className="error-box">{(error as ApiError).message}</div></div>;
-  }
+  if (isLoading) return <Esqueleto />;
+  if (error) return <div className="error-box">{(error as ApiError).message}</div>;
+
+  const vazio = (transactions ?? []).length === 0;
+  const variacao = calcularVariacao(stats.saldo, statsAnt.saldo);
 
   return (
     <>
-      <div className="page-head">
-        <div>
-          <div className="eyebrow">Resumo do mês</div>
-          <h1>Visão geral</h1>
-          <p>Onde cada centavo está em {label}, num relance.</p>
+      <section className="hero">
+        <div className="rot">Sobrou no mês</div>
+        <div className={`big tnum ${stats.saldo >= 0 ? "pos" : "neg"}`}>
+          {formatMoney(stats.saldo)}
         </div>
-        <Link className="btn btn-primary" to="/orcamento?aba=lancamentos">+ Nova transação</Link>
-      </div>
-
-      <div className="stat-grid">
-        <Stat label="Receitas" value={stats.income} tone="pos" />
-        <Stat label="Despesas" value={stats.expense} tone="neg" />
-        <Stat label="Investido" value={stats.investment} tone="gold" />
-        <Stat label="Saldo" value={stats.balance} tone={stats.balance >= 0 ? "pos" : "neg"} sub="Receitas − despesas − investido" />
-      </div>
-
-      <div className="two-col">
-        <div className="panel">
-          <div className="panel-head">
-            <h2>Últimas transações</h2>
-            <Link className="btn btn-ghost btn-sm" to="/orcamento?aba=lancamentos">Ver todas</Link>
+        {variacao && (
+          <div className={`delta ${variacao.melhorou ? "pos" : "neg"}`}>
+            <span aria-hidden>{variacao.melhorou ? "↑" : "↓"}</span>
+            {variacao.texto}
           </div>
-          <div className="panel-body">
-            {recent.length === 0 ? (
-              <div className="empty">Sem transações ainda.</div>
-            ) : (
-              <div className="table-wrap">
-                <table>
-                  <tbody>
-                    {recent.map((t) => {
-                      const cat = catMap.get(t.category_id);
-                      return (
-                        <tr key={t.id}>
-                          <td style={{ whiteSpace: "nowrap", color: "var(--text-dim)" }}>{formatDate(t.date)}</td>
-                          <td style={{ fontWeight: 600 }}>{t.description}</td>
-                          <td>
-                            {cat && (
-                              <span className="chip">
-                                <span className="dot" style={{ background: cat.color }} />
-                                {cat.icon}
-                              </span>
-                            )}
-                          </td>
-                          <td className="num" style={{ fontWeight: 650, color: toneColor(cat?.type) }}>
-                            {formatMoney(t.amount_paid)}
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
+        )}
+      </section>
+
+      <div className="duo">
+        <div className="card">
+          <div className="rot"><Bolinha cor="var(--pos)" /> Entrou</div>
+          <div className="val pos tnum">{formatMoney(stats.income)}</div>
+        </div>
+        <div className="card">
+          <div className="rot"><Bolinha cor="var(--neg)" /> Saiu</div>
+          <div className="val neg tnum">{formatMoney(stats.expense)}</div>
+        </div>
+        <div className="card">
+          <div className="rot"><Bolinha cor="var(--inv)" /> Investido</div>
+          <div className="val inv tnum">{formatMoney(stats.investment)}</div>
+        </div>
+      </div>
+
+      {vazio ? (
+        <div className="empty" style={{ marginTop: "var(--s6)" }}>
+          <div className="big">🪙</div>
+          <div className="tit">Nenhum lançamento neste mês</div>
+          <div>Toque no <b>+</b> para registrar o primeiro.</div>
+        </div>
+      ) : (
+        <>
+          <div className="sec-title">
+            <h2>Últimos lançamentos</h2>
+            <Link to="/orcamento?aba=lancamentos">Ver todos</Link>
+          </div>
+          <div className="list">
+            {recentes.map((t) => (
+              <LinhaLancamento key={t.id} t={t} cat={catMap.get(t.category_id)} />
+            ))}
+          </div>
+
+          {porCategoria.linhas.length > 0 && (
+            <>
+              <div className="sec-title">
+                <h2>Para onde foi</h2>
+                <Link to="/orcamento">Orçamento</Link>
               </div>
-            )}
-          </div>
-        </div>
-
-        <div className="panel">
-          <div className="panel-head"><h2>Gastos por categoria</h2></div>
-          <div className="panel-body">
-            {byExpense.rows.length === 0 ? (
-              <div className="empty">Sem gastos registrados.</div>
-            ) : (
-              byExpense.rows.map(({ cat, value }) => (
-                <div className="breakdown-item" key={cat.id}>
-                  <div className="btop">
-                    <span>{cat.icon} {cat.name}</span>
-                    <span className="v">{formatMoney(value)}</span>
+              <div className="card card-pad">
+                {porCategoria.linhas.map(({ cat, valor }) => (
+                  <div className="breakdown-item" key={cat.id}>
+                    <div className="btop">
+                      <span>{cat.icon} {cat.name}</span>
+                      <span className="v tnum">{formatMoney(valor)}</span>
+                    </div>
+                    <div className="bar-track">
+                      <div
+                        className="bar-fill"
+                        style={{
+                          width: `${Math.max((valor / porCategoria.max) * 100, 3)}%`,
+                          background: cat.color,
+                        }}
+                      />
+                    </div>
                   </div>
-                  <div className="bar-track">
-                    <div className="bar-fill" style={{ width: `${(value / byExpense.max) * 100}%`, background: cat.color }} />
-                  </div>
-                </div>
-              ))
-            )}
-          </div>
-        </div>
-      </div>
+                ))}
+              </div>
+            </>
+          )}
+        </>
+      )}
     </>
   );
 }
 
-function Stat({ label, value, tone, sub }: { label: string; value: number; tone: "pos" | "neg" | "gold"; sub?: string }) {
+function LinhaLancamento({ t, cat }: { t: Transaction; cat?: Category }) {
+  const valor = t.amount_paid ?? t.amount_planned ?? 0;
+  const sinal = cat?.type === "income" ? "+" : cat?.type === "expense" ? "−" : "";
+  const tom = cat?.type === "income" ? "pos" : cat?.type === "expense" ? "neg" : "inv";
+  // Só previsto, ainda não pago: o valor é uma promessa, e mostrar igual ao
+  // realizado faria o mês parecer fechado quando não está.
+  const soPrevisto = t.amount_paid === null || t.amount_paid === undefined;
+
   return (
-    <div className="stat">
-      <div className="label">{label}</div>
-      <div className={`value ${tone}`}>{formatMoney(value)}</div>
-      {sub && <div className="sub">{sub}</div>}
-    </div>
+    <Link className="row" to="/orcamento?aba=lancamentos">
+      <div
+        className="avatar"
+        style={{ background: `color-mix(in srgb, ${cat?.color ?? "#666"} 22%, transparent)` }}
+      >
+        {cat?.icon ?? "•"}
+      </div>
+      <div className="mid">
+        <div className="t">{t.description}</div>
+        <div className="s">
+          {formatDiaMes(t.date)}
+          {cat && <> · {cat.name}</>}
+        </div>
+      </div>
+      <div className={`amt tnum ${soPrevisto ? "" : tom}`}>
+        {sinal}{formatMoney(Math.abs(valor))}
+        {soPrevisto && <span className="sub">previsto</span>}
+      </div>
+    </Link>
   );
 }
 
-function toneColor(type?: CategoryType): string {
-  if (type === "income") return "var(--income)";
-  if (type === "expense") return "var(--expense)";
-  if (type === "investment") return "var(--gold)";
-  return "var(--text)";
+function Bolinha({ cor }: { cor: string }) {
+  return (
+    <span
+      style={{
+        width: 7, height: 7, borderRadius: 99, background: cor, display: "inline-block",
+      }}
+    />
+  );
+}
+
+function Esqueleto() {
+  return (
+    <>
+      <div className="skel" style={{ height: 132, borderRadius: "var(--r-lg)" }} />
+      <div className="duo">
+        {[0, 1, 2].map((i) => (
+          <div key={i} className="skel" style={{ height: 72 }} />
+        ))}
+      </div>
+      <div className="sec-title"><h2>Últimos lançamentos</h2></div>
+      <div className="skel" style={{ height: 240, borderRadius: "var(--r)" }} />
+    </>
+  );
+}
+
+function somar(transacoes: Transaction[] | undefined, catMap: Map<number, Category>) {
+  const totais: Record<CategoryType, number> = { income: 0, expense: 0, investment: 0 };
+  for (const t of transacoes ?? []) {
+    const cat = catMap.get(t.category_id);
+    if (!cat) continue;
+    totais[cat.type] += t.amount_paid ?? 0;
+  }
+  return { ...totais, saldo: totais.income - totais.expense - totais.investment };
+}
+
+/** Compara o saldo com o do mês anterior.
+ *
+ * Em porcentagem só quando ela significa alguma coisa: sair de -50 para +200 dá
+ * "-500%", um número tecnicamente correto e completamente inútil. Quando o mês
+ * anterior foi negativo ou perto de zero, a comparação vira o valor absoluto.
+ */
+function calcularVariacao(
+  atual: number,
+  anterior: number
+): { texto: string; melhorou: boolean } | null {
+  if (!Number.isFinite(anterior) || anterior === 0) return null;
+  const diferenca = atual - anterior;
+  if (Math.abs(diferenca) < 0.01) return null;
+
+  const melhorou = diferenca > 0;
+  if (anterior > 0) {
+    const pct = Math.round((diferenca / anterior) * 100);
+    if (Math.abs(pct) <= 999) {
+      return { texto: `${Math.abs(pct)}% vs. mês anterior`, melhorou };
+    }
+  }
+  return { texto: `${formatMoney(Math.abs(diferenca))} vs. mês anterior`, melhorou };
 }

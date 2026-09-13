@@ -30,8 +30,25 @@ export default function Budget() {
   const [params, setParams] = useSearchParams();
   const tab: Tab = params.get("aba") === "lancamentos" ? "lancamentos" : "metas";
   const { data: categories } = useCategories();
-  const [creating, setCreating] = useState(false);
+  // O botão + do shell chega aqui com ?novo=1. Sem ler esse parâmetro, ele
+  // abriria a aba de lançamentos e pararia ali — um toque a mais, justo na
+  // ação mais frequente do app.
+  const [creating, setCreating] = useState(params.get("novo") === "1");
   const [editing, setEditing] = useState<Transaction | null>(null);
+
+  function fecharCriacao() {
+    setCreating(false);
+    if (params.get("novo")) {
+      setParams(
+        (prev) => {
+          const p = new URLSearchParams(prev);
+          p.delete("novo");
+          return p;
+        },
+        { replace: true }
+      );
+    }
+  }
 
   function selectTab(next: Tab) {
     setParams(
@@ -95,7 +112,7 @@ export default function Budget() {
       {tab === "metas" ? <Metas /> : <Lancamentos categories={categories} onEdit={setEditing} />}
 
       {creating && categories && (
-        <TransactionForm categories={categories} onClose={() => setCreating(false)} />
+        <TransactionForm categories={categories} onClose={fecharCriacao} />
       )}
       {editing && categories && (
         <TransactionForm

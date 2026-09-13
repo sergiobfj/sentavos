@@ -44,3 +44,13 @@ export function todayIso(): string {
   const d = String(now.getDate()).padStart(2, "0");
   return `${y}-${m}-${d}`;
 }
+
+// "2026-09-13" -> "13 set". Data curta pra linha de lista: no celular a lista
+// é estreita e o ano quase nunca importa — todo lançamento visível é do mês
+// que está selecionado no topo.
+export function formatDiaMes(iso: string): string {
+  const [y, m, d] = iso.split("-").map(Number);
+  if (!y || !m || !d) return iso;
+  const mes = new Date(y, m - 1, d).toLocaleDateString("pt-BR", { month: "short" });
+  return `${d} ${mes.replace(".", "")}`;
+}
