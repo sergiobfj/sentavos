@@ -1,3 +1,5 @@
+import datetime as dt
+
 def criar_categoria(client, name="Mercado", type="expense"):
     return client.post(
         "/categories",
@@ -186,3 +188,119 @@ def test_excluir_categoria_com_lancamento_da_409(client):
     assert "lançamento" in r.json()["detail"]
     # E a categoria continua lá.
     assert len(client.get("/categories").json()) == 1
+
+
+# ---------- Caixinhas ----------
+# A diferença entre caixinha e teto mensal mora aqui: no teto, o que sobra
+# evapora na virada do mês; na caixinha, continua lá.
+
+def test_sobra_do_mes_anterior_entra_na_caixinha(client, session, dono):
+    from app.models import Budget, Category, Transaction
+
+    cat = Category(name="Lazer", type="expense", color="#f00", icon="L", user_id=dono.id)
+    session.add(cat)
+    session.commit()
+    session.refresh(cat)
+
+    # Agosto: separou 300, gastou 230. Sobraram 70.
+    session.add(Budget(category_id=cat.id, year=2026, month=8, amount=300.0, user_id=dono.id))
+    session.add(Transaction(date=dt.date(2026, 8, 10), description="Cinema",
+                            amount_paid=230.0, category_id=cat.id, user_id=dono.id))
+    # Setembro: separou 250.
+    session.add(Budget(category_id=cat.id, year=2026, month=9, amount=250.0, user_id=dono.id))
+    session.commit()
+
+    resumo = client.get("/budgets/summary?year=2026&month=9").json()
+    lazer = next(i for i in resumo["items"] if i["category_name"] == "Lazer")
+
+    assert lazer["carried_in"] == 70.0
+    # 70 que vieram + 250 separados − 0 gasto = 320 disponíveis.
+    assert lazer["available"] == 320.0
+
+
+def test_estourar_a_caixinha_deixa_divida_pro_mes_seguinte(client, session, dono):
+    """Sobra negativa é mantida de propósito.
+
+    Zerar o negativo faria estourar a caixinha sair de graça — e a pessoa
+    começaria o mês seguinte achando que tem mais do que tem.
+    """
+    from app.models import Budget, Category, Transaction
+
+    cat = Category(name="Mercado", type="expense", color="#f00", icon="M", user_id=dono.id)
+    session.add(cat)
+    session.commit()
+    session.refresh(cat)
+
+    session.add(Budget(category_id=cat.id, year=2026, month=8, amount=500.0, user_id=dono.id))
+    session.add(Transaction(date=dt.date(2026, 8, 12), description="Compras",
+                            amount_paid=620.0, category_id=cat.id, user_id=dono.id))
+    session.commit()
+
+    resumo = client.get("/budgets/summary?year=2026&month=9").json()
+    mercado = next(i for i in resumo["items"] if i["category_name"] == "Mercado")
+
+    assert mercado["carried_in"] == -120.0
+
+
+def test_receita_nao_acumula_sobra(client, session, dono):
+    """Receita é o que entra, não um pote de onde se tira.
+
+    Acumular "sobra de salário" misturaria as duas ideias e faria o total de
+    disponível não querer dizer nada.
+    """
+    from app.models import Budget, Category, Transaction
+
+    cat = Category(name="Salário", type="income", color="#0f0", icon="S", user_id=dono.id)
+    session.add(cat)
+    session.commit()
+    session.refresh(cat)
+
+    session.add(Budget(category_id=cat.id, year=2026, month=8, amount=4000.0, user_id=dono.id))
+    session.add(Transaction(date=dt.date(2026, 8, 5), description="Salário",
+                            amount_paid=4200.0, category_id=cat.id, user_id=dono.id))
+    session.commit()
+
+    resumo = client.get("/budgets/summary?year=2026&month=9").json()
+    salario = next(i for i in resumo["items"] if i["category_name"] == "Salário")
+
+    assert salario["carried_in"] == 0.0
+    assert salario["available"] == 0.0
+
+
+def test_nao_distribuido_e_o_que_entrou_menos_o_que_foi_separado(client, session, dono):
+    """O número que abre o ritual do salário."""
+    from app.models import Budget, Category, Transaction
+
+    receita = Category(name="Salário", type="income", color="#0f0", icon="S", user_id=dono.id)
+    gasto = Category(name="Aluguel", type="expense", color="#f00", icon="A", user_id=dono.id)
+    session.add_all([receita, gasto])
+    session.commit()
+    session.refresh(receita)
+    session.refresh(gasto)
+
+    session.add(Transaction(date=dt.date(2026, 9, 5), description="Salário",
+                            amount_paid=4500.0, category_id=receita.id, user_id=dono.id))
+    session.add(Budget(category_id=gasto.id, year=2026, month=9, amount=1450.0, user_id=dono.id))
+    session.commit()
+
+    resumo = client.get("/budgets/summary?year=2026&month=9").json()
+
+    assert resumo["unallocated"] == 3050.0
+
+
+# ---------- Arquivamento ----------
+
+def test_categoria_arquivada_sai_da_listagem_mas_nao_do_banco(client, session, dono):
+    from app.models import Category
+
+    ativa = Category(name="Mercado", type="expense", color="#f00", icon="M", user_id=dono.id)
+    velha = Category(name="SECCO", type="expense", color="#f00", icon="S",
+                     user_id=dono.id, archived=True)
+    session.add_all([ativa, velha])
+    session.commit()
+
+    nomes = [c["name"] for c in client.get("/categories").json()]
+    assert nomes == ["Mercado"]
+
+    todas = [c["name"] for c in client.get("/categories?incluir_arquivadas=1").json()]
+    assert sorted(todas) == ["Mercado", "SECCO"]

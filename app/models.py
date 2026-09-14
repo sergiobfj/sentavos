@@ -48,6 +48,12 @@ class CategoryBase(SQLModel):
     color: str
     icon: str
 
+    # Categoria arquivada some do formulário de lançamento mas continua
+    # existindo: os lançamentos antigos apontam pra ela, e apagá-la levaria o
+    # histórico junto. É o caminho do meio entre "conviver com 28 categorias
+    # herdadas da planilha" e "perder um ano de dados".
+    archived: bool = False
+
 class Category(CategoryBase, table=True):
     __tablename__ = "categories"
     user_id: int = dono()
@@ -61,6 +67,7 @@ class CategoryUpdate(SQLModel):
     type: CategoryType | None = None
     color: str | None = None
     icon: str | None = None
+    archived: bool | None = None
 
 class TransactionBase(SQLModel):
     date: dt.date
@@ -125,10 +132,22 @@ class BudgetSummaryItem(SQLModel):
     category_type: CategoryType
     color: str
     icon: str
+    archived: bool = False
     budget_id: int | None = None
+    # Quanto você separou pra esta caixinha neste mês.
     budgeted: float = 0
     planned: float = 0
     paid: float = 0
+
+    # ---------- Caixinha ----------
+    # O que sobrou (ou faltou) nos meses anteriores. É o que diferencia uma
+    # caixinha de um teto mensal: no teto, o que sobra evapora na virada; na
+    # caixinha, o dinheiro continua lá. Guardar 70 a mais em Lazer num mês
+    # significa poder gastar 70 a mais no seguinte, que é como as pessoas de
+    # fato organizam dinheiro.
+    carried_in: float = 0
+    # alocado + veio de trás − gasto. Positivo é o que ainda tem na caixinha.
+    available: float = 0
 
 class BudgetSummaryTotals(SQLModel):
     budgeted: float = 0
@@ -141,6 +160,10 @@ class BudgetSummary(SQLModel):
     items: list[BudgetSummaryItem]
     # Chaveado pelo tipo de categoria: expense, income, investment.
     totals: dict[str, BudgetSummaryTotals]
+
+    # Quanto entrou no mês e ainda não foi pra caixinha nenhuma. É a pergunta
+    # que abre o ritual do salário: "sobrou quanto pra distribuir?".
+    unallocated: float = 0
 
 
 # ---------- Patrimônio ----------

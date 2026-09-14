@@ -8,11 +8,14 @@ import logo from "../assets/logo.png";
 // Quatro abas, não cinco. Configurações sai da barra e vira o ⚙️ do topo: é a
 // tela que se abre uma vez por mês, e ocupar um quarto da faixa do polegar com
 // ela tiraria espaço das quatro que se usam todo dia.
+// A ordem segue o uso: Início todo dia, Lançamentos quase todo dia, Investir de
+// vez em quando, Patrimônio uma vez por mês. Patrimônio foi pro fim porque é o
+// que se abre menos, não porque importa menos.
 const ABAS = [
   { to: "/", label: "Início", end: true, icon: IconCasa },
-  { to: "/orcamento", label: "Orçamento", icon: IconAlvo },
-  { to: "/patrimonio", label: "Patrimônio", icon: IconCarteira },
+  { to: "/orcamento", label: "Lançamentos", icon: IconLista },
   { to: "/investimentos", label: "Investir", icon: IconGrafico },
+  { to: "/patrimonio", label: "Patrimônio", icon: IconCarteira },
 ];
 
 export default function Layout() {
@@ -129,12 +132,13 @@ function IconCasa() {
     </svg>
   );
 }
-function IconAlvo() {
+function IconLista() {
   return (
     <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
-      <circle cx="12" cy="12" r="8.5" />
-      <circle cx="12" cy="12" r="4.6" />
-      <circle cx="12" cy="12" r="1.2" fill="currentColor" />
+      <path d="M8 6.5h12M8 12h12M8 17.5h12" />
+      <circle cx="4" cy="6.5" r="1.3" fill="currentColor" stroke="none" />
+      <circle cx="4" cy="12" r="1.3" fill="currentColor" stroke="none" />
+      <circle cx="4" cy="17.5" r="1.3" fill="currentColor" stroke="none" />
     </svg>
   );
 }

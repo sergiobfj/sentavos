@@ -154,7 +154,10 @@ export const assetsApi = {
 
 // ---------- Categorias ----------
 export const categoriesApi = {
-  list: () => request<Category[]>("/categories"),
+  list: (incluirArquivadas = false) =>
+    request<Category[]>(
+      `/categories${incluirArquivadas ? "?incluir_arquivadas=1" : ""}`
+    ),
   get: (id: number) => request<Category>(`/categories/${id}`),
   create: (data: CategoryCreate) =>
     request<Category>("/categories", { method: "POST", body: JSON.stringify(data) }),

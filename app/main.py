@@ -249,10 +249,22 @@ def create_category(category: CategoryCreate, session: Session = Depends(get_ses
 
 
 @router.get("/categories")
-def list_categories(session: Session = Depends(get_session),
-    dono: User = Depends(require_user)):
-    categories = session.exec(consulta(Category, dono)).all()
-    return categories
+def list_categories(
+    session: Session = Depends(get_session),
+    dono: User = Depends(require_user),
+    incluir_arquivadas: bool = Query(default=False),
+):
+    """As categorias ativas. Arquivadas só com `incluir_arquivadas=1`.
+
+    O padrão exclui porque quem chama isto quase sempre é o formulário de
+    lançamento, e oferecer 28 categorias herdadas de uma planilha é o que fazia
+    escolher uma virar um exercício de paciência. Configurações passa o
+    parâmetro pra poder desarquivar.
+    """
+    query = consulta(Category, dono)
+    if not incluir_arquivadas:
+        query = query.where(Category.archived == False)  # noqa: E712
+    return session.exec(query.order_by(Category.type, Category.name)).all()
 
 
 @router.get("/categories/{category_id}")
@@ -318,6 +330,50 @@ def delete_category(category_id: int, session: Session = Depends(get_session),
     return {"message": "Categoria excluída."}
 
 
+def _sobra_acumulada(
+    session: Session, dono: User, ate_ano: int, ate_mes: int
+) -> dict[int, float]:
+    """Quanto cada caixinha trouxe dos meses anteriores.
+
+    É o que separa uma caixinha de um teto mensal. No teto, sobrar 70 em Lazer
+    não significa nada: vira o mês e o teto volta ao cheio. Na caixinha, aqueles
+    70 continuam lá — e é assim que as pessoas de fato organizam dinheiro, que é
+    a razão de o app existir.
+
+    A conta é uma varredura só por todo o histórico anterior ao mês pedido:
+
+        sobra = Σ(alocado até o mês passado) − Σ(pago até o mês passado)
+
+    Fazer em memória, e não em SQL com janela, é escolha de tamanho: são 273
+    lançamentos e dois anos. Se um dia virar dezenas de milhares, isto vira uma
+    agregação no banco — e esta frase é o aviso de quando.
+
+    Sobra negativa é mantida: estourar a caixinha num mês significa começar o
+    seguinte devendo pra ela, que é o comportamento honesto.
+    """
+    limite = ate_ano * 12 + (ate_mes - 1)
+
+    alocado: dict[int, float] = {}
+    for b in session.exec(consulta(Budget, dono)).all():
+        if b.year * 12 + (b.month - 1) < limite:
+            alocado[b.category_id] = alocado.get(b.category_id, 0.0) + b.amount
+
+    inicio_do_mes = dt.date(ate_ano, ate_mes, 1)
+    gasto: dict[int, float] = {}
+    linhas = session.exec(
+        select(Transaction.category_id, func.coalesce(func.sum(Transaction.amount_paid), 0.0))
+        .where(Transaction.user_id == dono.id, Transaction.date < inicio_do_mes)
+        .group_by(Transaction.category_id)
+    ).all()
+    for category_id, pago in linhas:
+        gasto[category_id] = float(pago or 0.0)
+
+    return {
+        cid: round(alocado.get(cid, 0.0) - gasto.get(cid, 0.0), 2)
+        for cid in set(alocado) | set(gasto)
+    }
+
+
 # Declarado antes de /budgets/{budget_id} pra "summary" não ser lido como id.
 @router.get("/budgets/summary", response_model=BudgetSummary)
 def get_budget_summary(
@@ -357,7 +413,10 @@ def get_budget_summary(
         ).all()
     }
 
-    categories = session.exec(consulta(Category, dono).order_by(Category.type, Category.name)).all()
+    categories = session.exec(
+        consulta(Category, dono).order_by(Category.type, Category.name)
+    ).all()
+    sobras = _sobra_acumulada(session, dono, year, month)
 
     # Os três tipos sempre vêm nos totais, mesmo zerados, pra o front não
     # precisar checar chave faltando.
@@ -373,11 +432,18 @@ def get_budget_summary(
             category_type=category.type,
             color=category.color,
             icon=category.icon,
+            archived=category.archived,
             budget_id=meta.id if meta else None,
             budgeted=meta.amount if meta else 0.0,
             planned=planned,
             paid=paid,
         )
+        # Só despesa e investimento têm caixinha: receita é o que ENTRA, não um
+        # pote de onde se tira. Acumular "sobra de salário" misturaria as duas
+        # ideias e faria o total de disponível não querer dizer nada.
+        if category.type != CategoryType.INCOME:
+            item.carried_in = sobras.get(category.id, 0.0)
+            item.available = round(item.carried_in + item.budgeted - item.paid, 2)
         items.append(item)
 
         total = totals[CategoryType(category.type).value]
@@ -385,7 +451,21 @@ def get_budget_summary(
         total.planned += item.planned
         total.paid += item.paid
 
-    return BudgetSummary(year=year, month=month, items=items, totals=totals)
+    # O que entrou no mês menos o que já foi pra alguma caixinha. É a pergunta
+    # que abre o ritual do salário: "sobrou quanto pra distribuir?".
+    entrou = totals[CategoryType.INCOME.value].paid
+    separado = (
+        totals[CategoryType.EXPENSE.value].budgeted
+        + totals[CategoryType.INVESTMENT.value].budgeted
+    )
+
+    return BudgetSummary(
+        year=year,
+        month=month,
+        items=items,
+        totals=totals,
+        unallocated=round(entrou - separado, 2),
+    )
 
 
 @router.put("/budgets")

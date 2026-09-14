@@ -14,7 +14,8 @@ const TYPES: CategoryType[] = ["expense", "income", "investment"];
 const EMPTY = { name: "", type: "expense" as CategoryType, color: "#f5b301", icon: "💸" };
 
 export default function Settings() {
-  const { data: categories, isLoading, error } = useCategories();
+  // Mostra as arquivadas também: é aqui que se desarquiva.
+  const { data: categories, isLoading, error } = useCategories(true);
   const [editing, setEditing] = useState<Category | null>(null);
   const [creating, setCreating] = useState(false);
 
@@ -51,9 +52,10 @@ export default function Settings() {
 }
 
 function CategoryCard({ category, onEdit }: { category: Category; onEdit: () => void }) {
+  const update = useUpdateCategory();
   const del = useDeleteCategory();
   return (
-    <div className="cat-card">
+    <div className="cat-card" style={category.archived ? { opacity: 0.5 } : undefined}>
       <div className="top">
         <div className="cat-icon" style={{ background: withAlpha(category.color, 0.16), color: category.color }}>
           {category.icon || "•"}
@@ -61,10 +63,24 @@ function CategoryCard({ category, onEdit }: { category: Category; onEdit: () => 
         <div>
           <div className="cname">{category.name}</div>
           <span className={`badge ${category.type}`}>{CATEGORY_TYPE_LABEL[category.type]}</span>
+          {category.archived && <span className="badge" style={{ marginLeft: 6 }}>arquivada</span>}
         </div>
       </div>
       <div className="actions">
         <button className="btn btn-ghost btn-sm" onClick={onEdit}>Editar</button>
+        {/* Arquivar e não excluir: os lançamentos antigos apontam pra esta
+            categoria, e apagá-la levaria o histórico junto. Excluir continua
+            existindo só para categoria que nunca foi usada — e nesse caso a
+            API deixa, porque não há o que perder. */}
+        <button
+          className="btn btn-ghost btn-sm"
+          disabled={update.isPending}
+          onClick={() =>
+            update.mutate({ id: category.id, data: { archived: !category.archived } })
+          }
+        >
+          {category.archived ? "Desarquivar" : "Arquivar"}
+        </button>
         <button
           className="btn btn-ghost btn-sm btn-danger"
           disabled={del.isPending}

@@ -144,8 +144,14 @@ export function useDeleteAssetSnapshot() {
 }
 
 // ---------- Categorias ----------
-export function useCategories() {
-  return useQuery({ queryKey: keys.categories, queryFn: categoriesApi.list });
+export function useCategories(incluirArquivadas = false) {
+  // A chave leva o parâmetro: sem isso as duas listas (a do formulário e a de
+  // Configurações) compartilhariam cache, e arquivar uma categoria a faria
+  // sumir da tela onde se desarquiva.
+  return useQuery({
+    queryKey: [...keys.categories, incluirArquivadas],
+    queryFn: () => categoriesApi.list(incluirArquivadas),
+  });
 }
 
 export function useCreateCategory() {

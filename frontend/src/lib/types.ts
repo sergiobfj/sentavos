@@ -8,10 +8,13 @@ export interface Category {
   type: CategoryType;
   color: string;
   icon: string;
+  // Arquivada some do formulário de lançamento mas continua no banco: os
+  // lançamentos antigos apontam pra ela.
+  archived: boolean;
 }
 
-export type CategoryCreate = Omit<Category, "id">;
-export type CategoryUpdate = Partial<CategoryCreate>;
+export type CategoryCreate = Omit<Category, "id" | "archived">;
+export type CategoryUpdate = Partial<CategoryCreate> & { archived?: boolean };
 
 export interface Transaction {
   id: number;
@@ -44,10 +47,17 @@ export interface BudgetSummaryItem {
   category_type: CategoryType;
   color: string;
   icon: string;
+  archived: boolean;
   budget_id: number | null;
+  // Quanto foi separado pra esta caixinha no mês.
   budgeted: number;
   planned: number;
   paid: number;
+  // O que sobrou (ou faltou) dos meses anteriores. É o que diferencia caixinha
+  // de teto mensal: no teto, o que sobra evapora na virada.
+  carried_in: number;
+  // veio de trás + separado − gasto. O que ainda tem na caixinha.
+  available: number;
 }
 
 export interface BudgetSummaryTotals {
@@ -61,6 +71,8 @@ export interface BudgetSummary {
   month: number;
   items: BudgetSummaryItem[];
   totals: Record<CategoryType, BudgetSummaryTotals>;
+  // Quanto entrou no mês e ainda não foi pra caixinha nenhuma.
+  unallocated: number;
 }
 
 export const CATEGORY_TYPE_LABEL: Record<CategoryType, string> = {

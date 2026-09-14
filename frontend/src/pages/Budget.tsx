@@ -90,7 +90,7 @@ export default function Budget() {
           className={tab === "metas" ? "active" : ""}
           onClick={() => selectTab("metas")}
         >
-          Metas
+          Caixinhas
         </button>
         <button
           role="tab"
@@ -152,6 +152,7 @@ function Metas() {
   const gasto = totals?.expense.paid ?? 0;
   const orcadoDespesa = totals?.expense.budgeted ?? 0;
   const estourou = orcadoDespesa > 0 && gasto > orcadoDespesa;
+  const naoDistribuido = data?.unallocated ?? 0;
   // A sobra é o que o mês devolve se tudo for exatamente ao orçado.
   const leftover = totals
     ? totals.income.budgeted - totals.expense.budgeted - totals.investment.budgeted
@@ -159,11 +160,18 @@ function Metas() {
 
   return (
     <>
-      {/* O heroi do orçamento é o quanto já foi, contra o teto. É a pergunta
-          que a tela responde; receita e sobra são contexto. */}
+      {/* O herói aqui é "sobrou quanto pra distribuir" — a pergunta que abre o
+          ritual do salário. O quanto já foi gasto é contexto disso, não o
+          contrário: quem abre esta tela no dia 5 quer separar dinheiro, não
+          auditar o mês. */}
       <section className="hero">
-        <div className="rot">Gasto em despesas</div>
-        <div className="big tnum">{formatMoney(gasto)}</div>
+        <div className="rot">Falta distribuir</div>
+        <div className={`big tnum ${naoDistribuido >= 0 ? "" : "neg"}`}>
+          {formatMoney(naoDistribuido)}
+        </div>
+        <div className="rot" style={{ marginTop: "var(--s2)", fontSize: 11.5 }}>
+          Gasto no mês: <b className="tnum">{formatMoney(gasto)}</b>
+        </div>
         {orcadoDespesa > 0 ? (
           <>
             <div className="delta" style={estourou ? { color: "var(--neg)" } : undefined}>
@@ -275,6 +283,8 @@ function Section({
 function BudgetRow({ item }: { item: BudgetSummaryItem }) {
   const resta = item.budgeted - item.paid;
   const estourou = item.budgeted > 0 && resta < 0;
+  // Receita não é caixinha: é o que entra, não um pote de onde se tira.
+  const ehCaixinha = item.category_type !== "income";
   // Estourar receita é bom, estourar despesa não — a cor segue o tipo.
   const estourarEhBom = item.category_type === "income";
   const razao = item.budgeted > 0 ? item.paid / item.budgeted : 0;
@@ -298,20 +308,28 @@ function BudgetRow({ item }: { item: BudgetSummaryItem }) {
         <div className="mid">
           <div className="t">{item.category_name}</div>
           <div className="s">
-            {item.paid > 0 ? (
+            {ehCaixinha ? (
               <>
-                <b style={{ color: "var(--text)" }}>{formatMoney(item.paid)}</b>
-                {item.budgeted > 0 && (
-                  <>
+                {/* O disponível é o número da caixinha: o que dá pra gastar
+                    hoje, já contando o que veio de trás. "Gastei 480 de 750"
+                    esconde que sobraram 70 do mês passado. */}
+                <b style={{ color: item.available < 0 ? "var(--neg)" : "var(--text)" }}>
+                  {formatMoney(item.available)}
+                </b>
+                <span> disponível</span>
+                {item.carried_in !== 0 && (
+                  <span style={{ color: item.carried_in > 0 ? "var(--pos)" : "var(--neg)" }}>
                     {" · "}
-                    <span style={estourou ? { color: estourarEhBom ? "var(--pos)" : "var(--neg)" } : undefined}>
-                      {estourou ? `passou ${formatMoney(-resta)}` : `resta ${formatMoney(resta)}`}
-                    </span>
-                  </>
+                    {item.carried_in > 0 ? "+" : ""}
+                    {formatMoney(item.carried_in)} de antes
+                  </span>
                 )}
               </>
-            ) : item.planned > 0 ? (
-              <>previsto {formatMoney(item.planned)}</>
+            ) : item.paid > 0 ? (
+              <>
+                <b style={{ color: "var(--text)" }}>{formatMoney(item.paid)}</b>
+                {item.budgeted > 0 && <> de {formatMoney(item.budgeted)} previsto</>}
+              </>
             ) : (
               "sem movimento"
             )}
