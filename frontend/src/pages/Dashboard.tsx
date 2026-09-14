@@ -7,12 +7,16 @@ import { transactionsApi } from "../lib/api";
 import { useQuery } from "@tanstack/react-query";
 import { ApiError } from "../lib/api";
 import { formatMoney, formatDiaMes } from "../lib/format";
+import { Fluxo, PorCategoria, PrevistoVsPago } from "../components/Graficos";
+import { useBudgetSummary } from "../lib/queries";
 import type { Category, CategoryType, Transaction } from "../lib/types";
 
 export default function Dashboard() {
   const { period } = usePeriod();
   const { data: transactions, isLoading, error } = useTransactions();
-  const { data: categories } = useCategories();
+  const { data: categories } = useCategories(true);
+  // O previsto x pago vem do resumo do orçamento, que o backend já cruza.
+  const { data: resumo } = useBudgetSummary();
 
   // O mês anterior existe só pra comparação do cartão herói. Sem ele o número
   // grande diria "quanto sobrou" sem dizer se isso é bom — e "R$ 1.200" só
@@ -53,9 +57,28 @@ export default function Dashboard() {
     const linhas = [...acc.entries()]
       .map(([id, valor]) => ({ cat: catMap.get(id)!, valor }))
       .filter((r) => r.cat && r.valor > 0)
-      .sort((a, b) => b.valor - a.valor);
-    return { linhas: linhas.slice(0, 5), max: linhas[0]?.valor ?? 1 };
+      .map((r) => ({
+        id: r.cat.id,
+        nome: r.cat.name,
+        icone: r.cat.icon,
+        cor: r.cat.color,
+        valor: r.valor,
+      }));
+    return { linhas };
   }, [transactions, catMap]);
+
+  const previstoVsPago = useMemo(
+    () =>
+      (resumo?.items ?? [])
+        .filter((i) => i.category_type === "expense")
+        .map((i) => ({
+          id: i.category_id,
+          nome: i.category_name,
+          previsto: i.planned,
+          pago: i.paid,
+        })),
+    [resumo]
+  );
 
   if (isLoading) return <Esqueleto />;
   if (error) return <div className="error-box">{(error as ApiError).message}</div>;
@@ -66,7 +89,7 @@ export default function Dashboard() {
   return (
     <>
       <section className="hero">
-        <div className="rot">Sobrou no mês</div>
+        <div className="rot">Carteira</div>
         <div className={`big tnum ${stats.saldo >= 0 ? "pos" : "neg"}`}>
           {formatMoney(stats.saldo)}
         </div>
@@ -93,6 +116,18 @@ export default function Dashboard() {
         </div>
       </div>
 
+      {/* A proporção entre os três, logo abaixo deles e sem título próprio: são
+          os mesmos números, então merecem a faixa mas não uma seção inteira. */}
+      {(stats.income > 0 || stats.expense > 0) && (
+        <div style={{ marginTop: "var(--s3)" }}>
+          <Fluxo
+            entrou={stats.income}
+            saiu={stats.expense}
+            investido={stats.investment}
+          />
+        </div>
+      )}
+
       {vazio ? (
         <div className="empty" style={{ marginTop: "var(--s6)" }}>
           <div className="big">🪙</div>
@@ -101,6 +136,36 @@ export default function Dashboard() {
         </div>
       ) : (
         <>
+          {/* Previsto x pago primeiro: é a pergunta que mais importa no meio
+              do mês ("estou dentro do que planejei?"). O detalhamento de onde
+              o dinheiro foi vem depois, porque responde ao passado. */}
+          {previstoVsPago.length > 0 && (
+            <>
+              <div className="sec-title">
+                <h2>Previsto × pago</h2>
+                <Link to="/orcamento">Caixinhas</Link>
+              </div>
+              <div className="card card-pad">
+                <PrevistoVsPago linhas={previstoVsPago} />
+              </div>
+            </>
+          )}
+
+          {porCategoria.linhas.length > 0 && (
+            <>
+              <div className="sec-title">
+                <h2>Para onde foi</h2>
+                <Link to="/orcamento?aba=lancamentos">Ver tudo</Link>
+              </div>
+              <div className="card card-pad">
+                <PorCategoria linhas={porCategoria.linhas} />
+              </div>
+            </>
+          )}
+
+          {/* A lista fecha a tela. Início virou a aba de relatório, e nela o
+              lançamento individual é consulta rápida -- quem quer a lista
+              inteira vai em Lançamentos, que existe pra isso. */}
           <div className="sec-title">
             <h2>Últimos lançamentos</h2>
             <Link to="/orcamento?aba=lancamentos">Ver todos</Link>
@@ -110,34 +175,6 @@ export default function Dashboard() {
               <LinhaLancamento key={t.id} t={t} cat={catMap.get(t.category_id)} />
             ))}
           </div>
-
-          {porCategoria.linhas.length > 0 && (
-            <>
-              <div className="sec-title">
-                <h2>Para onde foi</h2>
-                <Link to="/orcamento">Orçamento</Link>
-              </div>
-              <div className="card card-pad">
-                {porCategoria.linhas.map(({ cat, valor }) => (
-                  <div className="breakdown-item" key={cat.id}>
-                    <div className="btop">
-                      <span>{cat.icon} {cat.name}</span>
-                      <span className="v tnum">{formatMoney(valor)}</span>
-                    </div>
-                    <div className="bar-track">
-                      <div
-                        className="bar-fill"
-                        style={{
-                          width: `${Math.max((valor / porCategoria.max) * 100, 3)}%`,
-                          background: cat.color,
-                        }}
-                      />
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </>
-          )}
         </>
       )}
     </>
