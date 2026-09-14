@@ -1,5 +1,6 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import Modal from "./Modal";
+import CategoryPicker from "./CategoryPicker";
 import {
   useCreateTransaction,
   useDeleteTransaction,
@@ -8,7 +9,15 @@ import {
 import { usePeriod } from "../lib/period";
 import { ApiError } from "../lib/api";
 import { parseMoney, todayIso } from "../lib/format";
-import type { Category, Transaction } from "../lib/types";
+import type { Category, CategoryType, Transaction } from "../lib/types";
+
+// Tres tipos, os mesmos que a categoria ja tinha. Os rotulos sao os do dia a
+// dia -- "Saida" e nao "Despesa", porque e a palavra que se usa ao lancar.
+const TIPOS: { valor: CategoryType; rotulo: string; cor: string }[] = [
+  { valor: "expense", rotulo: "Saída", cor: "var(--neg)" },
+  { valor: "income", rotulo: "Entrada", cor: "var(--pos)" },
+  { valor: "investment", rotulo: "Investir", cor: "var(--inv)" },
+];
 
 export default function TransactionForm({
   categories,
@@ -20,14 +29,36 @@ export default function TransactionForm({
   onClose: () => void;
 }) {
   const isEdit = !!transaction;
+
+  // Editando, o tipo vem da categoria que ja estava no lancamento. Criando, o
+  // padrao e saida: e o que se lanca dez vezes mais que entrada.
+  const tipoInicial: CategoryType =
+    categories.find((c) => c.id === transaction?.category_id)?.type ?? "expense";
+  const [tipo, setTipo] = useState<CategoryType>(tipoInicial);
+
   const [form, setForm] = useState({
     date: transaction?.date ?? todayIso(),
     description: transaction?.description ?? "",
-    category_id: transaction?.category_id ?? categories[0]?.id ?? 0,
+    category_id: (transaction?.category_id ?? null) as number | null,
     amount_planned: transaction?.amount_planned?.toString() ?? "",
     amount_paid: transaction?.amount_paid?.toString() ?? "",
     note: transaction?.note ?? "",
   });
+
+  const ativas = useMemo(() => categories.filter((c) => !c.archived), [categories]);
+
+  // Trocar de tipo limpa a categoria escolhida se ela nao pertence ao novo
+  // tipo. Sem isso daria pra sair com "Saida" selecionado e a categoria
+  // "Salario" salva -- um lancamento que contaria como receita e apareceria
+  // como despesa na tela.
+  function trocarTipo(novo: CategoryType) {
+    setTipo(novo);
+    const atual = categories.find((c) => c.id === form.category_id);
+    if (!atual || atual.type !== novo) {
+      const primeira = ativas.find((c) => c.type === novo);
+      setForm((f) => ({ ...f, category_id: primeira?.id ?? null }));
+    }
+  }
   const { setPeriod } = usePeriod();
   const create = useCreateTransaction();
   const update = useUpdateTransaction();
@@ -78,42 +109,64 @@ export default function TransactionForm({
           ) : (
             <button type="button" className="btn btn-ghost" onClick={onClose}>Cancelar</button>
           )}
-          <button type="submit" form="tx-form" className="btn btn-primary" disabled={pending || !form.description.trim()}>
+          <button type="submit" form="tx-form" className="btn btn-primary" disabled={pending || !form.description.trim() || !form.category_id}>
             {pending ? "Salvando…" : "Salvar"}
           </button>
         </>
       }
     >
       <form id="tx-form" className="m-body" onSubmit={submit}>
+        {/* O tipo vem primeiro porque ele estreita todo o resto: escolhido
+            "Saida", o seletor de categoria ja abre so com as de saida. Pedir a
+            categoria antes obrigaria a procurar "Mercado" numa lista que
+            tambem tem "Salario". */}
+        <div className="field">
+          <label>Tipo</label>
+          <div className="tipo-toggle" role="group" aria-label="Tipo do lançamento">
+            {TIPOS.map(({ valor, rotulo, cor }) => (
+              <button
+                type="button"
+                key={valor}
+                className={tipo === valor ? "on" : ""}
+                style={tipo === valor ? { color: cor, borderColor: cor } : undefined}
+                onClick={() => trocarTipo(valor)}
+                aria-pressed={tipo === valor}
+              >
+                {rotulo}
+              </button>
+            ))}
+          </div>
+        </div>
+
         <div className="field">
           <label htmlFor="t-desc">Descrição</label>
           <input id="t-desc" value={form.description} autoFocus placeholder="Ex.: Conta de luz"
             onChange={(e) => setForm({ ...form, description: e.target.value })} />
         </div>
-        <div className="field row2">
-          <div className="field">
-            <label htmlFor="t-date">Data</label>
-            <input id="t-date" type="date" value={form.date}
-              onChange={(e) => setForm({ ...form, date: e.target.value })} />
-          </div>
-          <div className="field">
-            <label htmlFor="t-cat">Categoria</label>
-            <select id="t-cat" value={form.category_id}
-              onChange={(e) => setForm({ ...form, category_id: Number(e.target.value) })}>
-              {categories.map((c) => (
-                <option key={c.id} value={c.id}>{c.icon} {c.name}</option>
-              ))}
-            </select>
-          </div>
+
+        <div className="field">
+          <label>Categoria</label>
+          <CategoryPicker
+            categories={ativas}
+            tipo={tipo}
+            valor={form.category_id}
+            aoEscolher={(id) => setForm({ ...form, category_id: id })}
+          />
+        </div>
+
+        <div className="field">
+          <label htmlFor="t-date">Data</label>
+          <input id="t-date" type="date" value={form.date}
+            onChange={(e) => setForm({ ...form, date: e.target.value })} />
         </div>
         <div className="field row2">
           <div className="field">
-            <label htmlFor="t-planned">Previsto (R$)</label>
+            <label htmlFor="t-planned">Previsto</label>
             <input id="t-planned" inputMode="decimal" value={form.amount_planned} placeholder="0,00"
               onChange={(e) => setForm({ ...form, amount_planned: e.target.value })} />
           </div>
           <div className="field">
-            <label htmlFor="t-paid">Pago (R$)</label>
+            <label htmlFor="t-paid">{tipo === "income" ? "Recebido" : "Pago"}</label>
             <input id="t-paid" inputMode="decimal" value={form.amount_paid} placeholder="0,00"
               onChange={(e) => setForm({ ...form, amount_paid: e.target.value })} />
           </div>
