@@ -395,3 +395,66 @@ def test_disponivel_nao_fica_negativo_sem_caixinha(client, session, dono):
     assert uber["has_envelope"] is False
     assert uber["available"] == 0.0
     assert uber["paid"] == 45.0
+
+
+def test_caixinha_nao_existe_antes_do_mes_em_que_nasceu(client, session, dono):
+    """Olhar agosto de uma caixinha criada em setembro.
+
+    O gasto de agosto aparecia como "disponível negativo" — descontado de um
+    pote que naquele mês ainda não existia. Apareceu na tela com a Academia
+    marcando −R$ 120 em agosto, com a meta cadastrada só em setembro.
+    """
+    from app.models import Budget, Category, Transaction
+
+    cat = Category(name="Academia", type="expense", color="#f00", icon="A", user_id=dono.id)
+    session.add(cat)
+    session.commit()
+    session.refresh(cat)
+
+    session.add(Transaction(
+        date=dt.date(2026, 8, 17), description="Mensalidade",
+        amount_paid=120.0, category_id=cat.id, user_id=dono.id,
+    ))
+    # A caixinha só nasce em setembro.
+    session.add(Budget(category_id=cat.id, year=2026, month=9, amount=130.0, user_id=dono.id))
+    session.commit()
+
+    agosto = client.get("/budgets/summary?year=2026&month=8").json()
+    item = next(i for i in agosto["items"] if i["category_name"] == "Academia")
+
+    assert item["has_envelope"] is False, "caixinha existia antes de nascer"
+    assert item["available"] == 0.0
+    assert item["paid"] == 120.0
+
+    # Em setembro ela já é caixinha.
+    setembro = client.get("/budgets/summary?year=2026&month=9").json()
+    item = next(i for i in setembro["items"] if i["category_name"] == "Academia")
+    assert item["has_envelope"] is True
+
+
+def test_meta_de_zero_nao_cria_caixinha(client, session, dono):
+    """Separar nada não é separar.
+
+    Tocar no campo de meta e sair dele salva um zero. Sem esta guarda, a
+    categoria virava caixinha por acidente e passava a mostrar "disponível"
+    negativo — foi o que aconteceu com Academia e Internet em produção.
+    """
+    from app.models import Budget, Category, Transaction
+
+    cat = Category(name="Internet", type="expense", color="#f00", icon="I", user_id=dono.id)
+    session.add(cat)
+    session.commit()
+    session.refresh(cat)
+
+    session.add(Budget(category_id=cat.id, year=2026, month=9, amount=0.0, user_id=dono.id))
+    session.add(Transaction(
+        date=dt.date(2026, 9, 5), description="Internet",
+        amount_paid=60.0, category_id=cat.id, user_id=dono.id,
+    ))
+    session.commit()
+
+    resumo = client.get("/budgets/summary?year=2026&month=9").json()
+    item = next(i for i in resumo["items"] if i["category_name"] == "Internet")
+
+    assert item["has_envelope"] is False
+    assert item["available"] == 0.0

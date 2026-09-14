@@ -389,6 +389,16 @@ h1, h2, h3 { margin: 0; letter-spacing: -0.02em; line-height: 1.2; }
   font-size: 12px; color: var(--text-dim); margin-top: 1px;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
+
+/* Na linha de orçamento a legenda pode ocupar duas linhas em vez de cortar.
+   Cortar "sem movimento" em "sem movimen…" gasta o mesmo espaço e entrega
+   menos — e aqui há altura de sobra, já que a linha já é de duas faixas. */
+.budget-row .mid .s {
+  white-space: normal;
+  overflow: visible;
+  text-overflow: clip;
+  line-height: 1.35;
+}
 .list .row .amt { font-size: 15px; font-weight: 700; letter-spacing: -0.02em; text-align: right; flex: none; }
 .list .row .amt.pos { color: var(--pos); }
 .list .row .amt.neg { color: var(--neg); }
@@ -685,9 +695,31 @@ textarea { min-height: 76px; resize: vertical; }
 /* ---------- Linha de orçamento ----------
    Duas faixas: a de cima identifica e deixa editar a meta, a de baixo mostra
    o quanto dela já foi. Empilhar é o que permite manter a barra de progresso
-   no celular — em colunas ela teria uns 40px e não mostraria nada. */
-.budget-row { flex-direction: column; align-items: stretch; gap: var(--s2); cursor: default; }
-.budget-top { display: flex; align-items: center; gap: var(--s3); }
+   no celular — em colunas ela teria uns 40px e não mostraria nada.
+
+   O seletor é `.list .row.budget-row` e não só `.budget-row` por causa de
+   especificidade: `.list .row` vale 0,2,0 e traz `align-items: center`, que
+   vencia um `.budget-row` de 0,1,0. Numa coluna, `center` encolhe as faixas
+   até a largura do conteúdo e as centraliza — foi o que deixou a linha com 343
+   de 557px disponíveis, o texto espremido em 56px (cortando "sem movimento" no
+   meio) e um vão enorme sobrando à direita. */
+.list .row.budget-row {
+  flex-direction: column;
+  align-items: stretch;
+  gap: var(--s2);
+  cursor: default;
+}
+.budget-top { display: flex; align-items: center; gap: var(--s3); width: 100%; }
+.budget-top .mid { flex: 1; min-width: 0; }
+
+/* Largura fixa pro campo da meta, senão ele toma o espaço do nome. Estava
+   definida só pra `.asset-row`, e aqui o input esticava pra 223px. */
+.budget-row .saldo-input { width: 104px; flex: none; }
+.budget-row .saldo-input input {
+  min-height: 40px; padding: var(--s2); font-size: 15px; text-align: right;
+}
+
+/* Alinhada sob o nome, não sob o ícone: 40 do avatar + 12 do gap. */
 .budget-bar { display: flex; align-items: center; gap: var(--s3); padding-left: 52px; }
 .budget-bar .bar-track { flex: 1; }
 .budget-bar span { font-size: 11px; font-weight: 650; min-width: 34px; text-align: right; }
@@ -706,20 +738,37 @@ textarea { min-height: 76px; resize: vertical; }
   line-height: 1.5;
 }
 
-/* O campo de meta fica quieto até ser tocado.
-   Numa tela com 28 categorias, 28 caixas de input desenhadas ao mesmo tempo
-   competem com os números que a pessoa veio ler. Sem borda ele ainda é
-   claramente editável (está alinhado à direita, com placeholder), e a borda
-   aparece no foco, que é quando ela informa alguma coisa. */
+/* O campo de meta: discreto, mas ainda reconhecível como campo.
+   A primeira versão era sem borda nenhuma, pra 28 categorias não virarem 28
+   caixas competindo com os números. Foi longe demais: na tela ele lia como um
+   número solto, e nada indicava que ali se define a meta. A borda tênue é o
+   meio-termo — some no conjunto, mas o olho registra "isto é preenchível". */
 .budget-row .saldo-input input {
   background: transparent;
-  border-color: transparent;
+  border-color: var(--border-soft);
+  border-style: dashed;
   font-weight: 650;
+  color: var(--text-dim);
 }
 .budget-row .saldo-input input:hover { border-color: var(--border); }
 .budget-row .saldo-input input:focus {
   background: var(--surface-2);
+  border-style: solid;
+  color: var(--text);
   outline: 2px solid var(--gold);
+}
+/* Com meta definida ele deixa de ser convite e vira informação. */
+.budget-row .saldo-input input:not(:placeholder-shown) {
+  border-style: solid;
+  color: var(--text);
+}
+
+/* Cabeçalho da coluna da direita: sem ele, "0,00" ali é um número sem
+   pergunta. Aparece uma vez por seção, não por linha. */
+.col-meta {
+  font-size: 10.5px; font-weight: 700; letter-spacing: 0.06em;
+  text-transform: uppercase; color: var(--text-faint);
+  text-align: right; padding: 0 var(--s4) var(--s1);
 }
 
 

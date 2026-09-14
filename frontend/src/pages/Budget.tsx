@@ -260,6 +260,7 @@ function Section({
         </span>
       </div>
 
+      <div className="col-meta">separar no mês</div>
       <div className="list">
         {visiveis.map((item) => (
           <BudgetRow key={item.category_id} item={item} />
@@ -331,9 +332,14 @@ function BudgetRow({ item }: { item: BudgetSummaryItem }) {
               </>
             ) : item.paid > 0 ? (
               <>
+                {/* Sem a palavra, "R$ 770,00" solto embaixo do nome não diz se
+                    é o que se gastou, o que se planejou ou o que sobrou. */}
                 <b style={{ color: "var(--text)" }}>{formatMoney(item.paid)}</b>
-                {item.budgeted > 0 && <> de {formatMoney(item.budgeted)} previsto</>}
+                <span> {item.category_type === "income" ? "recebidos" : "gastos"}</span>
+                {item.planned > 0 && <> · {formatMoney(item.planned)} previsto</>}
               </>
+            ) : item.planned > 0 ? (
+              <>{formatMoney(item.planned)} previsto</>
             ) : (
               "sem movimento"
             )}

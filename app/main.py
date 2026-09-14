@@ -361,15 +361,27 @@ def _sobra_acumulada(
     limite = ate_ano * 12 + (ate_mes - 1)
 
     # Primeiro, quando cada caixinha nasceu — o mês da alocação mais antiga.
+    #
+    # Meta de valor ZERO não conta como nascimento: separar nada não é separar.
+    # Isso não é tecnicismo — tocar no campo e sair dele salva um zero, e sem
+    # esta guarda a categoria virava caixinha por acidente e passava a mostrar
+    # "disponível" negativo do nada.
     nascimento: dict[int, int] = {}
     alocado: dict[int, float] = {}
     for b in session.exec(consulta(Budget, dono)).all():
+        if b.amount == 0:
+            continue
         indice = b.year * 12 + (b.month - 1)
         anterior = nascimento.get(b.category_id)
         if anterior is None or indice < anterior:
             nascimento[b.category_id] = indice
         if indice < limite:
             alocado[b.category_id] = alocado.get(b.category_id, 0.0) + b.amount
+
+    # A caixinha só existe do mês em que nasceu em diante. Olhar agosto de uma
+    # caixinha criada em setembro mostrava o gasto de agosto como "disponível
+    # negativo" — descontando de um pote que ainda não existia naquele mês.
+    nascimento = {cid: n for cid, n in nascimento.items() if n <= limite}
 
     if not nascimento:
         return {}
