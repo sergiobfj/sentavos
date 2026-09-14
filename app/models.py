@@ -25,6 +25,12 @@ class User(SQLModel, table=True):
     # intencionado apagaria o demo inteiro — e só se descobriria depois.
     read_only: bool = Field(default=False)
 
+    # A taxa CDI ao ano, em porcentagem (10.65 = 10,65% a.a.). Fica no usuário e
+    # não no ativo porque é um número só pro país inteiro: repetido por
+    # aplicação, atualizar a Selic viraria editar cinco lugares e esquecer o
+    # sexto. Nulo = ainda não informado, e aí o app não projeta nada.
+    cdi_annual: float | None = Field(default=None)
+
     created_at: dt.datetime = Field(
         default_factory=lambda: dt.datetime.now(dt.timezone.utc)
     )
@@ -199,6 +205,14 @@ class AssetBase(SQLModel):
     asset_class: AssetClass
     note: str | None = None
 
+    # Quanto do CDI a aplicação paga, em porcentagem (115.0 = 115% do CDI). É
+    # como o banco apresenta renda fixa, então o número é copiado direto de lá.
+    #
+    # Nulo significa "não rende", que é o caso de conta corrente, imóvel e
+    # carro — a maioria dos ativos. Zero diria a mesma coisa, mas tornaria
+    # impossível distinguir "não sei a taxa" de "a taxa é zero".
+    cdi_percent: float | None = None
+
 class Asset(AssetBase, table=True):
     __tablename__ = "assets"
     user_id: int = dono()
@@ -211,6 +225,7 @@ class AssetUpdate(SQLModel):
     name: str | None = None
     asset_class: AssetClass | None = None
     note: str | None = None
+    cdi_percent: float | None = None
 
 
 # O saldo de um ativo num mês. Preenchido à mão — sem cotação automática no v1.
@@ -241,6 +256,11 @@ class AssetSummaryItem(SQLModel):
     asset_class: AssetClass
     liability: bool
     note: str | None = None
+    cdi_percent: float | None = None
+    # Quanto a aplicação DEVERIA render no mês, pela taxa declarada. É bruto:
+    # não desconta imposto de renda nem IOF. Nulo quando não há taxa ou o
+    # usuário ainda não informou o CDI.
+    expected_yield: float | None = None
     # id do snapshot deste mês exato; None quando o valor veio de mês anterior.
     snapshot_id: int | None = None
     value: float = 0

@@ -8,6 +8,7 @@ from sqlmodel import Session, SQLModel, and_, func, or_, select
 
 from app.auth import ConfiguracaoIncompleta, autenticar, exigir_escrita, require_user
 from app.escopo import buscar, consulta, exigir
+from app.rendimento import rendimento_do_mes
 from app.database import create_db_and_tables, get_session
 from app.security import RateLimitMiddleware, SecurityHeadersMiddleware
 from app.models import (
@@ -608,6 +609,15 @@ def get_asset_summary(
         previous = prev_snap.value if prev_snap else 0.0
         liability = is_liability(asset.asset_class)
 
+        # O rendimento esperado parte do saldo do mês ANTERIOR: é sobre ele que
+        # os juros do mês incidiram. Usar o saldo atual contaria juros sobre o
+        # aporte que acabou de entrar, inflando o resultado.
+        esperado = None
+        if asset.cdi_percent and dono.cdi_annual and previous > 0:
+            esperado = rendimento_do_mes(
+                previous, dono.cdi_annual, asset.cdi_percent, year, month
+            )
+
         items.append(
             AssetSummaryItem(
                 asset_id=asset.id,
@@ -615,6 +625,8 @@ def get_asset_summary(
                 asset_class=asset.asset_class,
                 liability=liability,
                 note=asset.note,
+                cdi_percent=asset.cdi_percent,
+                expected_yield=esperado,
                 # Só conta como "deste mês" se o snapshot for do período pedido;
                 # valor herdado de mês anterior não tem id pra editar aqui.
                 snapshot_id=(
@@ -730,6 +742,30 @@ def delete_asset_snapshot(snapshot_id: int, session: Session = Depends(get_sessi
     session.commit()
 
     return {"message": "Saldo excluído."}
+
+
+class PerfilUpdate(SQLModel):
+    cdi_annual: float | None = None
+
+
+@router.get("/perfil")
+def get_perfil(dono: User = Depends(require_user)):
+    """Os ajustes da conta. Hoje só o CDI, que alimenta a projeção."""
+    return {"nome": dono.name, "email": dono.email, "cdi_annual": dono.cdi_annual}
+
+
+@router.patch("/perfil")
+def update_perfil(
+    dados: PerfilUpdate,
+    session: Session = Depends(get_session),
+    dono: User = Depends(require_user),
+):
+    exigir_escrita(dono)
+    # O objeto do dono vem da mesma sessão da requisição, então basta alterar.
+    dono.cdi_annual = dados.cdi_annual
+    session.add(dono)
+    session.commit()
+    return {"cdi_annual": dono.cdi_annual}
 
 
 @router.post("/assets")

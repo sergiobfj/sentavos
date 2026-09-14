@@ -1,10 +1,13 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { parseMoney } from "../lib/format";
 import Modal from "../components/Modal";
 import {
   useCategories,
   useCreateCategory,
   useDeleteCategory,
   useUpdateCategory,
+  usePerfil,
+  useSetCdi,
 } from "../lib/queries";
 import { ApiError } from "../lib/api";
 import { CATEGORY_TYPE_LABEL, type Category, type CategoryType } from "../lib/types";
@@ -22,6 +25,11 @@ export default function Settings() {
   return (
     <>
       <div className="sec-title" style={{ marginTop: 0 }}>
+        <h2>Rendimento</h2>
+      </div>
+      <CdiCard />
+
+      <div className="sec-title">
         <h2>Categorias</h2>
         <button className="link" onClick={() => setCreating(true)}>+ Nova</button>
       </div>
@@ -168,4 +176,58 @@ function withAlpha(hex: string, alpha: number): string {
   const g = parseInt(m[2], 16);
   const b = parseInt(m[3], 16);
   return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+}
+
+
+/** Onde se informa a taxa CDI atual.
+ *
+ * Um lugar só pro país inteiro, e não um campo por aplicação: repetido em cada
+ * ativo, atualizar a Selic viraria editar cinco lugares e esquecer o sexto.
+ *
+ * O valor é digitado à mão de propósito — buscar automático exigiria uma
+ * chamada a serviço externo, que a CSP do app bloqueia e que quebraria calada
+ * no dia em que o serviço saísse do ar. Um número que muda poucas vezes por ano
+ * não justifica essa dependência.
+ */
+function CdiCard() {
+  const perfil = usePerfil();
+  const salvar = useSetCdi();
+  const [valor, setValor] = useState("");
+
+  // Sincroniza quando o dado chega: o estado inicial nasce vazio porque a
+  // query ainda não respondeu na primeira renderização.
+  useEffect(() => {
+    if (perfil.data?.cdi_annual != null) setValor(String(perfil.data.cdi_annual));
+  }, [perfil.data?.cdi_annual]);
+
+  const atual = perfil.data?.cdi_annual;
+  const mudou = valor.trim() !== (atual != null ? String(atual) : "");
+
+  return (
+    <div className="card card-pad">
+      <div className="field" style={{ marginBottom: 0 }}>
+        <label htmlFor="cdi">CDI hoje (% ao ano)</label>
+        <div style={{ display: "flex", gap: "var(--s2)" }}>
+          <input
+            id="cdi"
+            inputMode="decimal"
+            value={valor}
+            placeholder="Ex.: 10,65"
+            onChange={(e) => setValor(e.target.value)}
+          />
+          <button
+            className="btn btn-primary"
+            disabled={!mudou || salvar.isPending}
+            onClick={() => salvar.mutate(parseMoney(valor))}
+          >
+            {salvar.isPending ? "…" : "Salvar"}
+          </button>
+        </div>
+        <span className="hint">
+          Usado para calcular quanto suas aplicações devem render. A projeção é
+          bruta — não desconta imposto de renda.
+        </span>
+      </div>
+    </div>
+  );
 }

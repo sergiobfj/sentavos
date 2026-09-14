@@ -152,6 +152,16 @@ export const assetsApi = {
     request<{ message: string }>(`/assets/snapshots/${id}`, { method: "DELETE" }),
 };
 
+// ---------- Perfil ----------
+export const perfilApi = {
+  get: () => request<{ nome: string; email: string; cdi_annual: number | null }>("/perfil"),
+  setCdi: (cdi_annual: number | null) =>
+    request<{ cdi_annual: number | null }>("/perfil", {
+      method: "PATCH",
+      body: JSON.stringify({ cdi_annual }),
+    }),
+};
+
 // ---------- Categorias ----------
 export const categoriesApi = {
   list: (incluirArquivadas = false) =>

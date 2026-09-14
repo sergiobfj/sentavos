@@ -1,5 +1,11 @@
 import { useMutation, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
-import { assetsApi, budgetsApi, categoriesApi, transactionsApi } from "./api";
+import {
+  assetsApi,
+  budgetsApi,
+  categoriesApi,
+  perfilApi,
+  transactionsApi,
+} from "./api";
 import { usePeriod } from "./period";
 import type {
   AssetCreate,
@@ -186,6 +192,25 @@ export function useDeleteCategory() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: keys.categories });
       invalidateMovement(qc);
+    },
+  });
+}
+
+
+// ---------- Perfil ----------
+export function usePerfil() {
+  return useQuery({ queryKey: ["perfil"], queryFn: perfilApi.get });
+}
+
+export function useSetCdi() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (cdi: number | null) => perfilApi.setCdi(cdi),
+    // O CDI muda a projeção de todo ativo, então o resumo de patrimônio
+    // precisa ser refeito junto — senão o número novo só apareceria no F5.
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["perfil"] });
+      qc.invalidateQueries({ queryKey: keys.assets });
     },
   });
 }

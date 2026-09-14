@@ -2,6 +2,7 @@ import { useMemo } from "react";
 import { Link } from "react-router-dom";
 import {
   useAssetSummary,
+  usePerfil,
   useBudgetSummary,
   useCategories,
   useTransactions,
@@ -31,6 +32,7 @@ const COR_CLASSE: Record<string, string> = {
 export default function Investments() {
   const { label, ym } = usePeriod();
   const assets = useAssetSummary();
+  const perfil = usePerfil();
   const budget = useBudgetSummary();
   const transactions = useTransactions();
   const categories = useCategories();
@@ -66,6 +68,13 @@ export default function Investments() {
   // colocou. Só faz sentido com um mês anterior pra comparar: no primeiro mês
   // o saldo inteiro apareceria como "rendimento", o que seria falso.
   const temBase = anterior > 0;
+
+  // Quanto as aplicações DEVERIAM render no mês, somando as que têm taxa. Null
+  // quando nenhuma tem — aí não há o que comparar e a linha não aparece.
+  const comTaxa = itens.filter((i) => i.expected_yield != null);
+  const esperadoTotal = comTaxa.length
+    ? comTaxa.reduce((s, i) => s + (i.expected_yield ?? 0), 0)
+    : null;
   const rendimento = variacao - aporte;
 
   if (itens.length === 0) {
@@ -112,7 +121,7 @@ export default function Investments() {
           <div className="val inv tnum">{formatMoney(aporte)}</div>
         </div>
         <div className="card">
-          <div className="rot">Rendimento</div>
+          <div className="rot">Rendeu</div>
           {temBase ? (
             <div className={`val tnum ${rendimento >= 0 ? "pos" : "neg"}`}>
               {rendimento > 0 ? "+" : ""}{formatMoney(rendimento)}
@@ -122,8 +131,23 @@ export default function Investments() {
             // lucro. Melhor um traço honesto do que um número bonito e falso.
             <div className="val" style={{ color: "var(--text-faint)" }}>—</div>
           )}
+          {esperadoTotal !== null && (
+            <div style={{ fontSize: 11, color: "var(--text-faint)", marginTop: 3 }}>
+              esperado <span className="tnum">{formatMoney(esperadoTotal)}</span>
+            </div>
+          )}
         </div>
       </div>
+
+      {/* Sem o CDI não dá pra projetar nada, e a pessoa ficaria olhando um
+          traço sem saber por quê. O aviso aponta pro lugar de resolver. */}
+      {perfil.data && perfil.data.cdi_annual == null &&
+        itens.some((i) => i.cdi_percent != null) && (
+          <div className="aviso-box" style={{ marginTop: "var(--s4)" }}>
+            Você marcou a taxa das aplicações, mas falta informar o <b>CDI atual</b>{" "}
+            para eu calcular o rendimento. <Link to="/configuracoes">Informar agora</Link>
+          </div>
+        )}
 
       <div className="sec-title">
         <h2>Onde está</h2>
@@ -149,6 +173,12 @@ export default function Investments() {
               <div className="t">{item.name}</div>
               <div className="s">
                 {ASSET_CLASS_LABEL[item.asset_class]}
+                {item.cdi_percent != null && <> · {item.cdi_percent}% do CDI</>}
+                {item.expected_yield != null && item.expected_yield > 0 && (
+                  <span style={{ color: "var(--pos)" }}>
+                    {" · +"}{formatMoney(item.expected_yield)}
+                  </span>
+                )}
                 {total > 0 && <> · {Math.round((item.value / total) * 100)}%</>}
                 {/* Saldo herdado de mês anterior: sem avisar, o número parece
                     atual e a pessoa confia num dado que não atualizou. */}

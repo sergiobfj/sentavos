@@ -98,9 +98,14 @@ export interface Asset {
   name: string;
   asset_class: AssetClass;
   note: string | null;
+  // Quanto do CDI a aplicação paga (115 = 115% do CDI). Nulo = não rende, que
+  // é o caso de conta corrente, imóvel e carro.
+  cdi_percent: number | null;
 }
 
-export type AssetCreate = Omit<Asset, "id">;
+export type AssetCreate = Omit<Asset, "id" | "cdi_percent"> & {
+  cdi_percent?: number | null;
+};
 export type AssetUpdate = Partial<AssetCreate>;
 
 export interface AssetSnapshotSet {
@@ -116,6 +121,11 @@ export interface AssetSummaryItem {
   asset_class: AssetClass;
   liability: boolean;
   note: string | null;
+  cdi_percent: number | null;
+  // Quanto a aplicação DEVERIA render no mês, pela taxa declarada. Bruto: não
+  // desconta imposto de renda nem IOF. Null quando não há taxa, ou quando o
+  // CDI ainda não foi informado nas configurações.
+  expected_yield: number | null;
   // Null quando o valor foi herdado de um mês anterior: não há saldo deste
   // mês pra editar, então a tela mostra de quando ele é (as_of).
   snapshot_id: number | null;

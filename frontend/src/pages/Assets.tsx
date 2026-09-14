@@ -10,7 +10,7 @@ import {
 } from "../lib/queries";
 import { usePeriod } from "../lib/period";
 import { ApiError } from "../lib/api";
-import { formatMoney, formatYm } from "../lib/format";
+import { formatMoney, formatYm, parseMoney } from "../lib/format";
 import {
   ASSET_CLASS_LABEL,
   ASSET_CLASS_ORDER,
@@ -18,6 +18,10 @@ import {
   type AssetClass,
   type AssetSummaryItem,
 } from "../lib/types";
+
+// Só estas classes rendem juros. Conta corrente, imóvel e carro não rendem, e
+// oferecer um campo de taxa neles seria convite a preencher errado.
+const RENDEM: AssetClass[] = ["fixed_income", "equity", "crypto"];
 
 export default function Assets() {
   const { ym } = usePeriod();
@@ -122,6 +126,7 @@ export default function Assets() {
             name: editing.name,
             asset_class: editing.asset_class,
             note: editing.note,
+            cdi_percent: editing.cdi_percent,
           }}
           onClose={() => setEditing(null)}
         />
@@ -282,7 +287,11 @@ function DeleteAssetButton({
   );
 }
 
-const EMPTY = { name: "", asset_class: "checking" as AssetClass, note: null as string | null };
+const EMPTY = {
+  name: "",
+  asset_class: "checking" as AssetClass,
+  note: null as string | null,
+};
 
 function AssetForm({ asset, onClose }: { asset?: Asset; onClose: () => void }) {
   const isEdit = !!asset;
@@ -290,6 +299,7 @@ function AssetForm({ asset, onClose }: { asset?: Asset; onClose: () => void }) {
     name: asset?.name ?? EMPTY.name,
     asset_class: asset?.asset_class ?? EMPTY.asset_class,
     note: asset?.note ?? "",
+    cdi_percent: asset?.cdi_percent?.toString() ?? "",
   });
   const create = useCreateAsset();
   const update = useUpdateAsset();
@@ -302,6 +312,9 @@ function AssetForm({ asset, onClose }: { asset?: Asset; onClose: () => void }) {
       name: form.name.trim(),
       asset_class: form.asset_class,
       note: form.note.trim() || null,
+      // Vazio vira null, e não zero: "não sei a taxa" e "a taxa é zero" são
+      // coisas diferentes, e só a segunda deveria projetar rendimento zero.
+      cdi_percent: parseMoney(form.cdi_percent),
     };
     if (isEdit) {
       update.mutate({ id: asset!.id, data: payload }, { onSuccess: onClose });
@@ -359,6 +372,23 @@ function AssetForm({ asset, onClose }: { asset?: Asset; onClose: () => void }) {
             são o que a aba de Investimento vai olhar.
           </span>
         </div>
+        {RENDEM.includes(form.asset_class) && (
+          <div className="field">
+            <label htmlFor="a-cdi">Rende quanto do CDI?</label>
+            <input
+              id="a-cdi"
+              inputMode="decimal"
+              value={form.cdi_percent}
+              placeholder="Ex.: 115"
+              onChange={(e) => setForm({ ...form, cdi_percent: e.target.value })}
+            />
+            <span className="hint">
+              Em porcentagem, como o banco mostra: 115 para "115% do CDI". Deixe
+              vazio se não render juros.
+            </span>
+          </div>
+        )}
+
         <div className="field">
           <label htmlFor="a-note">Observação</label>
           <textarea
