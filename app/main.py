@@ -338,40 +338,67 @@ def _sobra_acumulada(
 
     É o que separa uma caixinha de um teto mensal. No teto, sobrar 70 em Lazer
     não significa nada: vira o mês e o teto volta ao cheio. Na caixinha, aqueles
-    70 continuam lá — e é assim que as pessoas de fato organizam dinheiro, que é
-    a razão de o app existir.
+    70 continuam lá — e é assim que as pessoas de fato organizam dinheiro.
 
-    A conta é uma varredura só por todo o histórico anterior ao mês pedido:
+        sobra = Σ(alocado) − Σ(pago),  a partir do mês da PRIMEIRA alocação
 
-        sobra = Σ(alocado até o mês passado) − Σ(pago até o mês passado)
+    O recorte na primeira alocação não é detalhe: é o que conserta o bug que
+    apareceu em produção. Uma conta com um ano de lançamentos importados e quase
+    nenhuma meta via o ano inteiro de gastos virar dívida — a Fatura aparecia
+    devendo R$ 5.443 pra si mesma, e a Academia R$ 1.500. Somar gasto anterior à
+    existência da caixinha é cobrar de um pote que ainda não tinha sido criado.
 
-    Fazer em memória, e não em SQL com janela, é escolha de tamanho: são 273
-    lançamentos e dois anos. Se um dia virar dezenas de milhares, isto vira uma
+    Categoria que nunca recebeu alocação simplesmente não é caixinha, e fica de
+    fora do resultado.
+
+    Fazer em memória, e não em SQL com janela, é escolha de tamanho: são
+    centenas de lançamentos e dois anos. Se virar dezenas de milhares, isto vira
     agregação no banco — e esta frase é o aviso de quando.
 
-    Sobra negativa é mantida: estourar a caixinha num mês significa começar o
-    seguinte devendo pra ela, que é o comportamento honesto.
+    Sobra negativa é mantida quando a caixinha existe: estourar num mês significa
+    começar o seguinte devendo pra ela, que é o comportamento honesto.
     """
     limite = ate_ano * 12 + (ate_mes - 1)
 
+    # Primeiro, quando cada caixinha nasceu — o mês da alocação mais antiga.
+    nascimento: dict[int, int] = {}
     alocado: dict[int, float] = {}
     for b in session.exec(consulta(Budget, dono)).all():
-        if b.year * 12 + (b.month - 1) < limite:
+        indice = b.year * 12 + (b.month - 1)
+        anterior = nascimento.get(b.category_id)
+        if anterior is None or indice < anterior:
+            nascimento[b.category_id] = indice
+        if indice < limite:
             alocado[b.category_id] = alocado.get(b.category_id, 0.0) + b.amount
 
+    if not nascimento:
+        return {}
+
+    # O gasto entra por mês, pra poder descartar o que é anterior ao nascimento
+    # da caixinha. Agregar tudo de uma vez impediria esse recorte.
     inicio_do_mes = dt.date(ate_ano, ate_mes, 1)
     gasto: dict[int, float] = {}
     linhas = session.exec(
-        select(Transaction.category_id, func.coalesce(func.sum(Transaction.amount_paid), 0.0))
-        .where(Transaction.user_id == dono.id, Transaction.date < inicio_do_mes)
-        .group_by(Transaction.category_id)
+        select(
+            Transaction.category_id,
+            Transaction.date,
+            func.coalesce(func.sum(Transaction.amount_paid), 0.0),
+        )
+        .where(
+            Transaction.user_id == dono.id,
+            Transaction.date < inicio_do_mes,
+            Transaction.category_id.in_(list(nascimento)),
+        )
+        .group_by(Transaction.category_id, Transaction.date)
     ).all()
-    for category_id, pago in linhas:
-        gasto[category_id] = float(pago or 0.0)
+    for category_id, data, pago in linhas:
+        indice = data.year * 12 + (data.month - 1)
+        if indice >= nascimento[category_id]:
+            gasto[category_id] = gasto.get(category_id, 0.0) + float(pago or 0.0)
 
     return {
         cid: round(alocado.get(cid, 0.0) - gasto.get(cid, 0.0), 2)
-        for cid in set(alocado) | set(gasto)
+        for cid in nascimento
     }
 
 
@@ -442,8 +469,12 @@ def get_budget_summary(
         # Só despesa e investimento têm caixinha: receita é o que ENTRA, não um
         # pote de onde se tira. Acumular "sobra de salário" misturaria as duas
         # ideias e faria o total de disponível não querer dizer nada.
-        if category.type != CategoryType.INCOME:
-            item.carried_in = sobras.get(category.id, 0.0)
+        # Só é caixinha quem já recebeu alocação alguma vez. Sem isso, gastar
+        # numa categoria comum apareceria como "disponível negativo" — que foi
+        # exatamente o que quebrou a tela em produção.
+        if category.type != CategoryType.INCOME and category.id in sobras:
+            item.has_envelope = True
+            item.carried_in = sobras[category.id]
             item.available = round(item.carried_in + item.budgeted - item.paid, 2)
         items.append(item)
 

@@ -53,6 +53,9 @@ export interface BudgetSummaryItem {
   budgeted: number;
   planned: number;
   paid: number;
+  // True quando a categoria já recebeu alocação alguma vez. Só então ela é
+  // caixinha; antes disso gastar nela não desconta de pote nenhum.
+  has_envelope: boolean;
   // O que sobrou (ou faltou) dos meses anteriores. É o que diferencia caixinha
   // de teto mensal: no teto, o que sobra evapora na virada.
   carried_in: number;

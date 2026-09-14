@@ -236,6 +236,7 @@ function Section({
   // contrário do que se abre a tela pra ver. Aqui: primeiro quem passou do
   // teto, depois quem mais consumiu.
   const ordenar = (a: BudgetSummaryItem, b: BudgetSummaryItem) => {
+    // Estourar só faz sentido contra uma alocação deste mês.
     const estourouA = a.budgeted > 0 && a.paid > a.budgeted;
     const estourouB = b.budgeted > 0 && b.paid > b.budgeted;
     if (estourouA !== estourouB) return estourouA ? -1 : 1;
@@ -283,8 +284,11 @@ function Section({
 function BudgetRow({ item }: { item: BudgetSummaryItem }) {
   const resta = item.budgeted - item.paid;
   const estourou = item.budgeted > 0 && resta < 0;
-  // Receita não é caixinha: é o que entra, não um pote de onde se tira.
-  const ehCaixinha = item.category_type !== "income";
+  // Duas condições: receita nunca é caixinha (é o que entra, não um pote de
+  // onde se tira), e categoria que nunca recebeu alocação também não é. Sem a
+  // segunda, gastar numa categoria comum mostrava "disponível" negativo — foi o
+  // que fez a Fatura aparecer com −R$ 5.443 em produção.
+  const ehCaixinha = item.category_type !== "income" && item.has_envelope;
   // Estourar receita é bom, estourar despesa não — a cor segue o tipo.
   const estourarEhBom = item.category_type === "income";
   const razao = item.budgeted > 0 ? item.paid / item.budgeted : 0;

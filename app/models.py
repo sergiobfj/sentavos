@@ -146,6 +146,11 @@ class BudgetSummaryItem(SQLModel):
     paid: float = 0
 
     # ---------- Caixinha ----------
+    # True quando a categoria já recebeu alocação em algum mês. Só então ela é
+    # uma caixinha; antes disso é uma categoria comum, onde gastar não desconta
+    # de pote nenhum.
+    has_envelope: bool = False
+
     # O que sobrou (ou faltou) nos meses anteriores. É o que diferencia uma
     # caixinha de um teto mensal: no teto, o que sobra evapora na virada; na
     # caixinha, o dinheiro continua lá. Guardar 70 a mais em Lazer num mês

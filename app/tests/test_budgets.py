@@ -304,3 +304,94 @@ def test_categoria_arquivada_sai_da_listagem_mas_nao_do_banco(client, session, d
 
     todas = [c["name"] for c in client.get("/categories?incluir_arquivadas=1").json()]
     assert sorted(todas) == ["Mercado", "SECCO"]
+
+
+def test_categoria_sem_meta_nenhuma_nao_vira_divida(client, session, dono):
+    """O bug que apareceu em produção: -R$ 5.443 na Fatura.
+
+    A conta tinha um ano de lançamentos importados da planilha e quase nenhuma
+    meta. Somando todo o histórico de gasto contra todo o histórico de alocação,
+    o ano inteiro virava "dívida da caixinha" — e a tela mostrava a Fatura
+    devendo cinco mil pra si mesma.
+
+    Uma caixinha passa a existir quando alguém põe dinheiro nela. Gasto anterior
+    a isso é só gasto: não tem caixa contra a qual descontar.
+    """
+    from app.models import Category, Transaction
+
+    cat = Category(name="Fatura", type="expense", color="#f00", icon="F", user_id=dono.id)
+    session.add(cat)
+    session.commit()
+    session.refresh(cat)
+
+    # Um ano de gastos, meta nenhuma — exatamente o caso dos dados importados.
+    for mes in range(1, 9):
+        session.add(Transaction(
+            date=dt.date(2026, mes, 10), description="Fatura",
+            amount_paid=680.0, category_id=cat.id, user_id=dono.id,
+        ))
+    session.commit()
+
+    resumo = client.get("/budgets/summary?year=2026&month=9").json()
+    fatura = next(i for i in resumo["items"] if i["category_name"] == "Fatura")
+
+    assert fatura["carried_in"] == 0.0, "gasto sem caixinha virou dívida"
+    assert fatura["has_envelope"] is False
+
+
+def test_sobra_conta_so_a_partir_da_primeira_meta(client, session, dono):
+    """A caixinha nasce na primeira alocação, não no primeiro gasto.
+
+    Gasto de antes da caixinha existir não pode ser descontado dela: seria
+    cobrar de um pote que ainda não tinha sido criado.
+    """
+    from app.models import Budget, Category, Transaction
+
+    cat = Category(name="Mercado", type="expense", color="#f00", icon="M", user_id=dono.id)
+    session.add(cat)
+    session.commit()
+    session.refresh(cat)
+
+    # Junho e julho: gasto sem meta. Não deve entrar na conta da caixinha.
+    for mes in (6, 7):
+        session.add(Transaction(
+            date=dt.date(2026, mes, 10), description="Compras",
+            amount_paid=900.0, category_id=cat.id, user_id=dono.id,
+        ))
+
+    # Agosto: a caixinha nasce, com 800 separados e 700 gastos. Sobram 100.
+    session.add(Budget(category_id=cat.id, year=2026, month=8, amount=800.0, user_id=dono.id))
+    session.add(Transaction(
+        date=dt.date(2026, 8, 10), description="Compras",
+        amount_paid=700.0, category_id=cat.id, user_id=dono.id,
+    ))
+    session.commit()
+
+    resumo = client.get("/budgets/summary?year=2026&month=9").json()
+    mercado = next(i for i in resumo["items"] if i["category_name"] == "Mercado")
+
+    assert mercado["carried_in"] == 100.0, "os 1.800 de antes da caixinha entraram na conta"
+    assert mercado["has_envelope"] is True
+
+
+def test_disponivel_nao_fica_negativo_sem_caixinha(client, session, dono):
+    """Sem caixinha não existe "disponível" — nem zero, nem negativo."""
+    from app.models import Category, Transaction
+
+    cat = Category(name="Uber", type="expense", color="#f00", icon="U", user_id=dono.id)
+    session.add(cat)
+    session.commit()
+    session.refresh(cat)
+
+    session.add(Transaction(
+        date=dt.date(2026, 9, 3), description="Corrida",
+        amount_paid=45.0, category_id=cat.id, user_id=dono.id,
+    ))
+    session.commit()
+
+    resumo = client.get("/budgets/summary?year=2026&month=9").json()
+    uber = next(i for i in resumo["items"] if i["category_name"] == "Uber")
+
+    assert uber["has_envelope"] is False
+    assert uber["available"] == 0.0
+    assert uber["paid"] == 45.0
