@@ -6,6 +6,7 @@ import TransactionList from "../components/TransactionList";
 import {
   useBudgetSummary,
   useCategories,
+  useDeleteBudget,
   useSetBudget,
   useTransactions,
 } from "../lib/queries";
@@ -17,7 +18,7 @@ import type { BudgetSummaryItem, Category, CategoryType, Transaction } from "../
 // Despesa primeiro: é onde o orçamento aperta. Receita fecha a lista porque
 // funciona como referência ("cabe no que entra?"), não como teto.
 const SECTIONS: { type: CategoryType; title: string; hint: string }[] = [
-  { type: "expense", title: "Despesas", hint: "O teto que você se dá em cada categoria" },
+  { type: "expense", title: "Despesas", hint: "O teto que você se dá em cada categoria no mês" },
   { type: "investment", title: "Investimentos", hint: "Quanto pretende guardar no mês" },
   { type: "income", title: "Receitas", hint: "Quanto espera receber no mês" },
 ];
@@ -90,7 +91,7 @@ export default function Budget() {
           className={tab === "metas" ? "active" : ""}
           onClick={() => selectTab("metas")}
         >
-          Caixinhas
+          Orçamento
         </button>
         <button
           role="tab"
@@ -152,30 +153,25 @@ function Metas() {
   const gasto = totals?.expense.paid ?? 0;
   const orcadoDespesa = totals?.expense.budgeted ?? 0;
   const estourou = orcadoDespesa > 0 && gasto > orcadoDespesa;
-  const naoDistribuido = data?.unallocated ?? 0;
-  // A sobra é o que o mês devolve se tudo for exatamente ao orçado.
-  const leftover = totals
-    ? totals.income.budgeted - totals.expense.budgeted - totals.investment.budgeted
-    : 0;
+  const resta = orcadoDespesa - gasto;
+  const entrou = totals?.income.paid ?? 0;
+  const investido = totals?.investment.paid ?? 0;
 
   return (
     <>
-      {/* O herói aqui é "sobrou quanto pra distribuir" — a pergunta que abre o
-          ritual do salário. O quanto já foi gasto é contexto disso, não o
-          contrário: quem abre esta tela no dia 5 quer separar dinheiro, não
-          auditar o mês. */}
+      {/* O herói é o gasto do mês contra o teto do mês, e nada mais. Antes era
+          "falta distribuir", que só fazia sentido com caixinha: sem pote pra
+          encher, distribuir não é a ação de ninguém. Gastei quanto, de quanto,
+          e quanto falta — é o que se confere de cabeça na fila do mercado. */}
       <section className="hero">
-        <div className="rot">Falta distribuir</div>
-        <div className={`big tnum ${naoDistribuido >= 0 ? "" : "neg"}`}>
-          {formatMoney(naoDistribuido)}
-        </div>
-        <div className="rot" style={{ marginTop: "var(--s2)", fontSize: 11.5 }}>
-          Gasto no mês: <b className="tnum">{formatMoney(gasto)}</b>
-        </div>
+        <div className="rot">Gasto em despesas</div>
+        <div className={`big tnum ${estourou ? "neg" : ""}`}>{formatMoney(gasto)}</div>
         {orcadoDespesa > 0 ? (
           <>
             <div className="delta" style={estourou ? { color: "var(--neg)" } : undefined}>
-              de {formatMoney(orcadoDespesa)} orçado
+              {estourou
+                ? `${formatMoney(-resta)} acima do teto de ${formatMoney(orcadoDespesa)}`
+                : `de ${formatMoney(orcadoDespesa)} — faltam ${formatMoney(resta)}`}
             </div>
             <div className="bar-track" style={{ marginTop: "var(--s3)" }}>
               <div
@@ -188,19 +184,23 @@ function Metas() {
             </div>
           </>
         ) : (
-          <div className="delta">Nenhuma meta definida ainda</div>
+          // Sem teto nenhum, o convite é definir o primeiro — não um zero que
+          // parece número.
+          <div className="delta">Sem teto definido. Preencha ao lado de uma categoria.</div>
         )}
       </section>
 
+      {/* Entrou e sobrou vêm do realizado, não do orçado: número orçado em
+          cartão herói mostra intenção com cara de fato. */}
       <div className="duo" style={{ gridTemplateColumns: "1fr 1fr" }}>
         <div className="card">
-          <div className="rot">Receita orçada</div>
-          <div className="val pos tnum">{formatMoney(totals?.income.budgeted ?? 0)}</div>
+          <div className="rot">Entrou no mês</div>
+          <div className="val pos tnum">{formatMoney(entrou)}</div>
         </div>
         <div className="card">
-          <div className="rot">Sobra planejada</div>
-          <div className={`val tnum ${leftover >= 0 ? "pos" : "neg"}`}>
-            {formatMoney(leftover)}
+          <div className="rot">Sobrou</div>
+          <div className={`val tnum ${entrou - gasto - investido >= 0 ? "pos" : "neg"}`}>
+            {formatMoney(entrou - gasto - investido)}
           </div>
         </div>
       </div>
@@ -256,11 +256,13 @@ function Section({
       <div className="sec-title">
         <h2>{title}</h2>
         <span className="tnum" style={{ fontSize: 13, color: "var(--text-dim)" }}>
-          {formatMoney(pago)} de {formatMoney(orcado)}
+          {/* Sem teto na seção, "de R$ 0,00" não é informação — é um zero que
+              parece meta de zero reais. */}
+          {orcado > 0 ? `${formatMoney(pago)} de ${formatMoney(orcado)}` : formatMoney(pago)}
         </span>
       </div>
 
-      <div className="col-meta">separar no mês</div>
+      <div className="col-meta">teto do mês</div>
       <div className="list">
         {visiveis.map((item) => (
           <BudgetRow key={item.category_id} item={item} />
@@ -285,11 +287,6 @@ function Section({
 function BudgetRow({ item }: { item: BudgetSummaryItem }) {
   const resta = item.budgeted - item.paid;
   const estourou = item.budgeted > 0 && resta < 0;
-  // Duas condições: receita nunca é caixinha (é o que entra, não um pote de
-  // onde se tira), e categoria que nunca recebeu alocação também não é. Sem a
-  // segunda, gastar numa categoria comum mostrava "disponível" negativo — foi o
-  // que fez a Fatura aparecer com −R$ 5.443 em produção.
-  const ehCaixinha = item.category_type !== "income" && item.has_envelope;
   // Estourar receita é bom, estourar despesa não — a cor segue o tipo.
   const estourarEhBom = item.category_type === "income";
   const razao = item.budgeted > 0 ? item.paid / item.budgeted : 0;
@@ -313,33 +310,27 @@ function BudgetRow({ item }: { item: BudgetSummaryItem }) {
         <div className="mid">
           <div className="t">{item.category_name}</div>
           <div className="s">
-            {ehCaixinha ? (
-              <>
-                {/* O disponível é o número da caixinha: o que dá pra gastar
-                    hoje, já contando o que veio de trás. "Gastei 480 de 750"
-                    esconde que sobraram 70 do mês passado. */}
-                <b style={{ color: item.available < 0 ? "var(--neg)" : "var(--text)" }}>
-                  {formatMoney(item.available)}
-                </b>
-                <span> disponível</span>
-                {item.carried_in !== 0 && (
-                  <span style={{ color: item.carried_in > 0 ? "var(--pos)" : "var(--neg)" }}>
-                    {" · "}
-                    {item.carried_in > 0 ? "+" : ""}
-                    {formatMoney(item.carried_in)} de antes
-                  </span>
-                )}
-              </>
-            ) : item.paid > 0 ? (
+            {item.paid > 0 ? (
               <>
                 {/* Sem a palavra, "R$ 770,00" solto embaixo do nome não diz se
                     é o que se gastou, o que se planejou ou o que sobrou. */}
                 <b style={{ color: "var(--text)" }}>{formatMoney(item.paid)}</b>
                 <span> {item.category_type === "income" ? "recebidos" : "gastos"}</span>
-                {item.planned > 0 && <> · {formatMoney(item.planned)} previsto</>}
+                {/* "Faltam" só com teto: sem denominador, faltar não é nada. */}
+                {item.budgeted > 0 && (
+                  <span style={{ color: estourou ? corEstouro(item) : "var(--text-faint)" }}>
+                    {" · "}
+                    {estourou ? `${formatMoney(-resta)} acima` : `faltam ${formatMoney(resta)}`}
+                  </span>
+                )}
+                {item.budgeted === 0 && item.planned > 0 && (
+                  <> · {formatMoney(item.planned)} previsto</>
+                )}
               </>
             ) : item.planned > 0 ? (
               <>{formatMoney(item.planned)} previsto</>
+            ) : item.budgeted > 0 ? (
+              <>teto de {formatMoney(item.budgeted)}, nada gasto ainda</>
             ) : (
               "sem movimento"
             )}
@@ -369,23 +360,46 @@ function BudgetRow({ item }: { item: BudgetSummaryItem }) {
   );
 }
 
+// Estourar receita é bom (recebi mais que esperava), estourar despesa não.
+function corEstouro(item: BudgetSummaryItem): string {
+  return item.category_type === "income" ? "var(--pos)" : "var(--neg)";
+}
+
 function MetaInput({ item }: { item: BudgetSummaryItem }) {
   const { period } = usePeriod();
   const setBudget = useSetBudget();
+  const deleteBudget = useDeleteBudget();
 
   return (
     <MoneyCell
-      saved={item.budget_id ? item.budgeted : null}
-      ariaLabel={`Orçado para ${item.category_name}`}
-      pending={setBudget.isPending}
-      onCommit={(amount) =>
+      // Meta de zero é o MESMO que sem meta agora que não há caixinha, então
+      // ela mostra o campo vazio e pontilhado como as outras. Antes aparecia
+      // um "0" sólido, que lia como "teto de zero reais" — e era só o resíduo
+      // de alguém tocar no campo e sair dele.
+      saved={item.budget_id && item.budgeted !== 0 ? item.budgeted : null}
+      ariaLabel={`Teto de ${item.category_name}`}
+      pending={setBudget.isPending || deleteBudget.isPending}
+      onCommit={(amount) => {
+        // Esvaziar o campo apaga a meta, em vez de gravar zero. A API de
+        // exclusão de meta já existia e não tinha porta nenhuma na tela: quem
+        // definia um teto por engano ficava com um "R$ 0,00" pregado na linha,
+        // que parece teto de zero reais — e teto de zero e "sem teto" são
+        // coisas diferentes na hora de ler a barra.
+        //
+        // Não tem confirmação de propósito: é edição em linha e se desfaz
+        // digitando o número de novo. Diálogo aqui seria pedágio no caminho de
+        // quem só quer corrigir um dígito.
+        if (amount === null) {
+          if (item.budget_id) deleteBudget.mutate(item.budget_id);
+          return;
+        }
         setBudget.mutate({
           category_id: item.category_id,
           year: period.year,
           month: period.month,
-          amount: amount ?? 0,
-        })
-      }
+          amount,
+        });
+      }}
     />
   );
 }

@@ -297,25 +297,68 @@ def update_category(
 
 
 @router.delete("/categories/{category_id}")
-def delete_category(category_id: int, session: Session = Depends(get_session),
-    dono: User = Depends(require_user)):
+def delete_category(
+    category_id: int,
+    session: Session = Depends(get_session),
+    dono: User = Depends(require_user),
+    mover_para: int | None = Query(
+        default=None,
+        description="Categoria que herda os lançamentos. Sem isso, categoria com lançamento não é apagada.",
+    ),
+):
+    """Apaga a categoria. Com `mover_para`, os lançamentos mudam de dono antes.
+
+    O `mover_para` é o que torna possível fundir categoria pela tela, que é a
+    operação de verdade: ninguém quer "apagar Uber", quer "Uber virou
+    Transporte". Sem ele só havia o caminho destrutivo — apagar um por um os 6
+    lançamentos pra depois poder apagar a categoria.
+    """
     exigir_escrita(dono)
     category = exigir(session, Category, category_id, dono, "Categoria")
 
-    # Lançamento é histórico: apagar a categoria junto seria destruir dado que
-    # o usuário não pediu pra perder. Melhor recusar e deixar ele decidir.
     lancamentos = session.exec(
         select(func.count())
         .select_from(Transaction)
         .where(Transaction.user_id == dono.id, Transaction.category_id == category_id)
     ).one()
 
-    if lancamentos:
+    if mover_para is not None:
+        # Herdeira tem que existir, ser do dono e não ser ela mesma — senão o
+        # UPDATE passaria e o DELETE em seguida levaria os lançamentos junto.
+        if mover_para == category_id:
+            raise HTTPException(
+                status_code=400, detail="A categoria não pode herdar dela mesma."
+            )
+        destino = exigir(session, Category, mover_para, dono, "Categoria de destino")
+
+        # Tipo diferente mudaria o sinal do lançamento: mover uma despesa pra
+        # uma categoria de receita faria o gasto virar entrada, e o mês inteiro
+        # passaria a mentir. Melhor recusar do que corromper calado.
+        if destino.type != category.type:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"'{destino.name}' é {destino.type.value} e '{category.name}' é "
+                    f"{category.type.value}. Mover trocaria o sinal dos lançamentos."
+                ),
+            )
+
+        for t in session.exec(
+            consulta(Transaction, dono).where(Transaction.category_id == category_id)
+        ).all():
+            t.category_id = mover_para
+            session.add(t)
+        session.flush()
+
+    elif lancamentos:
+        # Lançamento é histórico: apagar a categoria junto seria destruir dado
+        # que o usuário não pediu pra perder. Melhor recusar e deixar ele
+        # decidir — agora com "mover_para" como saída não destrutiva.
         raise HTTPException(
             status_code=409,
             detail=(
                 f"A categoria tem {lancamentos} lançamento(s). "
-                "Exclua ou mova esses lançamentos antes de apagar a categoria."
+                "Mova esses lançamentos para outra categoria antes de apagá-la."
             ),
         )
 
@@ -328,90 +371,12 @@ def delete_category(category_id: int, session: Session = Depends(get_session),
     session.delete(category)
     session.commit()
 
-    return {"message": "Categoria excluída."}
-
-
-def _sobra_acumulada(
-    session: Session, dono: User, ate_ano: int, ate_mes: int
-) -> dict[int, float]:
-    """Quanto cada caixinha trouxe dos meses anteriores.
-
-    É o que separa uma caixinha de um teto mensal. No teto, sobrar 70 em Lazer
-    não significa nada: vira o mês e o teto volta ao cheio. Na caixinha, aqueles
-    70 continuam lá — e é assim que as pessoas de fato organizam dinheiro.
-
-        sobra = Σ(alocado) − Σ(pago),  a partir do mês da PRIMEIRA alocação
-
-    O recorte na primeira alocação não é detalhe: é o que conserta o bug que
-    apareceu em produção. Uma conta com um ano de lançamentos importados e quase
-    nenhuma meta via o ano inteiro de gastos virar dívida — a Fatura aparecia
-    devendo R$ 5.443 pra si mesma, e a Academia R$ 1.500. Somar gasto anterior à
-    existência da caixinha é cobrar de um pote que ainda não tinha sido criado.
-
-    Categoria que nunca recebeu alocação simplesmente não é caixinha, e fica de
-    fora do resultado.
-
-    Fazer em memória, e não em SQL com janela, é escolha de tamanho: são
-    centenas de lançamentos e dois anos. Se virar dezenas de milhares, isto vira
-    agregação no banco — e esta frase é o aviso de quando.
-
-    Sobra negativa é mantida quando a caixinha existe: estourar num mês significa
-    começar o seguinte devendo pra ela, que é o comportamento honesto.
-    """
-    limite = ate_ano * 12 + (ate_mes - 1)
-
-    # Primeiro, quando cada caixinha nasceu — o mês da alocação mais antiga.
-    #
-    # Meta de valor ZERO não conta como nascimento: separar nada não é separar.
-    # Isso não é tecnicismo — tocar no campo e sair dele salva um zero, e sem
-    # esta guarda a categoria virava caixinha por acidente e passava a mostrar
-    # "disponível" negativo do nada.
-    nascimento: dict[int, int] = {}
-    alocado: dict[int, float] = {}
-    for b in session.exec(consulta(Budget, dono)).all():
-        if b.amount == 0:
-            continue
-        indice = b.year * 12 + (b.month - 1)
-        anterior = nascimento.get(b.category_id)
-        if anterior is None or indice < anterior:
-            nascimento[b.category_id] = indice
-        if indice < limite:
-            alocado[b.category_id] = alocado.get(b.category_id, 0.0) + b.amount
-
-    # A caixinha só existe do mês em que nasceu em diante. Olhar agosto de uma
-    # caixinha criada em setembro mostrava o gasto de agosto como "disponível
-    # negativo" — descontando de um pote que ainda não existia naquele mês.
-    nascimento = {cid: n for cid, n in nascimento.items() if n <= limite}
-
-    if not nascimento:
-        return {}
-
-    # O gasto entra por mês, pra poder descartar o que é anterior ao nascimento
-    # da caixinha. Agregar tudo de uma vez impediria esse recorte.
-    inicio_do_mes = dt.date(ate_ano, ate_mes, 1)
-    gasto: dict[int, float] = {}
-    linhas = session.exec(
-        select(
-            Transaction.category_id,
-            Transaction.date,
-            func.coalesce(func.sum(Transaction.amount_paid), 0.0),
-        )
-        .where(
-            Transaction.user_id == dono.id,
-            Transaction.date < inicio_do_mes,
-            Transaction.category_id.in_(list(nascimento)),
-        )
-        .group_by(Transaction.category_id, Transaction.date)
-    ).all()
-    for category_id, data, pago in linhas:
-        indice = data.year * 12 + (data.month - 1)
-        if indice >= nascimento[category_id]:
-            gasto[category_id] = gasto.get(category_id, 0.0) + float(pago or 0.0)
-
-    return {
-        cid: round(alocado.get(cid, 0.0) - gasto.get(cid, 0.0), 2)
-        for cid in nascimento
-    }
+    if mover_para is not None and lancamentos:
+        return {
+            "message": f"Categoria excluída. {lancamentos} lançamento(s) movido(s).",
+            "moved": lancamentos,
+        }
+    return {"message": "Categoria excluída.", "moved": 0}
 
 
 # Declarado antes de /budgets/{budget_id} pra "summary" não ser lido como id.
@@ -426,6 +391,10 @@ def get_budget_summary(
 
     Devolve todas as categorias, inclusive as sem meta e sem lançamento, pra
     aba de Orçamento poder oferecer o campo de meta em qualquer linha.
+
+    Cada mês é lido sozinho: o teto de setembro não sabe nada de agosto. Foi
+    uma escolha de substituir a caixinha acumulativa, cujo número dependia de
+    todo o histórico de metas — ver BudgetSummaryItem.
     """
     start, end = month_bounds(year, month)
 
@@ -456,7 +425,6 @@ def get_budget_summary(
     categories = session.exec(
         consulta(Category, dono).order_by(Category.type, Category.name)
     ).all()
-    sobras = _sobra_acumulada(session, dono, year, month)
 
     # Os três tipos sempre vêm nos totais, mesmo zerados, pra o front não
     # precisar checar chave faltando.
@@ -478,16 +446,6 @@ def get_budget_summary(
             planned=planned,
             paid=paid,
         )
-        # Só despesa e investimento têm caixinha: receita é o que ENTRA, não um
-        # pote de onde se tira. Acumular "sobra de salário" misturaria as duas
-        # ideias e faria o total de disponível não querer dizer nada.
-        # Só é caixinha quem já recebeu alocação alguma vez. Sem isso, gastar
-        # numa categoria comum apareceria como "disponível negativo" — que foi
-        # exatamente o que quebrou a tela em produção.
-        if category.type != CategoryType.INCOME and category.id in sobras:
-            item.has_envelope = True
-            item.carried_in = sobras[category.id]
-            item.available = round(item.carried_in + item.budgeted - item.paid, 2)
         items.append(item)
 
         total = totals[CategoryType(category.type).value]
@@ -495,21 +453,7 @@ def get_budget_summary(
         total.planned += item.planned
         total.paid += item.paid
 
-    # O que entrou no mês menos o que já foi pra alguma caixinha. É a pergunta
-    # que abre o ritual do salário: "sobrou quanto pra distribuir?".
-    entrou = totals[CategoryType.INCOME.value].paid
-    separado = (
-        totals[CategoryType.EXPENSE.value].budgeted
-        + totals[CategoryType.INVESTMENT.value].budgeted
-    )
-
-    return BudgetSummary(
-        year=year,
-        month=month,
-        items=items,
-        totals=totals,
-        unallocated=round(entrou - separado, 2),
-    )
+    return BudgetSummary(year=year, month=month, items=items, totals=totals)
 
 
 @router.put("/budgets")

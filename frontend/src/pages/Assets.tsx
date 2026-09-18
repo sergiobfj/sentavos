@@ -1,10 +1,13 @@
 import { useMemo, useState } from "react";
 import Modal from "../components/Modal";
+import ConfirmDialog from "../components/ConfirmDialog";
 import MoneyCell from "../components/MoneyCell";
+import { IconeLapis } from "../components/TransactionList";
 import {
   useAssetSummary,
   useCreateAsset,
   useDeleteAsset,
+  useDeleteAssetSnapshot,
   useSetAssetSnapshot,
   useUpdateAsset,
 } from "../lib/queries";
@@ -204,12 +207,19 @@ function AssetRow({
 }) {
   const { period } = usePeriod();
   const setSnapshot = useSetAssetSnapshot();
+  const removeSnapshot = useDeleteAssetSnapshot();
   // Valor herdado de mês anterior não é editável aqui: o input fica vazio e o
   // saldo antigo vira placeholder, pra não parecer que o mês já foi preenchido.
   const herdado = item.snapshot_id == null && item.as_of != null;
 
   return (
     <div className="row asset-row">
+      {/* O ícone abre a edição desde sempre; o que faltava era alguém
+          descobrir isso. Um emoji colorido não se parece com um botão, então
+          a única porta pra "editar ou excluir este ativo" era invisível — e
+          quem lançou um investimento errado não achou como apagar. O lápis no
+          fim da linha resolve; o ícone continua funcionando pra quem já
+          aprendeu o caminho. */}
       <button
         className="avatar"
         onClick={onEdit}
@@ -228,15 +238,26 @@ function AssetRow({
           {/* O estado do saldo vira texto curto em vez de coluna própria. Num
               celular, "de mai/2026" ao lado do nome diz o mesmo que uma coluna
               "Referência" e não custa um quinto da largura da tela. */}
-          {item.as_of == null
-            ? "sem saldo"
-            : item.as_of === ym
-              ? "atualizado neste mês"
-              : `de ${formatYm(item.as_of)}`}
-          {item.change !== 0 && item.as_of != null && (
-            <span style={{ color: changeColor(item) }}>
-              {" · "}{formatSigned(item.change)}
-            </span>
+          {/* Sobram ~130px aqui: 400 de tela menos avatar, campo de saldo,
+              lápis, vãos e recuo. Então a legenda diz UMA coisa, a mais
+              informativa, em vez de truncar duas.
+              "atualizado neste mês · +R$ 1.4…" era o pior dos mundos — o
+              rótulo inteiro e o número, que é o que se olha, cortado.
+              Saldo do mês corrente é o esperado, então ele não precisa de
+              rótulo: a variação sozinha já diz que o mês foi preenchido. Só o
+              que fura a expectativa (saldo herdado, saldo ausente) vira
+              palavra na tela. */}
+          {item.as_of == null ? (
+            "sem saldo"
+          ) : item.change !== 0 ? (
+            <>
+              {item.as_of !== ym && <>de {formatYm(item.as_of)} · </>}
+              <span style={{ color: changeColor(item) }}>{formatSigned(item.change)}</span>
+            </>
+          ) : item.as_of === ym ? (
+            "deste mês"
+          ) : (
+            `de ${formatYm(item.as_of)}`
           )}
         </div>
       </div>
@@ -246,17 +267,32 @@ function AssetRow({
           saved={item.snapshot_id != null ? item.value : null}
           ariaLabel={`Saldo de ${item.name}`}
           placeholder={herdado ? formatMoney(item.value) : "0,00"}
-          pending={setSnapshot.isPending}
-          onCommit={(amount) =>
+          pending={setSnapshot.isPending || removeSnapshot.isPending}
+          onCommit={(amount) => {
+            // Esvaziar o campo apaga o saldo DESTE mês; o ativo volta a herdar
+            // o do mês anterior. Antes isso gravava zero, e zero é uma
+            // afirmação forte: dizia "esta aplicação não tem nada", derrubando
+            // o patrimônio do mês, quando a verdade era "não atualizei ainda".
+            if (amount === null) {
+              if (item.snapshot_id != null) removeSnapshot.mutate(item.snapshot_id);
+              return;
+            }
             setSnapshot.mutate({
               asset_id: item.asset_id,
               year: period.year,
               month: period.month,
-              value: amount ?? 0,
-            })
-          }
+              value: amount,
+            });
+          }}
         />
       </div>
+
+      {/* Botão de verdade, e não o span decorativo da lista: aqui a linha não
+          é clicável (tem o campo de saldo dentro dela), então o lápis precisa
+          ser o alvo. */}
+      <button className="row-editar" onClick={onEdit} aria-label={`Editar ${item.name}`}>
+        <IconeLapis />
+      </button>
     </div>
   );
 }
@@ -270,20 +306,35 @@ function DeleteAssetButton({
   name: string;
   onDone: () => void;
 }) {
+  const [confirmando, setConfirmando] = useState(false);
   const del = useDeleteAsset();
+
   return (
-    <button
-      type="button"
-      className="btn btn-danger"
-      disabled={del.isPending}
-      onClick={() => {
-        if (confirm(`Excluir "${name}"? O histórico de saldos vai junto.`)) {
-          del.mutate(id, { onSuccess: onDone });
-        }
-      }}
-    >
-      {del.isPending ? "Excluindo…" : "Excluir"}
-    </button>
+    <>
+      <button
+        type="button"
+        className="btn btn-danger"
+        disabled={del.isPending}
+        onClick={() => setConfirmando(true)}
+      >
+        Excluir
+      </button>
+
+      {confirmando && (
+        <ConfirmDialog
+          title="Excluir ativo"
+          itemName={name}
+          consequences={[
+            "Todo o histórico de saldos deste ativo vai junto, em todos os meses.",
+            "O patrimônio líquido e a aba de Investir mudam na hora.",
+          ]}
+          pending={del.isPending}
+          error={(del.error as ApiError | null)?.message ?? null}
+          onCancel={() => setConfirmando(false)}
+          onConfirm={() => del.mutate(id, { onSuccess: onDone })}
+        />
+      )}
+    </>
   );
 }
 

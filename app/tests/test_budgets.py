@@ -190,104 +190,6 @@ def test_excluir_categoria_com_lancamento_da_409(client):
     assert len(client.get("/categories").json()) == 1
 
 
-# ---------- Caixinhas ----------
-# A diferença entre caixinha e teto mensal mora aqui: no teto, o que sobra
-# evapora na virada do mês; na caixinha, continua lá.
-
-def test_sobra_do_mes_anterior_entra_na_caixinha(client, session, dono):
-    from app.models import Budget, Category, Transaction
-
-    cat = Category(name="Lazer", type="expense", color="#f00", icon="L", user_id=dono.id)
-    session.add(cat)
-    session.commit()
-    session.refresh(cat)
-
-    # Agosto: separou 300, gastou 230. Sobraram 70.
-    session.add(Budget(category_id=cat.id, year=2026, month=8, amount=300.0, user_id=dono.id))
-    session.add(Transaction(date=dt.date(2026, 8, 10), description="Cinema",
-                            amount_paid=230.0, category_id=cat.id, user_id=dono.id))
-    # Setembro: separou 250.
-    session.add(Budget(category_id=cat.id, year=2026, month=9, amount=250.0, user_id=dono.id))
-    session.commit()
-
-    resumo = client.get("/budgets/summary?year=2026&month=9").json()
-    lazer = next(i for i in resumo["items"] if i["category_name"] == "Lazer")
-
-    assert lazer["carried_in"] == 70.0
-    # 70 que vieram + 250 separados − 0 gasto = 320 disponíveis.
-    assert lazer["available"] == 320.0
-
-
-def test_estourar_a_caixinha_deixa_divida_pro_mes_seguinte(client, session, dono):
-    """Sobra negativa é mantida de propósito.
-
-    Zerar o negativo faria estourar a caixinha sair de graça — e a pessoa
-    começaria o mês seguinte achando que tem mais do que tem.
-    """
-    from app.models import Budget, Category, Transaction
-
-    cat = Category(name="Mercado", type="expense", color="#f00", icon="M", user_id=dono.id)
-    session.add(cat)
-    session.commit()
-    session.refresh(cat)
-
-    session.add(Budget(category_id=cat.id, year=2026, month=8, amount=500.0, user_id=dono.id))
-    session.add(Transaction(date=dt.date(2026, 8, 12), description="Compras",
-                            amount_paid=620.0, category_id=cat.id, user_id=dono.id))
-    session.commit()
-
-    resumo = client.get("/budgets/summary?year=2026&month=9").json()
-    mercado = next(i for i in resumo["items"] if i["category_name"] == "Mercado")
-
-    assert mercado["carried_in"] == -120.0
-
-
-def test_receita_nao_acumula_sobra(client, session, dono):
-    """Receita é o que entra, não um pote de onde se tira.
-
-    Acumular "sobra de salário" misturaria as duas ideias e faria o total de
-    disponível não querer dizer nada.
-    """
-    from app.models import Budget, Category, Transaction
-
-    cat = Category(name="Salário", type="income", color="#0f0", icon="S", user_id=dono.id)
-    session.add(cat)
-    session.commit()
-    session.refresh(cat)
-
-    session.add(Budget(category_id=cat.id, year=2026, month=8, amount=4000.0, user_id=dono.id))
-    session.add(Transaction(date=dt.date(2026, 8, 5), description="Salário",
-                            amount_paid=4200.0, category_id=cat.id, user_id=dono.id))
-    session.commit()
-
-    resumo = client.get("/budgets/summary?year=2026&month=9").json()
-    salario = next(i for i in resumo["items"] if i["category_name"] == "Salário")
-
-    assert salario["carried_in"] == 0.0
-    assert salario["available"] == 0.0
-
-
-def test_nao_distribuido_e_o_que_entrou_menos_o_que_foi_separado(client, session, dono):
-    """O número que abre o ritual do salário."""
-    from app.models import Budget, Category, Transaction
-
-    receita = Category(name="Salário", type="income", color="#0f0", icon="S", user_id=dono.id)
-    gasto = Category(name="Aluguel", type="expense", color="#f00", icon="A", user_id=dono.id)
-    session.add_all([receita, gasto])
-    session.commit()
-    session.refresh(receita)
-    session.refresh(gasto)
-
-    session.add(Transaction(date=dt.date(2026, 9, 5), description="Salário",
-                            amount_paid=4500.0, category_id=receita.id, user_id=dono.id))
-    session.add(Budget(category_id=gasto.id, year=2026, month=9, amount=1450.0, user_id=dono.id))
-    session.commit()
-
-    resumo = client.get("/budgets/summary?year=2026&month=9").json()
-
-    assert resumo["unallocated"] == 3050.0
-
-
 # ---------- Arquivamento ----------
 
 def test_categoria_arquivada_sai_da_listagem_mas_nao_do_banco(client, session, dono):
@@ -306,155 +208,115 @@ def test_categoria_arquivada_sai_da_listagem_mas_nao_do_banco(client, session, d
     assert sorted(todas) == ["Mercado", "SECCO"]
 
 
-def test_categoria_sem_meta_nenhuma_nao_vira_divida(client, session, dono):
-    """O bug que apareceu em produção: -R$ 5.443 na Fatura.
+# ---------- Teto mensal, sem acúmulo ----------
+# Existiu aqui uma bateria de testes de caixinha: sobra do mês anterior,
+# dívida herdada, mês de nascimento da caixinha. Ela protegia um cálculo que
+# somava todo o histórico de metas e gastos — e cujo resultado ninguém
+# conseguia conferir de cabeça. Os testes abaixo travam o contrário: cada mês
+# se explica sozinho.
 
-    A conta tinha um ano de lançamentos importados da planilha e quase nenhuma
-    meta. Somando todo o histórico de gasto contra todo o histórico de alocação,
-    o ano inteiro virava "dívida da caixinha" — e a tela mostrava a Fatura
-    devendo cinco mil pra si mesma.
+def test_mes_nao_herda_sobra_do_anterior(client):
+    """Sobrar em julho não aumenta o teto de agosto."""
+    cat = criar_categoria(client, "Lazer")
+    definir_meta(client, cat["id"], 250, year=2026, month=7)
+    lancar(client, cat["id"], "2026-07-10", paid=180)  # sobraram 70
 
-    Uma caixinha passa a existir quando alguém põe dinheiro nela. Gasto anterior
-    a isso é só gasto: não tem caixa contra a qual descontar.
-    """
-    from app.models import Category, Transaction
-
-    cat = Category(name="Fatura", type="expense", color="#f00", icon="F", user_id=dono.id)
-    session.add(cat)
-    session.commit()
-    session.refresh(cat)
-
-    # Um ano de gastos, meta nenhuma — exatamente o caso dos dados importados.
-    for mes in range(1, 9):
-        session.add(Transaction(
-            date=dt.date(2026, mes, 10), description="Fatura",
-            amount_paid=680.0, category_id=cat.id, user_id=dono.id,
-        ))
-    session.commit()
-
-    resumo = client.get("/budgets/summary?year=2026&month=9").json()
-    fatura = next(i for i in resumo["items"] if i["category_name"] == "Fatura")
-
-    assert fatura["carried_in"] == 0.0, "gasto sem caixinha virou dívida"
-    assert fatura["has_envelope"] is False
-
-
-def test_sobra_conta_so_a_partir_da_primeira_meta(client, session, dono):
-    """A caixinha nasce na primeira alocação, não no primeiro gasto.
-
-    Gasto de antes da caixinha existir não pode ser descontado dela: seria
-    cobrar de um pote que ainda não tinha sido criado.
-    """
-    from app.models import Budget, Category, Transaction
-
-    cat = Category(name="Mercado", type="expense", color="#f00", icon="M", user_id=dono.id)
-    session.add(cat)
-    session.commit()
-    session.refresh(cat)
-
-    # Junho e julho: gasto sem meta. Não deve entrar na conta da caixinha.
-    for mes in (6, 7):
-        session.add(Transaction(
-            date=dt.date(2026, mes, 10), description="Compras",
-            amount_paid=900.0, category_id=cat.id, user_id=dono.id,
-        ))
-
-    # Agosto: a caixinha nasce, com 800 separados e 700 gastos. Sobram 100.
-    session.add(Budget(category_id=cat.id, year=2026, month=8, amount=800.0, user_id=dono.id))
-    session.add(Transaction(
-        date=dt.date(2026, 8, 10), description="Compras",
-        amount_paid=700.0, category_id=cat.id, user_id=dono.id,
-    ))
-    session.commit()
-
-    resumo = client.get("/budgets/summary?year=2026&month=9").json()
-    mercado = next(i for i in resumo["items"] if i["category_name"] == "Mercado")
-
-    assert mercado["carried_in"] == 100.0, "os 1.800 de antes da caixinha entraram na conta"
-    assert mercado["has_envelope"] is True
-
-
-def test_disponivel_nao_fica_negativo_sem_caixinha(client, session, dono):
-    """Sem caixinha não existe "disponível" — nem zero, nem negativo."""
-    from app.models import Category, Transaction
-
-    cat = Category(name="Uber", type="expense", color="#f00", icon="U", user_id=dono.id)
-    session.add(cat)
-    session.commit()
-    session.refresh(cat)
-
-    session.add(Transaction(
-        date=dt.date(2026, 9, 3), description="Corrida",
-        amount_paid=45.0, category_id=cat.id, user_id=dono.id,
-    ))
-    session.commit()
-
-    resumo = client.get("/budgets/summary?year=2026&month=9").json()
-    uber = next(i for i in resumo["items"] if i["category_name"] == "Uber")
-
-    assert uber["has_envelope"] is False
-    assert uber["available"] == 0.0
-    assert uber["paid"] == 45.0
-
-
-def test_caixinha_nao_existe_antes_do_mes_em_que_nasceu(client, session, dono):
-    """Olhar agosto de uma caixinha criada em setembro.
-
-    O gasto de agosto aparecia como "disponível negativo" — descontado de um
-    pote que naquele mês ainda não existia. Apareceu na tela com a Academia
-    marcando −R$ 120 em agosto, com a meta cadastrada só em setembro.
-    """
-    from app.models import Budget, Category, Transaction
-
-    cat = Category(name="Academia", type="expense", color="#f00", icon="A", user_id=dono.id)
-    session.add(cat)
-    session.commit()
-    session.refresh(cat)
-
-    session.add(Transaction(
-        date=dt.date(2026, 8, 17), description="Mensalidade",
-        amount_paid=120.0, category_id=cat.id, user_id=dono.id,
-    ))
-    # A caixinha só nasce em setembro.
-    session.add(Budget(category_id=cat.id, year=2026, month=9, amount=130.0, user_id=dono.id))
-    session.commit()
+    definir_meta(client, cat["id"], 250, year=2026, month=8)
+    lancar(client, cat["id"], "2026-08-05", paid=200)
 
     agosto = client.get("/budgets/summary?year=2026&month=8").json()
-    item = next(i for i in agosto["items"] if i["category_name"] == "Academia")
+    lazer = next(i for i in agosto["items"] if i["category_name"] == "Lazer")
 
-    assert item["has_envelope"] is False, "caixinha existia antes de nascer"
-    assert item["available"] == 0.0
-    assert item["paid"] == 120.0
-
-    # Em setembro ela já é caixinha.
-    setembro = client.get("/budgets/summary?year=2026&month=9").json()
-    item = next(i for i in setembro["items"] if i["category_name"] == "Academia")
-    assert item["has_envelope"] is True
+    assert lazer["budgeted"] == 250.0, "o teto de agosto é o de agosto"
+    assert lazer["paid"] == 200.0
+    # E os 70 que sobraram em julho não aparecem em campo nenhum.
+    assert "carried_in" not in lazer
+    assert "available" not in lazer
+    assert "has_envelope" not in lazer
 
 
-def test_meta_de_zero_nao_cria_caixinha(client, session, dono):
-    """Separar nada não é separar.
+def test_estourar_um_mes_nao_deixa_divida_no_seguinte(client):
+    """O bug da Fatura com −R$ 5.443, agora impossível por construção."""
+    cat = criar_categoria(client, "Fatura")
+    definir_meta(client, cat["id"], 100, year=2026, month=7)
+    lancar(client, cat["id"], "2026-07-10", paid=5000)
 
-    Tocar no campo de meta e sair dele salva um zero. Sem esta guarda, a
-    categoria virava caixinha por acidente e passava a mostrar "disponível"
-    negativo — foi o que aconteceu com Academia e Internet em produção.
-    """
-    from app.models import Budget, Category, Transaction
+    agosto = client.get("/budgets/summary?year=2026&month=8").json()
+    fatura = next(i for i in agosto["items"] if i["category_name"] == "Fatura")
 
-    cat = Category(name="Internet", type="expense", color="#f00", icon="I", user_id=dono.id)
-    session.add(cat)
-    session.commit()
-    session.refresh(cat)
+    assert fatura["paid"] == 0.0, "o estouro de julho não persegue agosto"
+    assert fatura["budgeted"] == 0.0
 
-    session.add(Budget(category_id=cat.id, year=2026, month=9, amount=0.0, user_id=dono.id))
-    session.add(Transaction(
-        date=dt.date(2026, 9, 5), description="Internet",
-        amount_paid=60.0, category_id=cat.id, user_id=dono.id,
-    ))
-    session.commit()
 
-    resumo = client.get("/budgets/summary?year=2026&month=9").json()
-    item = next(i for i in resumo["items"] if i["category_name"] == "Internet")
+def test_gasto_sem_meta_aparece_sem_teto(client):
+    """Categoria sem meta não é categoria proibida — só não tem régua."""
+    cat = criar_categoria(client, "Uber")
+    lancar(client, cat["id"], "2026-07-10", paid=42)
 
-    assert item["has_envelope"] is False
-    assert item["available"] == 0.0
+    resumo = client.get("/budgets/summary?year=2026&month=7").json()
+    uber = next(i for i in resumo["items"] if i["category_name"] == "Uber")
+
+    assert uber["paid"] == 42.0
+    assert uber["budgeted"] == 0.0
+    assert uber["budget_id"] is None
+
+
+def test_summary_nao_devolve_mais_unallocated(client):
+    criar_categoria(client)
+    resumo = client.get("/budgets/summary?year=2026&month=7").json()
+    assert "unallocated" not in resumo
+
+
+# ---------- Fundir categoria ----------
+# "Apagar Uber" não é o que se quer; o que se quer é "Uber virou Transporte".
+
+def test_mover_para_transfere_os_lancamentos_e_apaga_a_categoria(client):
+    uber = criar_categoria(client, "UBER")
+    transporte = criar_categoria(client, "Transporte")
+    lancar(client, uber["id"], "2026-07-10", paid=30)
+    lancar(client, uber["id"], "2026-07-12", paid=12)
+
+    r = client.delete(f"/categories/{uber['id']}?mover_para={transporte['id']}")
+
+    assert r.status_code == 200
+    assert r.json()["moved"] == 2
+    assert [c["name"] for c in client.get("/categories").json()] == ["Transporte"]
+
+    # E o dinheiro chegou inteiro do outro lado.
+    resumo = client.get("/budgets/summary?year=2026&month=7").json()
+    linha = next(i for i in resumo["items"] if i["category_name"] == "Transporte")
+    assert linha["paid"] == 42.0
+
+
+def test_mover_para_tipo_diferente_da_400(client):
+    """Mover despesa pra receita trocaria o sinal e faria o mês mentir."""
+    gasto = criar_categoria(client, "Mercado", type="expense")
+    entrada = criar_categoria(client, "Salário", type="income")
+    lancar(client, gasto["id"], "2026-07-10", paid=300)
+
+    r = client.delete(f"/categories/{gasto['id']}?mover_para={entrada['id']}")
+
+    assert r.status_code == 400
+    assert "sinal" in r.json()["detail"]
+    # Nada se move quando a resposta é recusa.
+    assert len(client.get("/categories").json()) == 2
+    resumo = client.get("/budgets/summary?year=2026&month=7").json()
+    assert next(i for i in resumo["items"] if i["category_name"] == "Mercado")["paid"] == 300.0
+
+
+def test_mover_para_ela_mesma_da_400(client):
+    cat = criar_categoria(client)
+    lancar(client, cat["id"], "2026-07-10", paid=10)
+
+    r = client.delete(f"/categories/{cat['id']}?mover_para={cat['id']}")
+
+    assert r.status_code == 400
+    assert len(client.get("/categories").json()) == 1
+
+
+def test_mover_para_categoria_inexistente_da_404(client):
+    cat = criar_categoria(client)
+    lancar(client, cat["id"], "2026-07-10", paid=10)
+
+    assert client.delete(f"/categories/{cat['id']}?mover_para=9999").status_code == 404
+    assert len(client.get("/categories").json()) == 1

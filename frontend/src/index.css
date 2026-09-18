@@ -393,7 +393,13 @@ h1, h2, h3 { margin: 0; letter-spacing: -0.02em; line-height: 1.2; }
 /* Na linha de orçamento a legenda pode ocupar duas linhas em vez de cortar.
    Cortar "sem movimento" em "sem movimen…" gasta o mesmo espaço e entrega
    menos — e aqui há altura de sobra, já que a linha já é de duas faixas. */
-.budget-row .mid .s {
+/* `.list .row.budget-row`, e não `.budget-row` sozinho: a regra base é
+   `.list .row .mid .s` (0,4,0) e perderia só pra (0,3,0), então o nowrap dela
+   continuava valendo e a legenda truncava em "R$ 120,00 …" mesmo com
+   white-space: normal declarado aqui. É a MESMA armadilha que já tinha
+   espremido a linha de orçamento antes — vale conferir a especificidade
+   sempre que uma regra de `.budget-row`/`.asset-row` "não pega". */
+.list .row.budget-row .mid .s {
   white-space: normal;
   overflow: visible;
   text-overflow: clip;
@@ -465,6 +471,14 @@ h1, h2, h3 { margin: 0; letter-spacing: -0.02em; line-height: 1.2; }
 .btn-ghost { background: transparent; border-color: transparent; color: var(--text-dim); }
 .btn-ghost:active { background: var(--surface-2); }
 .btn-danger { background: transparent; border-color: rgba(255, 107, 107, 0.35); color: var(--neg); }
+
+/* Vermelho cheio, só pro botão que confirma a exclusão no diálogo. O
+   btn-danger contornado serve pra "abrir a conversa sobre excluir"; este é o
+   que executa, e a diferença de peso entre os dois é o que evita confundir os
+   dois passos. */
+.btn-danger-solid {
+  background: var(--neg); border-color: var(--neg); color: #2a0a0a; font-weight: 750;
+}
 .btn-sm { min-height: 36px; padding: 0 var(--s3); font-size: 13px; }
 .btn-block { width: 100%; }
 
@@ -631,6 +645,61 @@ textarea { min-height: 76px; resize: vertical; }
   display: grid; place-items: center; font-size: 18px; flex: none;
 }
 .row-actions { display: flex; gap: var(--s2); margin-left: auto; }
+
+/* ------------------------------------------------- Diálogo de exclusão --- */
+
+.modal-confirm { max-width: 400px; }
+.confirm-body { text-align: center; padding-top: var(--s6); }
+.confirm-icone {
+  width: 48px; height: 48px; border-radius: var(--r-pill);
+  display: grid; place-items: center; margin: 0 auto var(--s4);
+  background: rgba(255, 107, 107, 0.12); color: var(--neg);
+}
+.confirm-titulo { font-size: 17px; font-weight: 750; margin-bottom: var(--s2); }
+/* O nome do item é o dado que faz a pessoa parar: é por ele que se percebe
+   "não era esse que eu queria apagar". Por isso tem peso de número herói. */
+.confirm-item {
+  font-size: 15px; font-weight: 700; color: var(--gold);
+  word-break: break-word; margin-bottom: var(--s3);
+}
+.confirm-conseq {
+  list-style: none; text-align: left;
+  background: var(--surface-2); border-radius: var(--r-sm);
+  padding: var(--s3); margin-bottom: var(--s3);
+  font-size: 13px; color: var(--text-dim); line-height: 1.55;
+}
+.confirm-conseq li { display: flex; gap: var(--s2); }
+.confirm-conseq li::before { content: "•"; color: var(--neg); flex: none; }
+.confirm-aviso { font-size: 12.5px; color: var(--text-faint); margin: 0; }
+.confirm-body .field { text-align: left; margin-top: var(--s4); margin-bottom: 0; }
+
+/* ------------------------------------------------------ Ação na linha --- */
+
+/* O lápis que abre a edição. Fica à direita, separado do corpo da linha por
+   uma borda, porque a linha inteira também é clicável: sem a separação visual
+   o dedo não sabe que ali muda o alvo. */
+.row-editar {
+  /* 32px onde ele é só dica visual (a linha inteira já é o alvo). Os 44px de
+     alvo mínimo valem pra .asset-row lá embaixo, onde a linha tem campo
+     dentro e o lápis é o único jeito de abrir a edição. Nasceu com 44 em todo
+     lugar e comeu largura do texto: "atualizado neste mê…". */
+  flex: none; width: 32px; align-self: stretch;
+  display: grid; place-items: center;
+  /* As margens negativas comem a própria borda interna da linha: sem elas o
+     lápis flutuaria a 16px da borda direita e a linha divisória seria um
+     tracinho no meio do nada. Com elas ele encosta no fim da linha e a
+     divisória vai de topo a base — que é o que faz parecer uma faixa de ação,
+     e não um ícone solto. */
+  margin: calc(var(--s3) * -1) calc(var(--s4) * -1) calc(var(--s3) * -1) 0;
+  background: transparent; border: 0; border-left: 1px solid var(--border-soft);
+  color: var(--text-faint); cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.row-editar:active { background: var(--surface-2); color: var(--gold); }
+/* A linha de Patrimônio tem cursor default (por causa do campo de saldo), e
+   sem isto o lápis herdaria a seta e não pareceria clicável. Aqui ele é alvo
+   de toque de verdade, então volta pros 44px. */
+.asset-row .row-editar { width: 44px; cursor: pointer; }
 
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: 0.01ms !important; transition: none !important; }

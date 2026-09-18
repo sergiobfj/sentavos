@@ -317,6 +317,17 @@ def ler_aba(ws, ano: int, inicios: list[int], tem_previsto: bool, duplicado: str
                 (col, _ler_mes(ws, ano, mes, col, tem_previsto, linha_meses, fim))
             )
 
+    if duplicado not in {"ultimo", "primeiro"}:
+        # Antes isto caía no `else` e virava "primeiro" calado. Parece
+        # inofensivo e não é: em 2025 o dezembro da esquerda é o PLANEJADO
+        # (números redondos, despesa variável preenchida) e o da direita é o
+        # REALIZADO (centavos, variável em branco porque foi tudo pra fatura).
+        # Escolher o errado troca o mês inteiro por uma versão que nunca
+        # aconteceu — e o relatório não diz nada, porque ele confia no que leu.
+        raise ValueError(
+            f"duplicado={duplicado!r} não existe. Use 'ultimo' ou 'primeiro'."
+        )
+
     for mes, lista in sorted(ocorrencias.items()):
         escolhida = lista[-1] if duplicado == "ultimo" else lista[0]
         if len(lista) > 1:
@@ -325,6 +336,7 @@ def ler_aba(ws, ano: int, inicios: list[int], tem_previsto: bool, duplicado: str
                 f"{ws.title}: mês {mes:02d} aparece {len(lista)}x. Ficou a coluna "
                 f"{openpyxl.utils.get_column_letter(escolhida[0])}; ignoradas: "
                 + ", ".join(openpyxl.utils.get_column_letter(c) for c in descartadas)
+                + f" (regra: {duplicado})"
             )
         total.lancamentos += escolhida[1].lancamentos
         total.saldos += escolhida[1].saldos

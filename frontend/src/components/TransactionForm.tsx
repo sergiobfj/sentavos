@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 import Modal from "./Modal";
+import ConfirmDialog from "./ConfirmDialog";
 import CategoryPicker from "./CategoryPicker";
 import {
   useCreateTransaction,
@@ -8,7 +9,7 @@ import {
 } from "../lib/queries";
 import { usePeriod } from "../lib/period";
 import { ApiError } from "../lib/api";
-import { parseMoney, todayIso } from "../lib/format";
+import { formatDiaMes, formatMoney, parseMoney, todayIso } from "../lib/format";
 import type { Category, CategoryType, Transaction } from "../lib/types";
 
 // Tres tipos, os mesmos que a categoria ja tinha. Os rotulos sao os do dia a
@@ -101,11 +102,7 @@ export default function TransactionForm({
               celular, um botão de apagar encostado no alvo que se quer tocar é
               um acidente esperando acontecer. Fechar, aqui, é tocar fora. */}
           {isEdit ? (
-            <ExcluirTransacao
-              id={transaction!.id}
-              descricao={transaction!.description}
-              onDone={onClose}
-            />
+            <ExcluirTransacao transacao={transaction!} onDone={onClose} />
           ) : (
             <button type="button" className="btn btn-ghost" onClick={onClose}>Cancelar</button>
           )}
@@ -183,25 +180,49 @@ export default function TransactionForm({
 }
 
 function ExcluirTransacao({
-  id,
-  descricao,
+  transacao,
   onDone,
 }: {
-  id: number;
-  descricao: string;
+  transacao: Transaction;
   onDone: () => void;
 }) {
+  const [confirmando, setConfirmando] = useState(false);
   const del = useDeleteTransaction();
+
+  // O valor entra na confirmação porque é ele que identifica o lançamento
+  // quando a descrição se repete — três "Futebol" no mês, só um de R$ 26,00.
+  const valor = transacao.amount_paid ?? transacao.amount_planned;
+  const consequencias = [
+    // Com o sinal, não em módulo: num lançamento de −R$ 500 (a retirada que
+    // anula um aporte), dizer "R$ 500,00 sai das somas" inverte o efeito —
+    // apagá-lo faz o total SUBIR 500.
+    valor != null
+      ? `O lançamento de ${formatMoney(valor)} em ${formatDiaMes(transacao.date)} deixa de contar.`
+      : "O lançamento sai da lista do mês.",
+  ];
+
   return (
-    <button
-      type="button"
-      className="btn btn-danger"
-      disabled={del.isPending}
-      onClick={() => {
-        if (confirm(`Excluir "${descricao}"?`)) del.mutate(id, { onSuccess: onDone });
-      }}
-    >
-      {del.isPending ? "Excluindo…" : "Excluir"}
-    </button>
+    <>
+      <button
+        type="button"
+        className="btn btn-danger"
+        disabled={del.isPending}
+        onClick={() => setConfirmando(true)}
+      >
+        Excluir
+      </button>
+
+      {confirmando && (
+        <ConfirmDialog
+          title="Excluir lançamento"
+          itemName={transacao.description}
+          consequences={consequencias}
+          pending={del.isPending}
+          error={(del.error as ApiError | null)?.message ?? null}
+          onCancel={() => setConfirmando(false)}
+          onConfirm={() => del.mutate(transacao.id, { onSuccess: onDone })}
+        />
+      )}
+    </>
   );
 }

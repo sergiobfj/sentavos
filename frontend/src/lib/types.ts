@@ -49,18 +49,16 @@ export interface BudgetSummaryItem {
   icon: string;
   archived: boolean;
   budget_id: number | null;
-  // Quanto foi separado pra esta caixinha no mês.
+  // O teto do mês. Zero (ou budget_id nulo) é categoria sem teto — gastar nela
+  // continua valendo, só não há régua pra comparar.
+  //
+  // Existiu aqui a caixinha acumulativa (has_envelope, carried_in, available):
+  // o que sobrava num mês virava saldo do seguinte. Saiu porque o número
+  // dependia de todo o passado — uma meta esquecida em janeiro voltava como
+  // dívida em setembro. Cada mês agora se explica sozinho.
   budgeted: number;
   planned: number;
   paid: number;
-  // True quando a categoria já recebeu alocação alguma vez. Só então ela é
-  // caixinha; antes disso gastar nela não desconta de pote nenhum.
-  has_envelope: boolean;
-  // O que sobrou (ou faltou) dos meses anteriores. É o que diferencia caixinha
-  // de teto mensal: no teto, o que sobra evapora na virada.
-  carried_in: number;
-  // veio de trás + separado − gasto. O que ainda tem na caixinha.
-  available: number;
 }
 
 export interface BudgetSummaryTotals {
@@ -74,8 +72,6 @@ export interface BudgetSummary {
   month: number;
   items: BudgetSummaryItem[];
   totals: Record<CategoryType, BudgetSummaryTotals>;
-  // Quanto entrou no mês e ainda não foi pra caixinha nenhuma.
-  unallocated: number;
 }
 
 export const CATEGORY_TYPE_LABEL: Record<CategoryType, string> = {

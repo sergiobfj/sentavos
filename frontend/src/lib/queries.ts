@@ -188,7 +188,10 @@ export function useUpdateCategory() {
 export function useDeleteCategory() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (id: number) => categoriesApi.remove(id),
+    // `moverPara` opcional: com ele os lançamentos trocam de categoria antes
+    // da exclusão, sem ele a API recusa apagar categoria com histórico.
+    mutationFn: ({ id, moverPara }: { id: number; moverPara?: number | null }) =>
+      categoriesApi.remove(id, moverPara),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: keys.categories });
       invalidateMovement(qc);

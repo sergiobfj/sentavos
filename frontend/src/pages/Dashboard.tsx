@@ -1,18 +1,24 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
+import TransactionForm from "../components/TransactionForm";
+import { MarcaEditavel } from "../components/TransactionList";
 import { useCategories, useTransactions } from "../lib/queries";
 import { usePeriod } from "../lib/period";
 import { shiftPeriod } from "../lib/period";
 import { transactionsApi } from "../lib/api";
 import { useQuery } from "@tanstack/react-query";
 import { ApiError } from "../lib/api";
-import { formatMoney, formatDiaMes } from "../lib/format";
+import { formatMoney, formatDiaMes, sinalDoValor } from "../lib/format";
 import { Fluxo, PorCategoria, PrevistoVsPago } from "../components/Graficos";
 import { useBudgetSummary } from "../lib/queries";
 import type { Category, CategoryType, Transaction } from "../lib/types";
 
 export default function Dashboard() {
   const { period } = usePeriod();
+  // Tocar num lançamento recente abre ele, e não a lista onde ele está. Levar
+  // pra outra aba pra depois procurar a mesma linha de novo é trabalho que a
+  // tela pode poupar — e era a distância que fazia "corrigir" parecer difícil.
+  const [editando, setEditando] = useState<Transaction | null>(null);
   const { data: transactions, isLoading, error } = useTransactions();
   const { data: categories } = useCategories(true);
   // O previsto x pago vem do resumo do orçamento, que o backend já cruza.
@@ -143,7 +149,7 @@ export default function Dashboard() {
             <>
               <div className="sec-title">
                 <h2>Previsto × pago</h2>
-                <Link to="/orcamento">Caixinhas</Link>
+                <Link to="/orcamento">Orçamento</Link>
               </div>
               <div className="card card-pad">
                 <PrevistoVsPago linhas={previstoVsPago} />
@@ -172,25 +178,46 @@ export default function Dashboard() {
           </div>
           <div className="list">
             {recentes.map((t) => (
-              <LinhaLancamento key={t.id} t={t} cat={catMap.get(t.category_id)} />
+              <LinhaLancamento
+                key={t.id}
+                t={t}
+                cat={catMap.get(t.category_id)}
+                onEdit={() => setEditando(t)}
+              />
             ))}
           </div>
         </>
+      )}
+
+      {editando && categories && (
+        <TransactionForm
+          categories={categories}
+          transaction={editando}
+          onClose={() => setEditando(null)}
+        />
       )}
     </>
   );
 }
 
-function LinhaLancamento({ t, cat }: { t: Transaction; cat?: Category }) {
+function LinhaLancamento({
+  t,
+  cat,
+  onEdit,
+}: {
+  t: Transaction;
+  cat?: Category;
+  onEdit: () => void;
+}) {
   const valor = t.amount_paid ?? t.amount_planned ?? 0;
-  const sinal = cat?.type === "income" ? "+" : cat?.type === "expense" ? "−" : "";
+  const sinal = sinalDoValor(cat?.type, valor);
   const tom = cat?.type === "income" ? "pos" : cat?.type === "expense" ? "neg" : "inv";
   // Só previsto, ainda não pago: o valor é uma promessa, e mostrar igual ao
   // realizado faria o mês parecer fechado quando não está.
   const soPrevisto = t.amount_paid === null || t.amount_paid === undefined;
 
   return (
-    <Link className="row" to="/orcamento?aba=lancamentos">
+    <button className="row" onClick={onEdit}>
       <div
         className="avatar"
         style={{ background: `color-mix(in srgb, ${cat?.color ?? "#666"} 22%, transparent)` }}
@@ -208,7 +235,8 @@ function LinhaLancamento({ t, cat }: { t: Transaction; cat?: Category }) {
         {sinal}{formatMoney(Math.abs(valor))}
         {soPrevisto && <span className="sub">previsto</span>}
       </div>
-    </Link>
+      <MarcaEditavel />
+    </button>
   );
 }
 

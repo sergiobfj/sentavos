@@ -1,5 +1,7 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
+import TransactionForm from "../components/TransactionForm";
+import { MarcaEditavel } from "../components/TransactionList";
 import {
   useAssetSummary,
   usePerfil,
@@ -16,6 +18,7 @@ import {
   INVESTMENT_CLASSES,
   type AssetClass,
   type AssetSummaryItem,
+  type Transaction,
 } from "../lib/types";
 
 // Esta aba não tem dados próprios de propósito: o saldo vem de Patrimônio
@@ -36,6 +39,12 @@ export default function Investments() {
   const budget = useBudgetSummary();
   const transactions = useTransactions();
   const categories = useCategories();
+  // O aporte errado tem que ter conserto aqui. Esta aba mostrava os aportes
+  // com `cursor: default` e nada acontecia ao tocar: quem lançou R$ 500 num
+  // lugar errado não tinha como apagar sem descobrir que o lançamento mora na
+  // aba de Lançamentos. O jeito que sobrava era lançar −500 pra anular, e é
+  // exatamente o que aconteceu duas vezes em setembro.
+  const [editando, setEditando] = useState<Transaction | null>(null);
 
   const erro = (assets.error || budget.error) as ApiError | null;
 
@@ -160,7 +169,10 @@ export default function Investments() {
 
       <div className="list">
         {itens.map((item) => (
-          <div className="row" key={item.asset_id} style={{ cursor: "default" }}>
+          // Ativo se edita em Patrimônio, e a linha leva pra lá em vez de
+          // abrir um formulário duplicado aqui — duas telas editando o mesmo
+          // ativo é como as duas começam a discordar.
+          <Link className="row" key={item.asset_id} to="/patrimonio">
             <div
               className="avatar"
               style={{
@@ -186,7 +198,8 @@ export default function Investments() {
               </div>
             </div>
             <div className="amt tnum">{formatMoney(item.value)}</div>
-          </div>
+            <MarcaEditavel />
+          </Link>
         ))}
       </div>
 
@@ -201,7 +214,7 @@ export default function Investments() {
                 lá de cima, não o assunto da tela. Quem quer todos vai na aba
                 de lançamentos, que é onde eles moram. */}
             {aportes.slice(0, 3).map((t) => (
-              <div className="row" key={t.id} style={{ cursor: "default" }}>
+              <button className="row" key={t.id} onClick={() => setEditando(t)}>
                 <div
                   className="avatar"
                   style={{ background: "color-mix(in srgb, var(--inv) 20%, transparent)" }}
@@ -213,10 +226,19 @@ export default function Investments() {
                   <div className="s">{formatDiaMes(t.date)}</div>
                 </div>
                 <div className="amt inv tnum">{formatMoney(t.amount_paid)}</div>
-              </div>
+                <MarcaEditavel />
+              </button>
             ))}
           </div>
         </>
+      )}
+
+      {editando && categories.data && (
+        <TransactionForm
+          categories={categories.data}
+          transaction={editando}
+          onClose={() => setEditando(null)}
+        />
       )}
     </>
   );

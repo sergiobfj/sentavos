@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { parseMoney } from "../lib/format";
 import Modal from "../components/Modal";
+import ConfirmDialog from "../components/ConfirmDialog";
 import {
   useCategories,
   useCreateCategory,
@@ -48,7 +49,12 @@ export default function Settings() {
       {categories && categories.length > 0 && (
         <div className="cat-grid">
           {categories.map((c) => (
-            <CategoryCard key={c.id} category={c} onEdit={() => setEditing(c)} />
+            <CategoryCard
+              key={c.id}
+              category={c}
+              todas={categories}
+              onEdit={() => setEditing(c)}
+            />
           ))}
         </div>
       )}
@@ -59,9 +65,17 @@ export default function Settings() {
   );
 }
 
-function CategoryCard({ category, onEdit }: { category: Category; onEdit: () => void }) {
+function CategoryCard({
+  category,
+  todas,
+  onEdit,
+}: {
+  category: Category;
+  todas: Category[];
+  onEdit: () => void;
+}) {
   const update = useUpdateCategory();
-  const del = useDeleteCategory();
+  const [excluindo, setExcluindo] = useState(false);
   return (
     <div className="cat-card" style={category.archived ? { opacity: 0.5 } : undefined}>
       <div className="top">
@@ -91,15 +105,93 @@ function CategoryCard({ category, onEdit }: { category: Category; onEdit: () => 
         </button>
         <button
           className="btn btn-ghost btn-sm btn-danger"
-          disabled={del.isPending}
-          onClick={() => {
-            if (confirm(`Excluir a categoria "${category.name}"?`)) del.mutate(category.id);
-          }}
+          onClick={() => setExcluindo(true)}
         >
           Excluir
         </button>
       </div>
+
+      {excluindo && (
+        <ExcluirCategoria
+          category={category}
+          todas={todas}
+          onDone={() => setExcluindo(false)}
+        />
+      )}
     </div>
+  );
+}
+
+/** Excluir categoria, com a opção de entregar os lançamentos a outra.
+ *
+ * Mover é o caminho principal, não o alternativo: quase nunca se quer "apagar
+ * UBER" — quer-se "UBER virou Transporte". Sem essa saída, reorganizar as
+ * categorias herdadas da planilha exigia apagar lançamento por lançamento, que
+ * é perder histórico pra arrumar nome.
+ *
+ * O seletor só oferece categorias do mesmo tipo. Mover uma despesa pra uma
+ * categoria de receita inverteria o sinal do lançamento e faria o mês inteiro
+ * mentir — a API recusa, e a tela nem chega a oferecer.
+ */
+function ExcluirCategoria({
+  category,
+  todas,
+  onDone,
+}: {
+  category: Category;
+  todas: Category[];
+  onDone: () => void;
+}) {
+  const del = useDeleteCategory();
+  const [destino, setDestino] = useState<string>("");
+
+  const candidatas = todas.filter(
+    (c) => c.id !== category.id && c.type === category.type
+  );
+
+  return (
+    <ConfirmDialog
+      title="Excluir categoria"
+      itemName={category.name}
+      consequences={[
+        destino
+          ? `Os lançamentos passam para "${todas.find((c) => String(c.id) === destino)?.name}".`
+          : "Categoria com lançamento não é apagada — escolha para onde eles vão, ou arquive em vez de excluir.",
+        "As metas desta categoria vão junto, em todos os meses.",
+      ]}
+      pending={del.isPending}
+      error={(del.error as ApiError | null)?.message ?? null}
+      onCancel={onDone}
+      onConfirm={() =>
+        del.mutate(
+          { id: category.id, moverPara: destino ? Number(destino) : null },
+          { onSuccess: onDone }
+        )
+      }
+    >
+      {candidatas.length > 0 && (
+        <div className="field">
+          <label htmlFor="mover-para">Mover os lançamentos para</label>
+          <select
+            id="mover-para"
+            value={destino}
+            onChange={(e) => setDestino(e.target.value)}
+          >
+            <option value="">— não mover —</option>
+            {candidatas.map((c) => (
+              <option key={c.id} value={c.id}>
+                {c.icon} {c.name}
+                {c.archived ? " (arquivada)" : ""}
+              </option>
+            ))}
+          </select>
+          <span className="hint">
+            Só categorias de {CATEGORY_TYPE_LABEL[category.type].toLowerCase()}: mover
+            para outro tipo trocaria o sinal dos lançamentos.
+          </span>
+        </div>
+      )}
+    </ConfirmDialog>
   );
 }
 

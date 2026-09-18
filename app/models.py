@@ -140,25 +140,22 @@ class BudgetSummaryItem(SQLModel):
     icon: str
     archived: bool = False
     budget_id: int | None = None
-    # Quanto você separou pra esta caixinha neste mês.
+    # O teto do mês. Zero (ou sem meta) significa categoria sem teto, não
+    # categoria proibida: gastar nela continua valendo, só não há régua.
     budgeted: float = 0
     planned: float = 0
     paid: float = 0
 
-    # ---------- Caixinha ----------
-    # True quando a categoria já recebeu alocação em algum mês. Só então ela é
-    # uma caixinha; antes disso é uma categoria comum, onde gastar não desconta
-    # de pote nenhum.
-    has_envelope: bool = False
-
-    # O que sobrou (ou faltou) nos meses anteriores. É o que diferencia uma
-    # caixinha de um teto mensal: no teto, o que sobra evapora na virada; na
-    # caixinha, o dinheiro continua lá. Guardar 70 a mais em Lazer num mês
-    # significa poder gastar 70 a mais no seguinte, que é como as pessoas de
-    # fato organizam dinheiro.
-    carried_in: float = 0
-    # alocado + veio de trás − gasto. Positivo é o que ainda tem na caixinha.
-    available: float = 0
+    # ---------- Por que não há acúmulo aqui ----------
+    # Existiu uma versão com caixinha: o que sobrava num mês virava saldo do
+    # mês seguinte (carried_in, available, has_envelope). A ideia é boa no
+    # papel e ruim na prática — o número que a tela mostrava dependia de todo
+    # o passado, então uma meta esquecida em janeiro reaparecia como dívida em
+    # setembro, e a Fatura chegou a mostrar −R$ 5.443 de "disponível".
+    #
+    # O teto mensal não tem passado: gastei 480 de 750, faltam 270, e na virada
+    # recomeça. É menos poderoso e é conferível de cabeça, que é o que importa
+    # numa tela que se abre no meio do mercado.
 
 class BudgetSummaryTotals(SQLModel):
     budgeted: float = 0
@@ -171,10 +168,6 @@ class BudgetSummary(SQLModel):
     items: list[BudgetSummaryItem]
     # Chaveado pelo tipo de categoria: expense, income, investment.
     totals: dict[str, BudgetSummaryTotals]
-
-    # Quanto entrou no mês e ainda não foi pra caixinha nenhuma. É a pergunta
-    # que abre o ritual do salário: "sobrou quanto pra distribuir?".
-    unallocated: float = 0
 
 
 # ---------- Patrimônio ----------

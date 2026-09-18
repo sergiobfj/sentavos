@@ -173,5 +173,12 @@ export const categoriesApi = {
     request<Category>("/categories", { method: "POST", body: JSON.stringify(data) }),
   update: (id: number, data: CategoryUpdate) =>
     request<Category>(`/categories/${id}`, { method: "PATCH", body: JSON.stringify(data) }),
-  remove: (id: number) => request<{ message: string }>(`/categories/${id}`, { method: "DELETE" }),
+  // `moverPara` entrega os lançamentos a outra categoria antes de apagar esta.
+  // É o que faz "fundir UBER em Transporte" ser uma operação, e não apagar
+  // seis lançamentos à mão pra depois poder apagar a categoria.
+  remove: (id: number, moverPara?: number | null) =>
+    request<{ message: string; moved: number }>(
+      `/categories/${id}${moverPara != null ? `?mover_para=${moverPara}` : ""}`,
+      { method: "DELETE" }
+    ),
 };

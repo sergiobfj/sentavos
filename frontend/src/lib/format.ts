@@ -1,3 +1,5 @@
+import type { CategoryType } from "./types";
+
 const brl = new Intl.NumberFormat("pt-BR", {
   style: "currency",
   currency: "BRL",
@@ -53,4 +55,18 @@ export function formatDiaMes(iso: string): string {
   if (!y || !m || !d) return iso;
   const mes = new Date(y, m - 1, d).toLocaleDateString("pt-BR", { month: "short" });
   return `${d} ${mes.replace(".", "")}`;
+}
+
+/** O sinal que vai na frente do valor, por tipo de categoria.
+ *
+ * Despesa e receita têm sinal fixo, e o valor guardado é sempre positivo.
+ * Investimento não: aporte é positivo e retirada é negativa, no mesmo campo.
+ * Por isso o menos dele vem do NÚMERO, não do tipo — sem isto, `Math.abs`
+ * apagava o sinal e um aporte de 500 ficava idêntico à retirada de −500 que o
+ * anulava.
+ */
+export function sinalDoValor(tipo: CategoryType | undefined, valor: number): string {
+  if (tipo === "income") return "+";
+  if (tipo === "expense") return "−";
+  return valor < 0 ? "−" : "";
 }
