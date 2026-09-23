@@ -10,9 +10,20 @@ import type {
   Budget,
   BudgetSet,
   BudgetSummary,
+  CandidatoAPagamento,
+  Card,
+  CardCreate,
+  CardUpdate,
   Category,
   CategoryCreate,
   CategoryUpdate,
+  Invoice,
+  InvoiceDetail,
+  InvoicesSummary,
+  PaymentMethod,
+  Purchase,
+  PurchaseCreate,
+  PurchaseUpdate,
   Transaction,
   TransactionCreate,
   TransactionUpdate,
@@ -160,6 +171,78 @@ export const perfilApi = {
       method: "PATCH",
       body: JSON.stringify({ cdi_annual }),
     }),
+};
+
+// ---------- Cartões ----------
+export const cardsApi = {
+  list: (incluirArquivados = false) =>
+    request<Card[]>(`/cards${incluirArquivados ? "?incluir_arquivados=1" : ""}`),
+  create: (data: CardCreate) =>
+    request<Card>("/cards", { method: "POST", body: JSON.stringify(data) }),
+  update: (id: number, data: CardUpdate) =>
+    request<Card>(`/cards/${id}`, { method: "PATCH", body: JSON.stringify(data) }),
+  // Recusa (409) cartão com compra: a saída ali é arquivar, que tira do
+  // formulário sem levar o histórico junto.
+  remove: (id: number) => request<{ message: string }>(`/cards/${id}`, { method: "DELETE" }),
+};
+
+// ---------- Compras no cartão ----------
+// Rota própria e não POST /transactions: o que entra não é um lançamento, é uma
+// compra que GERA lançamentos — um por parcela — e descobre em que fatura cada
+// um cai. O backend faz as duas coisas; o front só manda a compra.
+export const purchasesApi = {
+  get: (id: number) => request<Purchase>(`/purchases/${id}`),
+  create: (data: PurchaseCreate) =>
+    request<Purchase>("/purchases", { method: "POST", body: JSON.stringify(data) }),
+  update: (id: number, data: PurchaseUpdate) =>
+    request<Purchase>(`/purchases/${id}`, { method: "PATCH", body: JSON.stringify(data) }),
+  remove: (id: number) =>
+    request<{ message: string }>(`/purchases/${id}`, { method: "DELETE" }),
+};
+
+// ---------- Faturas ----------
+export const invoicesApi = {
+  // Uma chamada serve três telas: Faturas, o cartão de fatura do Início e os
+  // pagamentos que a lista de lançamentos mescla.
+  summary: ({ year, month }: Period) =>
+    request<InvoicesSummary>(`/invoices/summary?year=${year}&month=${month}`),
+  list: (cardId?: number) =>
+    request<Invoice[]>(`/invoices${cardId != null ? `?card_id=${cardId}` : ""}`),
+  get: (id: number) => request<InvoiceDetail>(`/invoices/${id}`),
+  pay: (id: number, data: { amount: number; date: string }) =>
+    request<Invoice>(`/invoices/${id}/payments`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+  undoPayment: (paymentId: number) =>
+    request<{ message: string }>(`/invoice_payments/${paymentId}`, { method: "DELETE" }),
+  // Lançamentos que PODEM ser o pagamento desta fatura. A lista é por forma
+  // (despesa, paga, perto do vencimento) — nunca por nome de categoria.
+  candidates: (id: number) =>
+    request<CandidatoAPagamento[]>(`/invoices/${id}/candidatos-a-pagamento`),
+  // Transforma um lançamento antigo no pagamento desta fatura: ele deixa de
+  // contar como gasto e o dinheiro passa a sair uma vez só, como pagamento.
+  reconcile: (id: number, transactionId: number) =>
+    request<Invoice>(`/invoices/${id}/reconciliar`, {
+      method: "POST",
+      body: JSON.stringify({ transaction_id: transactionId }),
+    }),
+};
+
+// ---------- Forma de pagamento do que já estava lançado ----------
+export const formaApi = {
+  um: (id: number, data: { metodo: PaymentMethod; card_id?: number; installments?: number }) =>
+    request<{ message: string }>(`/transactions/${id}/forma-de-pagamento`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+  // Em lote o parcelamento é sempre 1x: parcelar é decisão por compra, e
+  // aplicar "3x" a dez lançamentos de uma vez inventaria dado.
+  lote: (data: { ids: number[]; metodo: PaymentMethod; card_id?: number }) =>
+    request<{ atualizados: number; ignorados: { id: number; motivo: string }[] }>(
+      "/transactions/forma-de-pagamento",
+      { method: "POST", body: JSON.stringify(data) }
+    ),
 };
 
 // ---------- Categorias ----------

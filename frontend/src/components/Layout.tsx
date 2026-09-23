@@ -23,7 +23,7 @@ export default function Layout() {
   const { sessao, sair } = useAuth();
   const [escolhendoMes, setEscolhendoMes] = useState(false);
   const navigate = useNavigate();
-  const { pathname } = useLocation();
+  const { pathname, search } = useLocation();
 
   // O botão de novo lançamento não aparece onde ele não faria nada: em
   // Configurações não há o que lançar, e em Patrimônio o que se registra é
@@ -31,8 +31,14 @@ export default function Layout() {
   // A conta de demonstração não escreve, então o botão de novo lançamento não
   // aparece pra ela: oferecer uma ação que só pode terminar em erro é pior do
   // que não oferecer.
+  //
+  // Em Faturas ele também sai: ali a ação é pagar a fatura, e o botão flutuante
+  // cobria justamente o rodapé de total/pago/restante — visto na tela, não
+  // deduzido.
+  const emFaturas = new URLSearchParams(search).get("aba") === "faturas";
   const mostrarFab =
     !sessao?.somenteLeitura &&
+    !emFaturas &&
     (pathname === "/" || pathname.startsWith("/orcamento"));
 
   return (

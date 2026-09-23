@@ -3,10 +3,12 @@ import { Link, useSearchParams } from "react-router-dom";
 import MoneyCell from "../components/MoneyCell";
 import TransactionForm from "../components/TransactionForm";
 import TransactionList from "../components/TransactionList";
+import Invoices from "./Invoices";
 import {
   useBudgetSummary,
   useCategories,
   useDeleteBudget,
+  useInvoicesSummary,
   useSetBudget,
   useTransactions,
 } from "../lib/queries";
@@ -23,12 +25,23 @@ const SECTIONS: { type: CategoryType; title: string; hint: string }[] = [
   { type: "income", title: "Receitas", hint: "Quanto espera receber no mês" },
 ];
 
-type Tab = "metas" | "lancamentos";
+type Tab = "metas" | "lancamentos" | "faturas";
+
+// Faturas entra aqui e não na barra de baixo: as quatro abas do polegar são as
+// de todo dia, e fatura se olha uma ou duas vezes por mês. Ela mora ao lado dos
+// lançamentos porque é a mesma pergunta — o que aconteceu com meu dinheiro.
+const ABAS: { id: Tab; rotulo: string }[] = [
+  { id: "metas", rotulo: "Orçamento" },
+  { id: "lancamentos", rotulo: "Lançamentos" },
+  { id: "faturas", rotulo: "Faturas" },
+];
 
 export default function Budget() {
   // A sub-aba vive na URL pra sobreviver ao F5 e poder ser linkada de fora.
   const [params, setParams] = useSearchParams();
-  const tab: Tab = params.get("aba") === "lancamentos" ? "lancamentos" : "metas";
+  const aba = params.get("aba");
+  const tab: Tab =
+    aba === "lancamentos" ? "lancamentos" : aba === "faturas" ? "faturas" : "metas";
   const { data: categories } = useCategories();
   const [creating, setCreating] = useState(false);
 
@@ -85,25 +98,22 @@ export default function Budget() {
   return (
     <>
       <div className="subtabs" role="tablist">
-        <button
-          role="tab"
-          aria-selected={tab === "metas"}
-          className={tab === "metas" ? "active" : ""}
-          onClick={() => selectTab("metas")}
-        >
-          Orçamento
-        </button>
-        <button
-          role="tab"
-          aria-selected={tab === "lancamentos"}
-          className={tab === "lancamentos" ? "active" : ""}
-          onClick={() => selectTab("lancamentos")}
-        >
-          Lançamentos
-        </button>
+        {ABAS.map(({ id, rotulo }) => (
+          <button
+            key={id}
+            role="tab"
+            aria-selected={tab === id}
+            className={tab === id ? "active" : ""}
+            onClick={() => selectTab(id)}
+          >
+            {rotulo}
+          </button>
+        ))}
       </div>
 
-      {tab === "metas" ? <Metas /> : <Lancamentos categories={categories} onEdit={setEditing} />}
+      {tab === "metas" && <Metas />}
+      {tab === "lancamentos" && <Lancamentos categories={categories} onEdit={setEditing} />}
+      {tab === "faturas" && <Invoices />}
 
       {creating && categories && (
         <TransactionForm categories={categories} onClose={fecharCriacao} />
@@ -156,6 +166,7 @@ function Metas() {
   const resta = orcadoDespesa - gasto;
   const entrou = totals?.income.paid ?? 0;
   const investido = totals?.investment.paid ?? 0;
+  const noCartao = data?.caixa.no_cartao ?? 0;
 
   return (
     <>
@@ -202,6 +213,15 @@ function Metas() {
           <div className={`val tnum ${entrou - gasto - investido >= 0 ? "pos" : "neg"}`}>
             {formatMoney(entrou - gasto - investido)}
           </div>
+          {/* Este "sobrou" é do eixo do GASTO: desconta tudo que foi consumido,
+              inclusive o que está na fatura e ainda não saiu da conta. A linha
+              só aparece quando há cartão no mês, porque sem ele os dois eixos
+              dão o mesmo número e a explicação seria ruído. */}
+          {noCartao > 0 && (
+            <div className="s" style={{ marginTop: 2 }}>
+              {formatMoney(noCartao)} ainda na fatura
+            </div>
+          )}
         </div>
       </div>
 
@@ -414,22 +434,32 @@ function Lancamentos({
   onEdit: (t: Transaction) => void;
 }) {
   const { label } = usePeriod();
+  const [, setParams] = useSearchParams();
   const { data: transactions, isLoading, error } = useTransactions();
+  // Os pagamentos de fatura entram na mesma lista: eles são o maior desembolso
+  // do mês, e uma lista de "o que aconteceu com meu dinheiro" sem eles mandaria
+  // procurar noutra tela. Vêm do resumo que a aba de Faturas já busca.
+  const { data: faturas } = useInvoicesSummary();
+  const pagamentos = faturas?.payments ?? [];
+
+  const vazio = transactions?.length === 0 && pagamentos.length === 0;
 
   return (
     <>
       {isLoading && <div className="skel" style={{ height: 260, borderRadius: "var(--r)" }} />}
       {error && <div className="error-box">{(error as ApiError).message}</div>}
 
-      {transactions && transactions.length > 0 && (
+      {transactions && (transactions.length > 0 || pagamentos.length > 0) && (
         <TransactionList
           transactions={transactions}
           categories={categories ?? []}
+          payments={pagamentos}
           onEdit={onEdit}
+          onAbrirFatura={() => setParams({ aba: "faturas" }, { replace: true })}
         />
       )}
 
-      {!isLoading && !error && transactions?.length === 0 && (
+      {!isLoading && !error && vazio && (
         <div className="empty">
           <div className="big">🧾</div>
           <div className="tit">Nada lançado em {label}</div>

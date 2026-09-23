@@ -2,15 +2,33 @@ import { useMemo, useState } from "react";
 import Modal from "./Modal";
 import ConfirmDialog from "./ConfirmDialog";
 import CategoryPicker from "./CategoryPicker";
+import CardPicker from "./CardPicker";
+import PurchaseForm from "./PurchaseForm";
 import {
+  useCards,
+  useCreatePurchase,
   useCreateTransaction,
+  useDefinirForma,
   useDeleteTransaction,
   useUpdateTransaction,
 } from "../lib/queries";
 import { usePeriod } from "../lib/period";
 import { ApiError } from "../lib/api";
-import { formatDiaMes, formatMoney, parseMoney, todayIso } from "../lib/format";
-import type { Category, CategoryType, Transaction } from "../lib/types";
+import {
+  dividirEmParcelas,
+  formatDiaMes,
+  formatMesPorExtenso,
+  formatMoney,
+  parseMoney,
+  todayIso,
+} from "../lib/format";
+import {
+  ehParcela,
+  type Category,
+  type CategoryType,
+  type PaymentMethod,
+  type Transaction,
+} from "../lib/types";
 
 // Tres tipos, os mesmos que a categoria ja tinha. Os rotulos sao os do dia a
 // dia -- "Saida" e nao "Despesa", porque e a palavra que se usa ao lancar.
@@ -20,7 +38,36 @@ const TIPOS: { valor: CategoryType; rotulo: string; cor: string }[] = [
   { valor: "investment", rotulo: "Investir", cor: "var(--inv)" },
 ];
 
+// Até 12 cabem em duas fileiras de chips no celular; 18 e 24 existem porque
+// aparecem em eletrônico e passagem, e sem eles a opção seria digitar.
+const PARCELAS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 18, 24];
+
 export default function TransactionForm({
+  categories,
+  transaction,
+  onClose,
+}: {
+  categories: Category[];
+  transaction?: Transaction;
+  onClose: () => void;
+}) {
+  // Parcela não se edita sozinha: as N somam o valor da compra, e mexer numa
+  // faria a fatura discordar do total. A tela abre a COMPRA, onde a alteração
+  // tem o escopo certo — e as quatro telas que abrem este formulário não
+  // precisam saber disso.
+  if (transaction && ehParcela(transaction)) {
+    return (
+      <PurchaseForm
+        purchaseId={transaction.purchase_id!}
+        categories={categories}
+        onClose={onClose}
+      />
+    );
+  }
+  return <Lancamento categories={categories} transaction={transaction} onClose={onClose} />;
+}
+
+function Lancamento({
   categories,
   transaction,
   onClose,
@@ -37,6 +84,15 @@ export default function TransactionForm({
     categories.find((c) => c.id === transaction?.category_id)?.type ?? "expense";
   const [tipo, setTipo] = useState<CategoryType>(tipoInicial);
 
+  // Criando, o padrão é à vista. Editando um lançamento antigo (sem forma
+  // definida), nada vem marcado: marcar "à vista" sozinho seria responder por
+  // ele uma pergunta que o app não sabe responder.
+  const [forma, setForma] = useState<PaymentMethod | null>(
+    isEdit ? transaction!.payment_method : "cash"
+  );
+  const [cardId, setCardId] = useState<number | null>(null);
+  const [parcelas, setParcelas] = useState(1);
+
   const [form, setForm] = useState({
     date: transaction?.date ?? todayIso(),
     description: transaction?.description ?? "",
@@ -47,27 +103,70 @@ export default function TransactionForm({
   });
 
   const ativas = useMemo(() => categories.filter((c) => !c.archived), [categories]);
+  const { data: cards } = useCards();
 
   // Trocar de tipo limpa a categoria escolhida se ela nao pertence ao novo
-  // tipo. Sem isso daria pra sair com "Saida" selecionado e a categoria
+  // tipo. Sem isso dava pra sair com "Saida" selecionado e a categoria
   // "Salario" salva -- um lancamento que contaria como receita e apareceria
   // como despesa na tela.
   function trocarTipo(novo: CategoryType) {
     setTipo(novo);
+    // Cartão só existe pra saída: entrada e investimento não passam por fatura.
+    if (novo !== "expense" && forma === "credit") setForma("cash");
     const atual = categories.find((c) => c.id === form.category_id);
     if (!atual || atual.type !== novo) {
       const primeira = ativas.find((c) => c.type === novo);
       setForm((f) => ({ ...f, category_id: primeira?.id ?? null }));
     }
   }
+
   const { setPeriod } = usePeriod();
   const create = useCreateTransaction();
   const update = useUpdateTransaction();
-  const pending = create.isPending || update.isPending;
-  const err = (create.error || update.error) as ApiError | null;
+  const criarCompra = useCreatePurchase();
+  const definirForma = useDefinirForma();
+
+  const pending =
+    create.isPending || update.isPending || criarCompra.isPending || definirForma.isPending;
+  const err = (create.error ||
+    update.error ||
+    criarCompra.error ||
+    definirForma.error) as ApiError | null;
+
+  const noCartao = tipo === "expense" && forma === "credit";
+  const valorDaCompra = parseMoney(form.amount_paid) ?? 0;
+
+  // A prévia usa a mesma regra do servidor, mas quem decide é ele: o valor que
+  // vale é o que volta depois de salvar.
+  const previa = noCartao && valorDaCompra > 0 ? dividirEmParcelas(valorDaCompra, parcelas) : [];
+  const [ano, mes] = form.date.split("-").map(Number);
+
+  function irParaOMesSalvo(dataIso: string) {
+    const [y, m] = dataIso.split("-").map(Number);
+    if (y && m) setPeriod({ year: y, month: m });
+    onClose();
+  }
 
   function submit(e: React.FormEvent) {
     e.preventDefault();
+
+    // ---------- Compra nova no cartão ----------
+    if (noCartao && !isEdit) {
+      criarCompra.mutate(
+        {
+          card_id: cardId!,
+          category_id: Number(form.category_id),
+          description: form.description.trim(),
+          total_amount: valorDaCompra,
+          installments: parcelas,
+          purchase_date: form.date,
+          note: form.note.trim() || null,
+        },
+        { onSuccess: () => irParaOMesSalvo(form.date) }
+      );
+      return;
+    }
+
     const payload = {
       date: form.date,
       description: form.description.trim(),
@@ -75,21 +174,41 @@ export default function TransactionForm({
       amount_planned: parseMoney(form.amount_planned),
       amount_paid: parseMoney(form.amount_paid),
       note: form.note.trim() || null,
+      // Entrada e investimento são dinheiro que se move na hora; só despesa
+      // pode ficar pendurada numa fatura.
+      payment_method: (tipo === "expense" ? forma : "cash") as PaymentMethod | null,
     };
-    // Salvar um lançamento de outro mês some da lista e parece que falhou;
-    // então o app acompanha a data que foi salva.
-    function onSaved() {
-      const [y, m] = payload.date.split("-").map(Number);
-      if (y && m) setPeriod({ year: y, month: m });
-      onClose();
+
+    if (!isEdit) {
+      create.mutate(payload, { onSuccess: () => irParaOMesSalvo(payload.date) });
+      return;
     }
 
-    if (isEdit) {
-      update.mutate({ id: transaction!.id, data: payload }, { onSuccess: onSaved });
-    } else {
-      create.mutate(payload, { onSuccess: onSaved });
-    }
+    // ---------- Editando ----------
+    // Passar um lançamento existente PRA o cartão não é um PATCH: ele precisa
+    // virar compra, ganhar parcelas e entrar numa fatura. Quem faz isso é a
+    // rota de forma de pagamento, e ela roda depois de o resto ser salvo.
+    const viraCartao = noCartao && transaction!.payment_method !== "credit";
+    update.mutate(
+      { id: transaction!.id, data: viraCartao ? { ...payload, payment_method: undefined } : payload },
+      {
+        onSuccess: () => {
+          if (!viraCartao) return irParaOMesSalvo(payload.date);
+          definirForma.mutate(
+            {
+              id: transaction!.id,
+              metodo: "credit",
+              card_id: cardId!,
+              installments: parcelas,
+            },
+            { onSuccess: () => irParaOMesSalvo(payload.date) }
+          );
+        },
+      }
+    );
   }
+
+  const faltaCartao = noCartao && (cardId == null || valorDaCompra <= 0);
 
   return (
     <Modal
@@ -106,7 +225,12 @@ export default function TransactionForm({
           ) : (
             <button type="button" className="btn btn-ghost" onClick={onClose}>Cancelar</button>
           )}
-          <button type="submit" form="tx-form" className="btn btn-primary" disabled={pending || !form.description.trim() || !form.category_id}>
+          <button
+            type="submit"
+            form="tx-form"
+            className="btn btn-primary"
+            disabled={pending || !form.description.trim() || !form.category_id || faltaCartao}
+          >
             {pending ? "Salvando…" : "Salvar"}
           </button>
         </>
@@ -152,22 +276,110 @@ export default function TransactionForm({
         </div>
 
         <div className="field">
-          <label htmlFor="t-date">Data</label>
+          <label htmlFor="t-date">{noCartao ? "Data da compra" : "Data"}</label>
           <input id="t-date" type="date" value={form.date}
             onChange={(e) => setForm({ ...form, date: e.target.value })} />
         </div>
-        <div className="field row2">
+
+        {/* ---------- Forma de pagamento ----------
+            Só pra saída: entrada e investimento não passam por fatura. Não se
+            chama "Tipo" porque a palavra já é de Saída/Entrada/Investir, e ter
+            dois "Tipo" na mesma tela é como não ter nenhum. */}
+        {tipo === "expense" && (
           <div className="field">
-            <label htmlFor="t-planned">Previsto</label>
-            <input id="t-planned" inputMode="decimal" value={form.amount_planned} placeholder="0,00"
-              onChange={(e) => setForm({ ...form, amount_planned: e.target.value })} />
+            <label>Pagamento</label>
+            <div className="tipo-toggle" role="group" aria-label="Forma de pagamento">
+              <button
+                type="button"
+                className={forma === "cash" ? "on" : ""}
+                onClick={() => setForma("cash")}
+                aria-pressed={forma === "cash"}
+              >
+                À vista
+              </button>
+              <button
+                type="button"
+                className={forma === "credit" ? "on" : ""}
+                onClick={() => setForma("credit")}
+                aria-pressed={forma === "credit"}
+              >
+                Cartão
+              </button>
+            </div>
+            {forma === null && (
+              <div className="hint">
+                Este lançamento é anterior ao cartão e ainda não tem forma de
+                pagamento. Até você responder, ele conta como saída da conta.
+              </div>
+            )}
           </div>
+        )}
+
+        {noCartao && (
+          <>
+            <div className="field">
+              <label>Cartão</label>
+              <CardPicker cards={cards ?? []} valor={cardId} aoEscolher={setCardId} />
+            </div>
+
+            <div className="field">
+              <label>Parcelas</label>
+              <div className="chip-linha" role="group" aria-label="Número de parcelas">
+                {PARCELAS.map((n) => (
+                  <button
+                    type="button"
+                    key={n}
+                    className={n === parcelas ? "on" : ""}
+                    onClick={() => setParcelas(n)}
+                    aria-pressed={n === parcelas}
+                  >
+                    {n}x
+                  </button>
+                ))}
+              </div>
+            </div>
+          </>
+        )}
+
+        {/* No cartão, "Previsto" sai em vez de ficar cinza: compra já
+            aconteceu, e um campo desabilitado ao lado do valor faz procurar o
+            que se perdeu. O que sobra é o valor da compra, em largura inteira. */}
+        <div className={noCartao ? "field" : "field row2"}>
+          {!noCartao && (
+            <div className="field">
+              <label htmlFor="t-planned">Previsto</label>
+              <input id="t-planned" inputMode="decimal" value={form.amount_planned} placeholder="0,00"
+                onChange={(e) => setForm({ ...form, amount_planned: e.target.value })} />
+            </div>
+          )}
           <div className="field">
-            <label htmlFor="t-paid">{tipo === "income" ? "Recebido" : "Pago"}</label>
+            <label htmlFor="t-paid">
+              {noCartao ? "Valor total da compra" : tipo === "income" ? "Recebido" : "Pago"}
+            </label>
             <input id="t-paid" inputMode="decimal" value={form.amount_paid} placeholder="0,00"
               onChange={(e) => setForm({ ...form, amount_paid: e.target.value })} />
           </div>
         </div>
+
+        {/* A conta na frente de quem lança, antes de salvar: quanto fica cada
+            parcela, quando começa e em qual fatura cai. */}
+        {previa.length > 0 && ano && mes && (
+          <div className="aviso-box">
+            {parcelas === 1 ? (
+              <>Uma parcela de <b>{formatMoney(previa[0])}</b> em {formatMesPorExtenso(ano, mes)}.</>
+            ) : (
+              <>
+                {parcelas} parcelas de <b>{formatMoney(previa[1])}</b>
+                {previa[0] !== previa[1] && <> (a 1ª de {formatMoney(previa[0])})</>}
+                {" · "}1ª em {formatMesPorExtenso(ano, mes)}
+              </>
+            )}
+            <div style={{ marginTop: "var(--s2)", color: "var(--text-faint)" }}>
+              O dinheiro só sai da conta quando você pagar a fatura.
+            </div>
+          </div>
+        )}
+
         <div className="field">
           <label htmlFor="t-note">Observação</label>
           <textarea id="t-note" value={form.note} placeholder="Opcional"

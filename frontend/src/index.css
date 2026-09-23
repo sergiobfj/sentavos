@@ -845,7 +845,10 @@ textarea { min-height: 76px; resize: vertical; }
    Três botões lado a lado em vez de um select: a escolha tem três opções fixas
    e cabe na tela inteira. Select pra três itens é esconder a resposta atrás de
    um toque. */
-.tipo-toggle { display: grid; grid-template-columns: repeat(3, 1fr); gap: var(--s2); }
+/* Colunas automaticas e nao `repeat(3, 1fr)`: o mesmo componente serve os tres
+   tipos (Saida/Entrada/Investir) e os dois de forma de pagamento (A vista /
+   Cartao). Fixo em tres, o par deixaria um terco da largura vazio. */
+.tipo-toggle { display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; gap: var(--s2); }
 .tipo-toggle button {
   min-height: 46px; border-radius: var(--r-sm);
   border: 1.5px solid var(--border); background: var(--surface-2);
@@ -925,3 +928,166 @@ textarea { min-height: 76px; resize: vertical; }
 .viz-legenda span { display: inline-flex; align-items: center; gap: 5px; }
 .viz-legenda i { width: 9px; height: 9px; border-radius: 3px; flex: none; }
 .viz-legenda b { color: var(--text); font-weight: 650; }
+
+
+/* ------------------------------------------------------------- Cartão --- */
+/* Gasto e saída de caixa deixaram de ser o mesmo evento, e a tela precisa
+   mostrar os dois sem virar painel. Quase tudo aqui reaproveita .card,
+   .list .row e .chip — o que é novo é só o que não existia: a linha da fatura,
+   os chips de escolha e a barra de ação da revisão. */
+
+/* O avatar do pagamento de fatura não tem cor de categoria porque não TEM
+   categoria: ele não é gasto, é o gasto de antes saindo da conta. */
+.avatar-fatura {
+  background: var(--surface-3);
+  color: var(--text-dim);
+}
+
+/* "Após faturas" mora colado na Carteira, separado por uma linha fina: é
+   projeção do que já está comprometido, e a hierarquia tem que dizer isso
+   sozinha, sem depender de ler o rótulo. */
+.hero-secundario {
+  display: flex; align-items: baseline; justify-content: space-between;
+  gap: var(--s3); margin-top: var(--s3);
+  padding-top: var(--s3); border-top: 1px solid var(--border-soft);
+  font-size: 12.5px; color: var(--text-dim);
+}
+.hero-secundario b { font-size: 14px; color: var(--text); font-weight: 700; }
+.hero-secundario b.neg { color: var(--neg); }
+
+/* A linha de apoio dentro dos cartões do topo ("R$ 700,00 no cartão"). O `.s`
+   das listas mora em `.list .row .mid .s`, então aqui não alcança. */
+.duo .card .s { font-size: 11px; color: var(--text-faint); margin-top: 3px; }
+.duo .rot .bolinha-icone { display: inline-flex; color: var(--text-dim); }
+.duo .rot .bolinha-icone svg { width: 13px; height: 13px; }
+/* O cartão de fatura é um link: sem isto ele herdaria o sublinhado e o dourado
+   dos links do app. */
+a.card { text-decoration: none; color: inherit; display: block; }
+
+/* Aviso que É um botão: os lançamentos sem forma de pagamento não são só um
+   recado, são uma tarefa. Por isso ele tem seta e alvo de linha inteira. */
+.aviso-acao {
+  display: flex; align-items: center; justify-content: space-between; gap: var(--s3);
+  min-height: 56px; margin-top: var(--s3);
+  padding: var(--s3) var(--s4); border-radius: var(--r-sm);
+  background: var(--gold-ghost); border: 1px solid rgba(245, 179, 1, 0.3);
+  color: var(--gold-hi); font-size: 12.5px; line-height: 1.45;
+  text-decoration: none;
+}
+.aviso-acao b { display: block; font-size: 13.5px; font-weight: 700; }
+.aviso-acao div div { color: var(--text-dim); margin-top: 2px; }
+.aviso-acao span { font-size: 20px; color: var(--text-dim); flex: none; }
+
+/* ---------- Chips de escolha ----------
+   Cartão e parcelas são listas curtas de opções fixas. Um <select> aqui abriria
+   roleta no celular pra escolher entre duas ou três coisas — o mesmo motivo que
+   tirou o select do seletor de mês. */
+.chip-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: var(--s2); }
+.chip-grid button {
+  min-height: 56px; padding: var(--s2) var(--s3);
+  border-radius: var(--r-sm); border: 1.5px solid var(--border);
+  background: var(--surface-2); cursor: pointer; text-align: left;
+  display: grid; gap: 2px;
+}
+.chip-grid button b { font-size: 13.5px; font-weight: 700; color: var(--text-dim); }
+.chip-grid button span { font-size: 11px; color: var(--text-faint); }
+.chip-grid button.on { background: var(--surface-3); border-color: var(--gold); }
+.chip-grid button.on b { color: var(--text); }
+
+/* Rolagem horizontal e não quebra de linha: 14 opções de parcela em três
+   fileiras empurrariam o resto do formulário pra fora da primeira dobra. */
+.chip-linha {
+  display: flex; gap: var(--s2); overflow-x: auto;
+  padding-bottom: var(--s2); scrollbar-width: none;
+}
+.chip-linha::-webkit-scrollbar { display: none; }
+.chip-linha button {
+  flex: none; min-height: 44px; min-width: 52px; padding: 0 var(--s3);
+  border-radius: var(--r-pill); border: 1.5px solid var(--border);
+  background: var(--surface-2); color: var(--text-dim);
+  font-size: 13px; font-weight: 650; cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.chip-linha button.on {
+  background: var(--gold-ghost); border-color: var(--gold); color: var(--gold-hi);
+}
+
+/* ---------- Resumo em pares ----------
+   Usado no contexto da compra e no cabeçalho do pagamento. É uma tabela de duas
+   colunas sem ser uma tabela: rótulo à esquerda, número à direita. */
+.resumo-compra {
+  display: grid; gap: var(--s2);
+  padding: var(--s3); border-radius: var(--r-sm);
+  background: var(--surface-2); margin-bottom: var(--s4);
+}
+.resumo-compra .linha { display: flex; justify-content: space-between; gap: var(--s3); font-size: 13px; }
+.resumo-compra .linha span { color: var(--text-dim); }
+.resumo-compra .linha b { color: var(--text); font-weight: 700; text-align: right; }
+
+/* ---------- Faturas ---------- */
+.fatura-cabeca {
+  display: flex; align-items: flex-start; justify-content: space-between; gap: var(--s3);
+}
+.fatura-cabeca .t { font-size: 15px; font-weight: 700; }
+.fatura-cabeca .s { font-size: 11.5px; color: var(--text-faint); margin-top: 2px; }
+
+/* O alvo é a linha inteira, com 64px de altura: é o toque mais frequente desta
+   tela, e um "Ver fatura" de texto seria um alvo de 80×16. */
+.fatura-linha {
+  display: flex; align-items: center; justify-content: space-between; gap: var(--s3);
+  width: 100%; min-height: 64px; margin-top: var(--s3);
+  padding: var(--s3); border-radius: var(--r-sm);
+  background: var(--surface-2); border: 1px solid var(--border-soft);
+  text-align: left; cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.fatura-linha:active { background: var(--surface-3); }
+.fatura-linha .rot { font-size: 11px; font-weight: 650; color: var(--text-dim); }
+.fatura-linha .big { font-size: 22px; font-weight: 800; letter-spacing: -0.02em; margin: 2px 0; }
+.fatura-linha .s { font-size: 11.5px; color: var(--text-faint); }
+.fatura-linha .fim { display: grid; gap: var(--s2); justify-items: end; flex: none; }
+.fatura-linha .ver { font-size: 11.5px; color: var(--gold); white-space: nowrap; }
+
+.fatura-total {
+  display: flex; justify-content: space-between; align-items: baseline;
+  gap: var(--s3); padding: var(--s2) 0; font-size: 13.5px; color: var(--text-dim);
+}
+.fatura-total b { color: var(--text); font-weight: 700; }
+.fatura-total.destaque {
+  border-top: 1px solid var(--border); margin-top: var(--s2); padding-top: var(--s3);
+  font-size: 15px; color: var(--text);
+}
+.fatura-total.destaque b { font-size: 18px; font-weight: 800; }
+
+/* ---------- Revisão do histórico ----------
+   `.list .row` vale (0,2,0), então o modificador precisa vir junto dele pra
+   valer — a especificidade aqui já custou dois bugs de layout no projeto. */
+.list .row.revisao-row { cursor: default; }
+.list .row.revisao-row.on { background: var(--gold-ghost); }
+.list .row.revisao-row .mid { cursor: pointer; }
+/* O alvo do toque é a etiqueta de 44px, não o quadradinho de 20: no celular,
+   um checkbox nativo sozinho é errar duas em cada dez. */
+.revisao-marca {
+  display: grid; place-items: center;
+  width: 44px; height: 44px; margin-left: -10px; flex: none; cursor: pointer;
+}
+.revisao-marca input { width: 20px; height: 20px; accent-color: var(--gold); cursor: pointer; }
+
+/* Barra de ação fixa acima da pílula de navegação: no celular quem decide é o
+   polegar, e o botão não pode estar no fim de uma lista de 269 linhas. */
+.barra-acao {
+  position: fixed; left: 0; right: 0;
+  bottom: calc(var(--tab-h) + env(safe-area-inset-bottom, 0px) + var(--s4));
+  z-index: 60;
+  margin: 0 var(--s4); padding: var(--s3) var(--s4);
+  border-radius: var(--r); border: 1px solid var(--border);
+  background: var(--surface); box-shadow: var(--shadow-2);
+}
+.barra-acao .quantos {
+  font-size: 12px; font-weight: 650; color: var(--text-dim); margin-bottom: var(--s2);
+}
+
+/* Reserva o espaço que a barra de ação (fixed) cobre, pra as últimas linhas da
+   lista continuarem alcançáveis. A altura acompanha os três estados dela:
+   só os botões, com seletor de cartão, e com o botão de confirmar. */
+.espaco-barra { height: 190px; }

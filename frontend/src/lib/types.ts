@@ -16,18 +16,55 @@ export interface Category {
 export type CategoryCreate = Omit<Category, "id" | "archived">;
 export type CategoryUpdate = Partial<CategoryCreate> & { archived?: boolean };
 
+// Como o dinheiro sai (ou não sai) da conta.
+//
+// `null` é um terceiro estado e é de propósito: os lançamentos anteriores ao
+// cartão não têm essa informação, e inventá-la seria pior que admitir que ela
+// falta. A Carteira conta esses como saída — é como já eram contados — e a tela
+// avisa quantos ainda estão sem resposta.
+export type PaymentMethod = "cash" | "credit";
+
+export const PAYMENT_METHOD_LABEL: Record<PaymentMethod, string> = {
+  cash: "À vista",
+  credit: "Cartão",
+};
+
 export interface Transaction {
   id: number;
-  date: string; // ISO date (YYYY-MM-DD)
+  date: string; // ISO date (YYYY-MM-DD) — a competência: o mês em que isto conta
   description: string;
   amount_planned: number | null;
   amount_paid: number | null;
   note: string | null;
   category_id: number;
+  payment_method: PaymentMethod | null;
+
+  // ---------- Só em parcela de compra no cartão ----------
+  // Vêm calculados do backend pra a linha da lista poder dizer
+  // "Notebook · Compras · Nubank 2/3" sem uma chamada por linha.
+  purchase_id?: number | null;
+  installment_no?: number | null;
+  invoice_id?: number | null;
+  installments?: number | null;
+  purchase_total?: number | null;
+  purchase_date?: string | null;
+  card_id?: number | null;
+  card_name?: string | null;
 }
 
-export type TransactionCreate = Omit<Transaction, "id">;
+export type TransactionCreate = Omit<
+  Transaction,
+  | "id" | "purchase_id" | "installment_no" | "invoice_id" | "installments"
+  | "purchase_total" | "purchase_date" | "card_id" | "card_name"
+>;
 export type TransactionUpdate = Partial<TransactionCreate>;
+
+/** Parcela não é lançamento solto: as N somam o valor da compra. Editar ou
+ *  apagar uma sozinha quebraria esse total, então a API recusa (409) e a tela
+ *  manda pra compra. */
+export function ehParcela(t: Transaction): boolean {
+  return t.purchase_id != null;
+}
 
 // A meta de gasto de uma categoria num mês. "Orçado" (meta do mês) é outra
 // coisa que "previsto" (amount_planned dos lançamentos) — as duas convivem.
@@ -67,11 +104,172 @@ export interface BudgetSummaryTotals {
   paid: number;
 }
 
+/** Os dois eixos do mês, que eram o mesmo número até o cartão existir.
+ *
+ *  Gastei 1.200 (500 à vista + 700 no cartão) e saiu da conta 500 — o cartão sai
+ *  quando a fatura for paga. Vem junto do resumo de orçamento porque a tela de
+ *  Início já pede esse resumo: uma chamada a mais ali seria espera por nada. */
+export interface Caixa {
+  // Dinheiro de verdade
+  entrou: number;
+  saiu_a_vista: number;
+  investido: number;
+  faturas_pagas: number;
+  carteira: number;
+  // O que foi consumido — é o número das metas
+  gasto_total: number;
+  no_cartao: number;
+  // Transição: despesa anterior ao cartão, ainda sem forma de pagamento
+  sem_forma_definida: number;
+  sem_forma_definida_qtd: number;
+  // Compromisso
+  faturas_do_mes: number;
+  faturas_em_aberto: number;
+  apos_faturas: number;
+}
+
 export interface BudgetSummary {
   year: number;
   month: number;
   items: BudgetSummaryItem[];
+  // Continua medindo GASTO: compra no cartão consome a meta no mês da parcela,
+  // mesmo sem ter saído da conta.
   totals: Record<CategoryType, BudgetSummaryTotals>;
+  caixa: Caixa;
+}
+
+// ---------- Cartão de crédito ----------
+
+export interface Card {
+  id: number;
+  name: string;
+  closing_day: number;
+  due_day: number;
+  archived: boolean;
+}
+
+export type CardCreate = Omit<Card, "id" | "archived">;
+export type CardUpdate = Partial<CardCreate> & { archived?: boolean };
+
+export type InvoiceStatus = "aberta" | "parcial" | "paga" | "atrasada";
+
+export const INVOICE_STATUS_LABEL: Record<InvoiceStatus, string> = {
+  aberta: "Aberta",
+  parcial: "Parcial",
+  paga: "Paga",
+  atrasada: "Atrasada",
+};
+
+export interface Invoice {
+  id: number;
+  card_id: number;
+  card_name: string;
+  // Referência = mês do VENCIMENTO, que é como o banco chama a fatura.
+  year: number;
+  month: number;
+  closing_date: string;
+  due_date: string;
+  total: number;
+  paid: number;
+  remaining: number;
+  status: InvoiceStatus;
+  item_count: number;
+}
+
+export interface InvoiceItem {
+  transaction_id: number;
+  date: string;
+  description: string;
+  amount: number;
+  category_id: number;
+  category_name: string;
+  color: string;
+  icon: string;
+  // Nulos em compra de uma parcela só: "1/1" não informa nada.
+  installment_no: number | null;
+  installments: number | null;
+  purchase_id: number;
+  purchase_total: number;
+  purchase_date: string;
+}
+
+export interface InvoicePayment {
+  id: number;
+  invoice_id: number;
+  date: string;
+  amount: number;
+  note: string | null;
+  card_id: number;
+  card_name: string;
+  invoice_year: number;
+  invoice_month: number;
+}
+
+export interface InvoiceDetail extends Invoice {
+  items: InvoiceItem[];
+  payments: InvoicePayment[];
+}
+
+export interface CardInvoices {
+  card_id: number;
+  name: string;
+  closing_day: number;
+  due_day: number;
+  archived: boolean;
+  current: Invoice | null;
+  next: Invoice | null;
+  open_total: number;
+}
+
+export interface InvoicesSummary {
+  year: number;
+  month: number;
+  cards: CardInvoices[];
+  payments: InvoicePayment[];
+  due_this_month: number;
+  paid_this_month: number;
+  open_total: number;
+}
+
+export interface Purchase {
+  id: number;
+  card_id: number;
+  card_name: string;
+  category_id: number;
+  category_name: string;
+  color: string;
+  icon: string;
+  description: string;
+  total_amount: number;
+  installments: number;
+  purchase_date: string;
+  note: string | null;
+  installment_amounts: number[];
+  paid_installments: number;
+  // Com fatura paga, valor/parcelas/cartão/data não mudam mais: mexer
+  // reescreveria uma fatura que já foi cobrada.
+  locked: boolean;
+}
+
+export interface PurchaseCreate {
+  card_id: number;
+  category_id: number;
+  description: string;
+  total_amount: number;
+  installments: number;
+  purchase_date: string;
+  note?: string | null;
+}
+
+export type PurchaseUpdate = Partial<PurchaseCreate>;
+
+export interface CandidatoAPagamento {
+  id: number;
+  date: string;
+  description: string;
+  amount: number;
+  category_name: string;
+  payment_method: PaymentMethod | null;
 }
 
 export const CATEGORY_TYPE_LABEL: Record<CategoryType, string> = {

@@ -57,6 +57,30 @@ export function formatDiaMes(iso: string): string {
   return `${d} ${mes.replace(".", "")}`;
 }
 
+/** Prévia das parcelas, para o formulário mostrar antes de salvar.
+ *
+ * Espelha `dividir_em_parcelas` de `app/cartao.py`, que é quem DECIDE: o valor
+ * que vale é o que volta do servidor. Isto aqui existe só pra a tela poder
+ * dizer "3 parcelas de R$ 300,00" enquanto a pessoa ainda está escolhendo.
+ *
+ * A conta é em centavos inteiros porque float não fecha — `100/3*3` não dá 100.
+ * O que sobra vai na primeira parcela, que é a que aparece no mês da compra.
+ */
+export function dividirEmParcelas(total: number, parcelas: number): number[] {
+  if (parcelas < 1) return [];
+  const centavos = Math.round(total * 100);
+  const base = Math.floor(centavos / parcelas);
+  const resto = centavos - base * parcelas;
+  return [(base + resto) / 100, ...Array(parcelas - 1).fill(base / 100)];
+}
+
+/** "2026-09" → "setembro/2026". Por extenso porque aparece em frase corrida
+ *  ("1ª em setembro/2026"), onde "set/2026" lê como abreviação de formulário. */
+export function formatMesPorExtenso(ano: number, mes: number): string {
+  const nome = new Date(ano, mes - 1, 1).toLocaleDateString("pt-BR", { month: "long" });
+  return `${nome}/${ano}`;
+}
+
 /** O sinal que vai na frente do valor, por tipo de categoria.
  *
  * Despesa e receita têm sinal fixo, e o valor guardado é sempre positivo.

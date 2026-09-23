@@ -2,8 +2,12 @@ import { useMutation, useQuery, useQueryClient, type QueryClient } from "@tansta
 import {
   assetsApi,
   budgetsApi,
+  cardsApi,
   categoriesApi,
+  formaApi,
+  invoicesApi,
   perfilApi,
+  purchasesApi,
   transactionsApi,
 } from "./api";
 import { usePeriod } from "./period";
@@ -12,8 +16,13 @@ import type {
   AssetSnapshotSet,
   AssetUpdate,
   BudgetSet,
+  CardCreate,
+  CardUpdate,
   CategoryCreate,
   CategoryUpdate,
+  PaymentMethod,
+  PurchaseCreate,
+  PurchaseUpdate,
   TransactionCreate,
   TransactionUpdate,
 } from "./types";
@@ -23,13 +32,21 @@ const keys = {
   categories: ["categories"] as const,
   budgets: ["budgets"] as const,
   assets: ["assets"] as const,
+  cards: ["cards"] as const,
+  invoices: ["invoices"] as const,
 };
 
 // O summary de orçamento soma amount_planned/amount_paid das transações, então
 // mexer em transação (ou em categoria) desatualiza o orçamento também.
+//
+// As faturas entram na mesma invalidação desde que o cartão existe: uma compra
+// muda a fatura, e o resumo de orçamento passou a carregar o bloco de caixa, que
+// desconta pagamento de fatura. Esquecer um dos três deixaria a tela com dois
+// números do mesmo mês discordando — que é o defeito mais caro de depurar aqui.
 function invalidateMovement(qc: QueryClient) {
   qc.invalidateQueries({ queryKey: keys.transactions });
   qc.invalidateQueries({ queryKey: keys.budgets });
+  qc.invalidateQueries({ queryKey: keys.invoices });
 }
 
 // ---------- Transações ----------
@@ -199,6 +216,166 @@ export function useDeleteCategory() {
   });
 }
 
+
+// ---------- Cartões ----------
+export function useCards(incluirArquivados = false) {
+  // Mesma armadilha das categorias: sem o parâmetro na chave, arquivar um
+  // cartão o faria sumir da tela onde se desarquiva.
+  return useQuery({
+    queryKey: [...keys.cards, incluirArquivados],
+    queryFn: () => cardsApi.list(incluirArquivados),
+  });
+}
+
+export function useCreateCard() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (data: CardCreate) => cardsApi.create(data),
+    onSuccess: () => qc.invalidateQueries({ queryKey: keys.cards }),
+  });
+}
+
+export function useUpdateCard() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, data }: { id: number; data: CardUpdate }) => cardsApi.update(id, data),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: keys.cards });
+      // O nome do cartão aparece na linha da parcela e no resumo de faturas.
+      qc.invalidateQueries({ queryKey: keys.invoices });
+      qc.invalidateQueries({ queryKey: keys.transactions });
+    },
+  });
+}
+
+export function useDeleteCard() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: number) => cardsApi.remove(id),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: keys.cards });
+      qc.invalidateQueries({ queryKey: keys.invoices });
+    },
+  });
+}
+
+// ---------- Faturas ----------
+export function useInvoicesSummary() {
+  const { period, ym } = usePeriod();
+  return useQuery({
+    queryKey: [...keys.invoices, "summary", ym],
+    queryFn: () => invoicesApi.summary(period),
+  });
+}
+
+export function useInvoice(id: number | null) {
+  return useQuery({
+    queryKey: [...keys.invoices, "detalhe", id],
+    queryFn: () => invoicesApi.get(id!),
+    enabled: id != null,
+  });
+}
+
+export function usePayInvoice() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, amount, date }: { id: number; amount: number; date: string }) =>
+      invoicesApi.pay(id, { amount, date }),
+    // Pagar fatura é saída de caixa: muda a Carteira, que vem do resumo de
+    // orçamento. Por isso invalida tudo, não só a fatura.
+    onSuccess: () => invalidateMovement(qc),
+  });
+}
+
+export function useUndoPayment() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (paymentId: number) => invoicesApi.undoPayment(paymentId),
+    onSuccess: () => invalidateMovement(qc),
+  });
+}
+
+export function useCandidatosAPagamento(invoiceId: number | null) {
+  return useQuery({
+    queryKey: [...keys.invoices, "candidatos", invoiceId],
+    queryFn: () => invoicesApi.candidates(invoiceId!),
+    enabled: invoiceId != null,
+  });
+}
+
+export function useReconcile() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, transactionId }: { id: number; transactionId: number }) =>
+      invoicesApi.reconcile(id, transactionId),
+    onSuccess: () => invalidateMovement(qc),
+  });
+}
+
+// ---------- Compras no cartão ----------
+export function usePurchase(id: number | null) {
+  return useQuery({
+    queryKey: ["purchases", id],
+    queryFn: () => purchasesApi.get(id!),
+    enabled: id != null,
+  });
+}
+
+export function useCreatePurchase() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (data: PurchaseCreate) => purchasesApi.create(data),
+    onSuccess: () => invalidateMovement(qc),
+  });
+}
+
+export function useUpdatePurchase() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, data }: { id: number; data: PurchaseUpdate }) =>
+      purchasesApi.update(id, data),
+    onSuccess: (_, { id }) => {
+      invalidateMovement(qc);
+      qc.invalidateQueries({ queryKey: ["purchases", id] });
+    },
+  });
+}
+
+export function useDeletePurchase() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: number) => purchasesApi.remove(id),
+    onSuccess: () => invalidateMovement(qc),
+  });
+}
+
+// ---------- Forma de pagamento do histórico ----------
+export function useDefinirForma() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      id,
+      metodo,
+      card_id,
+      installments,
+    }: {
+      id: number;
+      metodo: PaymentMethod;
+      card_id?: number;
+      installments?: number;
+    }) => formaApi.um(id, { metodo, card_id, installments }),
+    onSuccess: () => invalidateMovement(qc),
+  });
+}
+
+export function useDefinirFormaEmLote() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (data: { ids: number[]; metodo: PaymentMethod; card_id?: number }) =>
+      formaApi.lote(data),
+    onSuccess: () => invalidateMovement(qc),
+  });
+}
 
 // ---------- Perfil ----------
 export function usePerfil() {

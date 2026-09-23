@@ -156,7 +156,11 @@ export function Fluxo({
 
   const partes = [
     { rot: "Entrou", valor: entrou, cor: VIZ.entrou },
-    { rot: "Saiu", valor: saiu, cor: VIZ.saiu },
+    // "Gastou" e não "Saiu": com cartão, o que se gastou e o que saiu da conta
+    // deixaram de ser o mesmo número, e esta faixa mostra o do gasto. O cartão
+    // de cima usa a mesma palavra — duas palavras pro mesmo número fariam
+    // parecer que são dois.
+    { rot: "Gastou", valor: saiu, cor: VIZ.saiu },
     { rot: "Investido", valor: investido, cor: VIZ.investido },
   ].filter((p) => p.valor > 0);
 

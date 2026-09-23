@@ -5,6 +5,7 @@ import Budget from "./pages/Budget";
 import Investments from "./pages/Investments";
 import Assets from "./pages/Assets";
 import Settings from "./pages/Settings";
+import Revisao from "./pages/Revisao";
 import Login from "./pages/Login";
 import { useAuth } from "./lib/auth";
 
@@ -49,6 +50,9 @@ export default function App() {
         <Route path="/investimentos" element={<Investments />} />
         <Route path="/patrimonio" element={<Assets />} />
         <Route path="/configuracoes" element={<Settings />} />
+        {/* Fora da barra de abas: é uma tarefa de mutirão, feita uma vez
+            enquanto o histórico é organizado, não uma seção do app. */}
+        <Route path="/rever" element={<Revisao />} />
         {/* Rotas antigas: Transações virou sub-aba de Orçamento e Categorias
             entrou em Configurações. Redirecionar evita quebrar link salvo. */}
         <Route path="/transacoes" element={<Navigate to="/orcamento?aba=lancamentos" replace />} />

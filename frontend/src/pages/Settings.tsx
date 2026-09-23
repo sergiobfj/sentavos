@@ -1,17 +1,28 @@
 import { useEffect, useState } from "react";
+import { Link } from "react-router-dom";
 import { parseMoney } from "../lib/format";
 import Modal from "../components/Modal";
 import ConfirmDialog from "../components/ConfirmDialog";
+import { IconeCartao, MarcaEditavel } from "../components/TransactionList";
 import {
+  useCards,
   useCategories,
+  useCreateCard,
   useCreateCategory,
+  useDeleteCard,
   useDeleteCategory,
+  useUpdateCard,
   useUpdateCategory,
   usePerfil,
   useSetCdi,
 } from "../lib/queries";
 import { ApiError } from "../lib/api";
-import { CATEGORY_TYPE_LABEL, type Category, type CategoryType } from "../lib/types";
+import {
+  CATEGORY_TYPE_LABEL,
+  type Card as CardType,
+  type Category,
+  type CategoryType,
+} from "../lib/types";
 
 const TYPES: CategoryType[] = ["expense", "income", "investment"];
 
@@ -26,6 +37,11 @@ export default function Settings() {
   return (
     <>
       <div className="sec-title" style={{ marginTop: 0 }}>
+        <h2>Cartões</h2>
+      </div>
+      <Cartoes />
+
+      <div className="sec-title">
         <h2>Rendimento</h2>
       </div>
       <CdiCard />
@@ -62,6 +78,273 @@ export default function Settings() {
       {creating && <CategoryForm onClose={() => setCreating(false)} />}
       {editing && <CategoryForm category={editing} onClose={() => setEditing(null)} />}
     </>
+  );
+}
+
+// ---------- Cartões ----------
+
+function Cartoes() {
+  // Inclui arquivados: é aqui que se desarquiva, igual às categorias.
+  const { data: cards, isLoading } = useCards(true);
+  const { data: categories } = useCategories(true);
+  const [editando, setEditando] = useState<CardType | null>(null);
+  const [criando, setCriando] = useState(false);
+  const arquivarCategoria = useUpdateCategory();
+
+  // A categoria "Fatura do cartão" é o jeito antigo de registrar fatura: uma
+  // despesa por mês com o total. Com cartão de verdade no app, lançar dos dois
+  // jeitos no mesmo mês conta o mesmo dinheiro duas vezes. O app OFERECE
+  // arquivá-la — não arquiva sozinho, e não toca no histórico dela.
+  const legada = (categories ?? []).find(
+    (c) =>
+      !c.archived &&
+      c.type === "expense" &&
+      /fatura/i.test(c.name)
+  );
+
+  if (isLoading) return <div className="skel" style={{ height: 90 }} />;
+
+  return (
+    <>
+      {(cards ?? []).length === 0 ? (
+        <div className="card card-pad">
+          <div className="hint" style={{ marginBottom: "var(--s3)" }}>
+            Com um cartão cadastrado, a compra vira gasto no mês em que você
+            comprou e só sai da conta quando você pagar a fatura.
+          </div>
+          <button className="btn btn-primary btn-block" onClick={() => setCriando(true)}>
+            Cadastrar cartão
+          </button>
+        </div>
+      ) : (
+        <>
+          <div className="list">
+            {(cards ?? []).map((c) => (
+              <button
+                className="row"
+                key={c.id}
+                onClick={() => setEditando(c)}
+                style={c.archived ? { opacity: 0.5 } : undefined}
+              >
+                <div className="avatar avatar-fatura" aria-hidden>
+                  <IconeCartao />
+                </div>
+                <div className="mid">
+                  <div className="t">{c.name}</div>
+                  <div className="s">
+                    fecha dia {c.closing_day} · vence dia {c.due_day}
+                    {c.archived && " · arquivado"}
+                  </div>
+                </div>
+                <MarcaEditavel />
+              </button>
+            ))}
+          </div>
+          <button
+            className="btn btn-ghost btn-sm btn-block"
+            style={{ marginTop: "var(--s2)" }}
+            onClick={() => setCriando(true)}
+          >
+            + Novo cartão
+          </button>
+        </>
+      )}
+
+      {(cards ?? []).length > 0 && legada && (
+        <div className="aviso-box" style={{ marginTop: "var(--s3)" }}>
+          A categoria <b>{legada.name}</b> é o jeito antigo de registrar fatura:
+          uma despesa por mês, com o total. Agora que existe cartão, usar os dois
+          no mesmo mês conta o mesmo dinheiro duas vezes.
+          <div style={{ marginTop: "var(--s2)", color: "var(--text-faint)" }}>
+            Arquivar tira a categoria do formulário. Os lançamentos antigos dela
+            <b> não mudam</b> — para reaproveitá-los, abra a fatura do mês e use
+            "já lancei este pagamento como despesa".
+          </div>
+          <button
+            className="btn btn-sm"
+            style={{ marginTop: "var(--s3)" }}
+            disabled={arquivarCategoria.isPending}
+            onClick={() =>
+              arquivarCategoria.mutate({ id: legada.id, data: { archived: true } })
+            }
+          >
+            Arquivar {legada.name}
+          </button>
+        </div>
+      )}
+
+      <Link className="btn btn-ghost btn-sm btn-block" to="/rever" style={{ marginTop: "var(--s3)" }}>
+        Revisar forma de pagamento dos lançamentos
+      </Link>
+
+      {criando && <CardForm onClose={() => setCriando(false)} />}
+      {editando && <CardForm card={editando} onClose={() => setEditando(null)} />}
+    </>
+  );
+}
+
+function CardForm({ card, onClose }: { card?: CardType; onClose: () => void }) {
+  const criar = useCreateCard();
+  const atualizar = useUpdateCard();
+  const [excluindo, setExcluindo] = useState(false);
+  const [form, setForm] = useState({
+    name: card?.name ?? "",
+    closing_day: String(card?.closing_day ?? 25),
+    due_day: String(card?.due_day ?? 2),
+  });
+
+  const pendente = criar.isPending || atualizar.isPending;
+  const erro = (criar.error || atualizar.error) as ApiError | null;
+  const fecha = Number(form.closing_day);
+  const vence = Number(form.due_day);
+  const valido =
+    form.name.trim() && fecha >= 1 && fecha <= 31 && vence >= 1 && vence <= 31;
+
+  return (
+    <Modal
+      title={card ? "Editar cartão" : "Novo cartão"}
+      onClose={onClose}
+      footer={
+        <>
+          {card ? (
+            <button
+              type="button"
+              className="btn btn-danger"
+              onClick={() => setExcluindo(true)}
+            >
+              Excluir
+            </button>
+          ) : (
+            <button type="button" className="btn btn-ghost" onClick={onClose}>
+              Cancelar
+            </button>
+          )}
+          <button
+            type="submit"
+            form="card-form"
+            className="btn btn-primary"
+            disabled={pendente || !valido}
+          >
+            {pendente ? "Salvando…" : "Salvar"}
+          </button>
+        </>
+      }
+    >
+      <form
+        id="card-form"
+        className="m-body"
+        onSubmit={(e) => {
+          e.preventDefault();
+          const dados = {
+            name: form.name.trim(),
+            closing_day: fecha,
+            due_day: vence,
+          };
+          if (card) atualizar.mutate({ id: card.id, data: dados }, { onSuccess: onClose });
+          else criar.mutate(dados, { onSuccess: onClose });
+        }}
+      >
+        <div className="field">
+          <label htmlFor="cd-nome">Nome</label>
+          <input
+            id="cd-nome"
+            value={form.name}
+            autoFocus
+            placeholder="Ex.: Nubank"
+            onChange={(e) => setForm({ ...form, name: e.target.value })}
+          />
+        </div>
+
+        <div className="field row2">
+          <div className="field">
+            <label htmlFor="cd-fecha">Fecha dia</label>
+            <input
+              id="cd-fecha"
+              inputMode="numeric"
+              value={form.closing_day}
+              onChange={(e) => setForm({ ...form, closing_day: e.target.value })}
+            />
+          </div>
+          <div className="field">
+            <label htmlFor="cd-vence">Vence dia</label>
+            <input
+              id="cd-vence"
+              inputMode="numeric"
+              value={form.due_day}
+              onChange={(e) => setForm({ ...form, due_day: e.target.value })}
+            />
+          </div>
+        </div>
+
+        <div className="hint">
+          Compra feita <b>até</b> o dia do fechamento entra na fatura que fecha
+          nesse dia. Depois disso, vai pra próxima.
+          {valido && (
+            <div style={{ marginTop: "var(--s2)" }}>
+              Uma compra hoje cairia na fatura que{" "}
+              {vence > fecha ? "vence no mesmo mês do fechamento" : "vence no mês seguinte"}.
+            </div>
+          )}
+        </div>
+
+        {card && (
+          <div className="field">
+            <label>Arquivar</label>
+            <button
+              type="button"
+              className="btn btn-sm"
+              disabled={atualizar.isPending}
+              onClick={() =>
+                atualizar.mutate(
+                  { id: card.id, data: { archived: !card.archived } },
+                  { onSuccess: onClose }
+                )
+              }
+            >
+              {card.archived ? "Desarquivar cartão" : "Arquivar cartão"}
+            </button>
+            <div className="hint">
+              Arquivado, ele some do formulário de lançamento sem levar as
+              compras e faturas antigas junto.
+            </div>
+          </div>
+        )}
+
+        {erro && (
+          <div className="error-box" style={{ padding: 0, textAlign: "left" }}>
+            {erro.message}
+          </div>
+        )}
+      </form>
+
+      {excluindo && card && <ExcluirCartao card={card} onDone={onClose} onCancel={() => setExcluindo(false)} />}
+    </Modal>
+  );
+}
+
+function ExcluirCartao({
+  card,
+  onDone,
+  onCancel,
+}: {
+  card: CardType;
+  onDone: () => void;
+  onCancel: () => void;
+}) {
+  const del = useDeleteCard();
+  return (
+    <ConfirmDialog
+      title="Excluir cartão"
+      itemName={card.name}
+      consequences={[
+        "Só dá para excluir cartão sem nenhuma compra registrada.",
+        "Com histórico, a API recusa e o caminho é arquivar.",
+      ]}
+      pending={del.isPending}
+      error={(del.error as ApiError | null)?.message ?? null}
+      onCancel={onCancel}
+      onConfirm={() => del.mutate(card.id, { onSuccess: onDone })}
+    />
   );
 }
 
