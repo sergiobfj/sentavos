@@ -28,14 +28,41 @@ branch_labels = None
 depends_on = None
 
 
+def tem_coluna(tabela: str, coluna: str) -> bool:
+    """A coluna já existe neste banco?
+
+    Num banco em uso, não — é o que esta migração vem adicionar. Num banco
+    VAZIO, sim: a 0001 monta as tabelas com `create_all`, que usa o modelo de
+    hoje e já traz as colunas de todas as migrações seguintes. Sem esta
+    checagem, `alembic upgrade head` num ambiente novo morre aqui com
+    "duplicate column name: archived" — e como a API roda o upgrade no startup,
+    o app não sobe.
+
+    Descoberto ao montar uma cópia local pra ensaiar a migração do cartão.
+    """
+    inspetor = sa.inspect(op.get_bind())
+    if tabela not in inspetor.get_table_names():
+        return False
+    return coluna in {c["name"] for c in inspetor.get_columns(tabela)}
+
+
+def tem_indice(tabela: str, indice: str) -> bool:
+    inspetor = sa.inspect(op.get_bind())
+    if tabela not in inspetor.get_table_names():
+        return False
+    return indice in {i["name"] for i in inspetor.get_indexes(tabela)}
+
+
 def upgrade() -> None:
-    op.add_column(
-        "categories",
-        sa.Column("archived", sa.Boolean(), nullable=False, server_default=sa.false()),
-    )
+    if not tem_coluna("categories", "archived"):
+        op.add_column(
+            "categories",
+            sa.Column("archived", sa.Boolean(), nullable=False, server_default=sa.false()),
+        )
     # Índice porque toda listagem de categoria filtra por arquivada a partir de
     # agora, e o formulário de lançamento faz isso a cada abertura.
-    op.create_index("ix_categories_archived", "categories", ["user_id", "archived"])
+    if not tem_indice("categories", "ix_categories_archived"):
+        op.create_index("ix_categories_archived", "categories", ["user_id", "archived"])
 
 
 def downgrade() -> None:

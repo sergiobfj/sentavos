@@ -75,6 +75,20 @@ class CategoryUpdate(SQLModel):
     icon: str | None = None
     archived: bool | None = None
 
+class PaymentMethod(str, Enum):
+    """Como o dinheiro sai (ou não sai) da conta neste lançamento.
+
+    NULL é um terceiro estado, e é de propósito: os 269 lançamentos que já
+    existiam quando o cartão entrou no app não têm essa informação, e inventá-la
+    seria pior do que admitir que ela falta. Ver `TransactionBase.payment_method`.
+    """
+
+    # Saiu da conta na hora: PIX, débito, dinheiro, boleto.
+    CASH = "cash"
+    # Foi gasto agora, sai da conta quando a fatura for paga.
+    CREDIT = "credit"
+
+
 class TransactionBase(SQLModel):
     date: dt.date
     description: str
@@ -83,10 +97,35 @@ class TransactionBase(SQLModel):
     note: str | None = None
     category_id: int = Field(foreign_key="categories.id")
 
+    # ---------- Gasto x saída de caixa ----------
+    # Até aqui o app tratava os dois como o mesmo evento. É verdade pra PIX e
+    # débito, e falso pro cartão: a compra é gasto hoje e só vira saída de caixa
+    # quando a fatura é paga, semanas depois.
+    #
+    # Nulo = "ainda não sei", e só acontece em lançamento anterior a esta
+    # funcionalidade. A Carteira conta esses como saída de caixa — não porque
+    # sejam à vista, mas porque é assim que eles já eram contados, e mudar isso
+    # sem o dono revisar reescreveria o histórico dele de um dia pro outro. A
+    # tela de revisão existe pra transformar esse nulo em resposta.
+    payment_method: PaymentMethod | None = None
+
+
 class Transaction(TransactionBase, table=True):
     __tablename__ = "transactions"
     user_id: int = dono()
     id: int | None = Field(default=None, primary_key=True)
+
+    # ---------- Só para lançamento de cartão ----------
+    # Os três andam juntos: ou são todos nulos (lançamento à vista), ou todos
+    # preenchidos (uma parcela de uma compra, cobrada numa fatura).
+    #
+    # Não vêm em TransactionCreate de propósito: parcela não se cria solta, se
+    # cria pela compra — senão dava pra plantar uma parcela "3 de 2", ou uma
+    # parcela numa fatura que já foi paga.
+    purchase_id: int | None = Field(default=None, foreign_key="purchases.id", index=True)
+    installment_no: int | None = None
+    invoice_id: int | None = Field(default=None, foreign_key="invoices.id", index=True)
+
 
 class TransactionCreate(TransactionBase):
     pass
@@ -98,6 +137,299 @@ class TransactionUpdate(SQLModel):
     amount_paid: float | None = None
     note: str | None = None
     category_id: int | None = None
+    payment_method: PaymentMethod | None = None
+
+
+class TransactionRead(TransactionBase):
+    """O lançamento como a tela precisa dele.
+
+    A lista mostra "Notebook · Compras · Nubank 2/10", e esses três últimos
+    dados moram em duas tabelas diferentes. Resolver isso no navegador daria uma
+    chamada por linha; resolver aqui custa duas consultas para a lista inteira.
+    """
+
+    id: int
+    purchase_id: int | None = None
+    installment_no: int | None = None
+    invoice_id: int | None = None
+    # Vêm da compra e do cartão — nulos em lançamento à vista.
+    installments: int | None = None
+    purchase_total: float | None = None
+    purchase_date: dt.date | None = None
+    card_id: int | None = None
+    card_name: str | None = None
+
+
+# ---------- Cartão de crédito ----------
+# Três entidades e um princípio: a fatura não guarda dinheiro, ela guarda
+# identidade. Total, pago, restante e status são derivados dos itens e dos
+# pagamentos toda vez que a tela pede.
+#
+# É a mesma decisão da aba de Investimento, que não tem dados próprios: dois
+# números para o mesmo dinheiro começam iguais e terminam diferentes. Um status
+# gravado teria ainda um segundo defeito — precisaria de alguém passando de
+# tempos em tempos só pra virar "aberta" em "atrasada" na data certa.
+
+
+class CardBase(SQLModel):
+    name: str
+    # Dia do mês, 1 a 31. Mês curto é achatado na hora de calcular (ver
+    # app/cartao.py): cartão que fecha 31 fecha 28 em fevereiro.
+    closing_day: int = Field(ge=1, le=31)
+    due_day: int = Field(ge=1, le=31)
+
+    # Arquivado some do formulário de lançamento e continua no banco, igual à
+    # categoria: as compras antigas apontam pra ele.
+    archived: bool = False
+
+
+class Card(CardBase, table=True):
+    __tablename__ = "cards"
+    user_id: int = dono()
+    id: int | None = Field(default=None, primary_key=True)
+    created_at: dt.datetime = Field(
+        default_factory=lambda: dt.datetime.now(dt.timezone.utc)
+    )
+
+
+class CardCreate(CardBase):
+    pass
+
+
+class CardUpdate(SQLModel):
+    name: str | None = None
+    closing_day: int | None = Field(default=None, ge=1, le=31)
+    due_day: int | None = Field(default=None, ge=1, le=31)
+    archived: bool | None = None
+
+
+# Teto de parcelas. Não é regra de cartão nenhum — é o que impede um dedo errado
+# ("1200x") de plantar mil linhas no banco. A tela oferece até 24.
+MAX_PARCELAS = 72
+
+
+class PurchaseBase(SQLModel):
+    card_id: int = Field(foreign_key="cards.id")
+    category_id: int = Field(foreign_key="categories.id")
+    description: str
+    # O valor CHEIO da compra. As parcelas saem daqui divididas em centavos
+    # inteiros, e não o contrário: guardar o valor da parcela faria o total ser
+    # uma multiplicação que não fecha (33,33 × 3 = 99,99).
+    total_amount: float
+    installments: int = Field(default=1, ge=1, le=MAX_PARCELAS)
+    # Quando a compra aconteceu de verdade. Diferente da competência do gasto
+    # (que é a data de cada parcela) e da fatura que a cobra.
+    purchase_date: dt.date
+    note: str | None = None
+
+
+class Purchase(PurchaseBase, table=True):
+    """A compra no cartão, parcelada ou não.
+
+    Existe mesmo em 1x. Poderia não existir — uma compra à vista no cartão é uma
+    parcela só, e os dados caberiam na própria transação. Mas aí editar e
+    apagar teriam dois caminhos diferentes conforme o número de parcelas, e o
+    caminho menos usado é sempre o que quebra.
+    """
+
+    __tablename__ = "purchases"
+    user_id: int = dono()
+    id: int | None = Field(default=None, primary_key=True)
+    created_at: dt.datetime = Field(
+        default_factory=lambda: dt.datetime.now(dt.timezone.utc)
+    )
+
+
+class PurchaseCreate(PurchaseBase):
+    pass
+
+
+class PurchaseUpdate(SQLModel):
+    """O que dá pra mudar depois.
+
+    Descrição, categoria e observação são rótulo: mudam sem mexer em dinheiro.
+    Valor, parcelas e cartão mudam quanto cada fatura cobra — a rota recusa
+    esses três quando alguma fatura da compra já recebeu pagamento.
+    """
+
+    description: str | None = None
+    category_id: int | None = None
+    note: str | None = None
+    total_amount: float | None = None
+    installments: int | None = Field(default=None, ge=1, le=MAX_PARCELAS)
+    card_id: int | None = None
+    purchase_date: dt.date | None = None
+
+
+class Invoice(SQLModel, table=True):
+    """Uma fatura de um cartão num período.
+
+    `year`/`month` são a referência pela qual ela é conhecida — o mês do
+    VENCIMENTO, que é como o banco a chama e como se fala dela ("a fatura de
+    outubro"). O fechamento pode ser do mês anterior.
+
+    As duas datas ficam CONGELADAS aqui, e não recalculadas a partir do cartão.
+    Trocar o dia de fechamento em 2027 não pode remontar as faturas de 2026 —
+    elas já foram cobradas e pagas com as datas que tinham.
+    """
+
+    __tablename__ = "invoices"
+    __table_args__ = (
+        UniqueConstraint("user_id", "card_id", "year", "month", name="uq_invoice_card_period"),
+    )
+
+    user_id: int = dono()
+    id: int | None = Field(default=None, primary_key=True)
+    card_id: int = Field(foreign_key="cards.id", index=True)
+    year: int = Field(ge=1900, le=2999)
+    month: int = Field(ge=1, le=12)
+    closing_date: dt.date
+    due_date: dt.date
+
+
+class InvoicePaymentBase(SQLModel):
+    date: dt.date
+    amount: float
+    # Livre, e é o que guarda o rastro de uma reconciliação: quando um
+    # lançamento antigo de "Fatura do cartão" vira pagamento, o que ele era
+    # fica escrito aqui. Sem isso a operação apagaria a origem sem deixar marca.
+    note: str | None = None
+
+
+class InvoicePayment(InvoicePaymentBase, table=True):
+    """O pagamento da fatura: saída de caixa que NÃO é gasto de categoria.
+
+    É por isso que ele não é uma `Transaction`. O gasto já foi contado quando a
+    compra foi lançada; contar de novo aqui somaria o mesmo dinheiro duas vezes,
+    e o erro apareceria como "gastei 2.400 num mês em que gastei 1.200".
+
+    Não ter `category_id` não é esquecimento: é a garantia estrutural de que
+    isso nunca vai cair numa meta nem no "para onde foi".
+    """
+
+    __tablename__ = "invoice_payments"
+    user_id: int = dono()
+    id: int | None = Field(default=None, primary_key=True)
+    invoice_id: int = Field(foreign_key="invoices.id", index=True)
+
+
+class InvoicePaymentCreate(InvoicePaymentBase):
+    pass
+
+
+class InvoiceStatus(str, Enum):
+    """Calculado na hora, nunca gravado.
+
+    A precedência é `paga` → `atrasada` → `parcial` → `aberta`: uma fatura
+    vencida com saldo aparece como atrasada mesmo se já recebeu parte, porque é
+    a informação que pede ação. Quanto já foi pago continua visível ao lado.
+    """
+
+    ABERTA = "aberta"
+    PARCIAL = "parcial"
+    PAGA = "paga"
+    ATRASADA = "atrasada"
+
+
+# Sem juros, multa, rotativo ou IOF — de propósito. Cobrança dessas entra como
+# lançamento normal, feito pelo dono, com o valor que o banco cobrou de fato.
+
+
+class InvoiceItem(SQLModel):
+    """Uma linha da fatura: a parcela, com o rastro até a compra que a gerou."""
+
+    transaction_id: int
+    # A competência do gasto — o mês em que esta parcela conta no orçamento.
+    date: dt.date
+    description: str
+    amount: float
+    category_id: int
+    category_name: str
+    color: str
+    icon: str
+    # "1/3". Nulo em compra de uma parcela só, pra a tela não escrever "1/1".
+    installment_no: int | None = None
+    installments: int | None = None
+    purchase_id: int
+    purchase_total: float
+    purchase_date: dt.date
+
+
+class InvoiceRead(SQLModel):
+    id: int
+    card_id: int
+    card_name: str
+    year: int
+    month: int
+    closing_date: dt.date
+    due_date: dt.date
+    total: float = 0
+    paid: float = 0
+    remaining: float = 0
+    status: InvoiceStatus = InvoiceStatus.ABERTA
+    item_count: int = 0
+
+
+class InvoicePaymentRead(InvoicePaymentBase):
+    id: int
+    invoice_id: int
+    card_id: int
+    card_name: str
+    # Pra a lista de lançamentos poder linkar de volta sem uma segunda consulta.
+    invoice_year: int
+    invoice_month: int
+
+
+class InvoiceDetail(InvoiceRead):
+    items: list[InvoiceItem] = []
+    payments: list[InvoicePaymentRead] = []
+
+
+class CardInvoices(SQLModel):
+    """O que a aba de Faturas mostra por cartão."""
+
+    card_id: int
+    name: str
+    closing_day: int
+    due_day: int
+    archived: bool
+    # A fatura que vence no mês selecionado — a que se paga agora.
+    current: InvoiceRead | None = None
+    # A que está acumulando para o mês seguinte.
+    next: InvoiceRead | None = None
+    # Tudo que ainda não foi pago, deste cartão, somando todas as faturas.
+    open_total: float = 0
+
+
+class InvoicesSummary(SQLModel):
+    year: int
+    month: int
+    cards: list[CardInvoices] = []
+    # Os pagamentos feitos no mês — é o que a lista de lançamentos mescla, e o
+    # que a Carteira desconta.
+    payments: list[InvoicePaymentRead] = []
+    # Faturas que vencem no mês selecionado.
+    due_this_month: float = 0
+    paid_this_month: float = 0
+    # Restante de TODAS as faturas em aberto, de todos os cartões. É o número
+    # que vira "após faturas" no Início.
+    open_total: float = 0
+
+
+class PurchaseRead(PurchaseBase):
+    """A compra com o contexto que a tela mostra ao abrir uma parcela."""
+
+    id: int
+    card_name: str
+    category_name: str
+    color: str
+    icon: str
+    # Valor de cada parcela, na ordem — a primeira leva os centavos que sobram.
+    installment_amounts: list[float] = []
+    # Quantas parcelas estão em fatura já paga: é o que decide se dá pra editar
+    # valor, parcelas e cartão.
+    paid_installments: int = 0
+    locked: bool = False
 
 
 # ---------- Orçamento ----------
@@ -162,12 +494,59 @@ class BudgetSummaryTotals(SQLModel):
     planned: float = 0
     paid: float = 0
 
+class Caixa(SQLModel):
+    """Os dois eixos do mês, lado a lado: o que gastei e o que saiu da conta.
+
+    Eles eram o mesmo número até o cartão entrar no app. Agora:
+
+        gastei 1.200 no mês  (500 à vista + 700 no cartão)
+        saiu da conta 500    (o cartão sai quando a fatura for paga)
+
+    Mora no resumo do orçamento, e não numa rota própria, porque a tela de
+    Início já pede este resumo — uma chamada a mais na tela que mais se abre
+    seria meio segundo de espera por nada.
+    """
+
+    # ---------- Eixo caixa: dinheiro de verdade ----------
+    entrou: float = 0
+    saiu_a_vista: float = 0
+    investido: float = 0
+    faturas_pagas: float = 0
+    # entrou − saiu à vista − investido − faturas pagas
+    carteira: float = 0
+
+    # ---------- Eixo gasto: o que consumi ----------
+    # gasto_total inclui o que foi no cartão; é o número das metas.
+    gasto_total: float = 0
+    no_cartao: float = 0
+
+    # ---------- Transição ----------
+    # Despesa anterior ao cartão, ainda sem forma de pagamento definida. Conta
+    # como saída de caixa (é como já era contada), mas a tela avisa que esses
+    # lançamentos existem em vez de fingir que a resposta está completa.
+    sem_forma_definida: float = 0
+    sem_forma_definida_qtd: int = 0
+
+    # ---------- Compromisso ----------
+    # Faturas que vencem neste mês, e o que ainda falta pagar de todas elas.
+    faturas_do_mes: float = 0
+    faturas_em_aberto: float = 0
+    # Carteira − faturas em aberto. É projeção, não saldo: fica ao lado da
+    # Carteira, nunca no lugar dela.
+    apos_faturas: float = 0
+
+
 class BudgetSummary(SQLModel):
     year: int
     month: int
     items: list[BudgetSummaryItem]
     # Chaveado pelo tipo de categoria: expense, income, investment.
+    #
+    # Continua somando TODA despesa, à vista ou no cartão: meta mede gasto, e
+    # uma compra parcelada no cartão consome o teto de Alimentação no mês da
+    # parcela mesmo sem ter saído da conta ainda.
     totals: dict[str, BudgetSummaryTotals]
+    caixa: Caixa = Caixa()
 
 
 # ---------- Patrimônio ----------

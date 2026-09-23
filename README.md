@@ -12,15 +12,80 @@ existe um e-mail e uma senha configurados no servidor, e mais ninguém entra.
 
 | Aba | O que responde |
 | --- | --- |
-| **Visão geral** | Como foi o mês: entrou, saiu, sobrou. |
-| **Orçamento** | Orçado × previsto × pago por categoria, e os lançamentos do mês. |
+| **Visão geral** | Como foi o mês: entrou, gastou, sobrou na conta. |
+| **Orçamento** | Orçado × previsto × pago por categoria, os lançamentos do mês e as faturas dos cartões. |
 | **Investimento** | Quanto tenho aplicado e como está dividido. Visão cruzada de Patrimônio — não guarda dado próprio. |
 | **Patrimônio** | Quanto cada coisa vale hoje, incluindo dívida (que entra subtraindo). |
-| **Configurações** | Categorias. |
+| **Configurações** | Cartões, CDI e categorias. |
 
 Transação é **fluxo** (o que se moveu no mês); ativo é **estoque** (quanto vale
 num ponto do tempo). Por isso patrimônio não sai da soma das transações — precisa
 de saldo lançado à mão, mês a mês.
+
+## Gasto não é saída de caixa
+
+O app separa duas coisas que ele tratava como uma só. É a distinção que faz
+cartão de crédito funcionar:
+
+| | O que é | Onde aparece |
+| --- | --- | --- |
+| **Gasto** | o que você consumiu no mês | "Gastou", metas, "para onde foi" |
+| **Saída de caixa** | o que saiu da conta no mês | "Carteira" |
+
+Compra no cartão é gasto **na hora** e saída de caixa **só quando a fatura é
+paga**. Pagar a fatura é saída de caixa e **não** é gasto novo — o gasto já foi
+contado quando cada compra foi lançada. Contar de novo somaria o mesmo dinheiro
+duas vezes.
+
+### Cartões
+
+Um cartão tem nome, dia de fechamento e dia de vencimento. Nada mais: sem
+limite, sem bandeira, sem cor. A compra feita **até** o dia do fechamento entra
+na fatura que fecha nesse dia; a partir do dia seguinte, na próxima.
+
+O app descobre a fatura sozinho — você nunca escolhe uma na mão.
+
+Fatura vencida com saldo aparece como **atrasada**. Juros, multa, rotativo e
+IOF não são calculados de propósito: são regra de banco, mudam por contrato e
+errar neles é pior do que não ter. Cobrança dessas entra como um lançamento
+normal, com o valor que o banco cobrou de fato.
+
+### Parcelamento
+
+Uma compra de R$ 900 em 3× vira três parcelas de R$ 300, uma por mês a partir do
+mês da compra, cada uma na fatura do seu ciclo. As três continuam ligadas à
+compra: abrir qualquer uma mostra o total, "2 de 3" e o cartão.
+
+Quando o valor não divide certo, o resto vai na **primeira** parcela — R$ 100 em
+3× são 33,34 + 33,33 + 33,33. A soma é sempre exata.
+
+Parcela não se edita nem se apaga sozinha (a compra inteira, sim), e depois que
+uma fatura dela é paga, valor, parcelas, cartão e data travam: mexer reescreveria
+uma fatura que já foi cobrada.
+
+### Competência × cobrança
+
+Compra em 28/09 num cartão que fecha 25 é gasto de **setembro** — foi quando
+aconteceu — e é cobrada na fatura que vence em **novembro**. São quatro datas
+diferentes e o app guarda as quatro: data da compra, competência do gasto, fatura
+que cobra e data do pagamento.
+
+### Lançamentos anteriores ao cartão
+
+Quem já usava o app tem lançamentos sem forma de pagamento definida. A migração
+**não** marca nenhum deles como "à vista": parte foi no cartão, e chutar seria
+inventar dado financeiro.
+
+Até serem revisados eles contam como saída de caixa — que é como já eram
+contados, então nenhum número de nenhum mês passado muda. O app avisa quantos
+estão assim e leva pra tela de revisão, onde dá pra responder em lote.
+
+Se você registrava a fatura como uma despesa numa categoria tipo "Fatura do
+cartão", a tela da fatura tem **"já lancei este pagamento como despesa"**: o
+lançamento antigo vira o pagamento daquela fatura e deixa de contar como gasto,
+em vez de o mesmo dinheiro ser contado duas vezes. É uma operação explícita,
+escolhida item a item — o app nunca faz isso sozinho por causa do nome da
+categoria.
 
 ## Stack
 
@@ -38,7 +103,7 @@ só é pequena o bastante pra morar no projeto.
 ```bash
 # 1. Gere suas credenciais (pede a senha escondida e imprime o que colar)
 uv sync
-uv run python -m app.criar_senha
+uv run python -m app.criar_usuario
 
 # 2. Backend — http://localhost:8000
 cp .env.example .env      # cole as três variáveis + DATABASE_URL
@@ -66,7 +131,7 @@ na **Vercel**.
 ### 1. Gere as credenciais
 
 ```bash
-uv run python -m app.criar_senha
+uv run python -m app.criar_usuario
 ```
 
 Guarde a saída: são três das variáveis do passo 3. A senha em si não fica salva
@@ -101,7 +166,8 @@ O primeiro build demora alguns minutos (é Docker). Quando terminar, abra a URL
 {"message":"API do Sentavos no ar"}
 ```
 
-As tabelas são criadas nesse primeiro boot, pelo `create_all`.
+As tabelas são criadas nesse primeiro boot, pelas migrações do Alembic — elas
+rodam sozinhas no startup. Veja a seção **Migrações**.
 
 Teste o login antes de seguir:
 
@@ -210,12 +276,38 @@ em lugar nenhum.
 
 O console do navegador nomeia exatamente a diretiva que bloqueou.
 
+## Migrações
+
+**Alembic**, rodando no startup (`create_db_and_tables` chama `alembic upgrade
+head`). Não use `create_all` pra mudar schema: ele cria tabela que falta e nunca
+altera uma que já existe.
+
+| | O que fez |
+| --- | --- |
+| `0001_multiusuario` | `user_id` em cinco tabelas, com as linhas existentes adotadas |
+| `0002_caixinhas` | categorias arquiváveis |
+| `0003_rendimento` | `cdi_percent` no ativo e `cdi_annual` no usuário |
+| `0004_cartao` | cartões, compras, faturas, pagamentos e a forma de pagamento |
+
+Toda migração é **idempotente por coluna**: ela checa antes de adicionar. Num
+banco vazio a `0001` monta as tabelas com `create_all`, que usa o modelo de hoje
+— ou seja, já com as colunas das migrações seguintes. Sem a checagem,
+`alembic upgrade head` num ambiente novo morre com "duplicate column", e como a
+API roda o upgrade no startup, **o app não sobe**.
+
+Antes de rodar contra dado real, ensaie numa cópia: copie a conta pro SQLite,
+`alembic stamp head` nela e rode. `scripts/backup.py` copia a conta inteira pra
+um JSON em `backups/` — use antes de qualquer script que escreva.
+
+> **Enum vem do modelo, nunca de strings escritas na migração.** O SQLAlchemy
+> grava o NOME do membro (`CREDIT`), não o valor (`credit`). `sa.Enum("credit",
+> …)` criaria no Postgres um tipo que recusa exatamente o que o ORM manda — e a
+> suíte não pegaria, porque os testes montam o banco com `create_all` e nunca
+> executam a migração. Erro que só aparece em produção.
+
 ## Ainda não tem
 
-- **Migrações.** O `create_all` no startup cria tabela que falta, mas nunca altera
-  uma que já existe. Adicionar um campo hoje exige mexer no banco à mão. Vai
-  precisar de Alembic antes da primeira mudança de schema em produção.
 - **Backup automático** do Postgres.
 - **Cotação automática** de investimento — saldo é preenchido à mão, mês a mês.
-- **Troca de senha pela interface** — hoje é rodar o `criar_senha` e atualizar as
+- **Troca de senha pela interface** — hoje é rodar o `criar_usuario` e atualizar as
   variáveis no host.

@@ -61,6 +61,7 @@ from sqlmodel import Session, select
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from app.database import engine  # noqa: E402
+from scripts.backup import salvar  # noqa: E402
 from app.models import Budget, Category, CategoryType, Transaction, User  # noqa: E402
 
 
@@ -184,37 +185,17 @@ def normalizar(texto: str) -> str:
 
 
 def backup(session: Session, dono: User) -> str:
-    """Grava categorias, lançamentos e metas em JSON antes de escrever.
+    """Grava a conta inteira em JSON antes de escrever.
 
     Não é zelo genérico: este script muda o category_id de centenas de linhas,
     e não há como desfazer isso com SQL depois — a informação de onde cada
     lançamento estava só existe antes da escrita.
-    """
-    dados = {
-        "conta": dono.email,
-        "gerado_em": dt.datetime.now(dt.timezone.utc).isoformat(),
-        "categories": [
-            c.model_dump(mode="json")
-            for c in session.exec(select(Category).where(Category.user_id == dono.id)).all()
-        ],
-        "transactions": [
-            t.model_dump(mode="json")
-            for t in session.exec(select(Transaction).where(Transaction.user_id == dono.id)).all()
-        ],
-        "budgets": [
-            b.model_dump(mode="json")
-            for b in session.exec(select(Budget).where(Budget.user_id == dono.id)).all()
-        ],
-    }
 
-    raiz = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    pasta = os.path.join(raiz, "backups")
-    os.makedirs(pasta, exist_ok=True)
-    marca = dt.datetime.now().strftime("%Y%m%d-%H%M%S")
-    caminho = os.path.join(pasta, f"antes-de-reagrupar-categorias-{marca}.json")
-    with open(caminho, "w", encoding="utf-8") as f:
-        json.dump(dados, f, ensure_ascii=False, indent=1)
-    return caminho
+    A cópia em si mora em scripts/backup.py, que cobre as nove tabelas. Ficava
+    aqui e salvava três; quando o cartão entrou, um backup feito por este script
+    deixaria cartões, compras, faturas e pagamentos de fora sem avisar ninguém.
+    """
+    return salvar(session, dono, "antes-de-reagrupar-categorias")
 
 
 def main() -> int:

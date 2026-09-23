@@ -21,7 +21,12 @@ from app.models import (
     Asset,
     AssetSnapshot,
     Budget,
+    Card,
     Category,
+    Invoice,
+    InvoicePayment,
+    PaymentMethod,
+    Purchase,
     Transaction,
     User,
 )
@@ -52,13 +57,49 @@ def _semear(session: Session, dono: User) -> dict:
     snap = AssetSnapshot(
         asset_id=ativo.id, year=2026, month=9, value=1000.0, user_id=dono.id
     )
-    session.add(snap)
+    cartao = Card(
+        name=f"Cartão de {dono.name}", closing_day=25, due_day=2, user_id=dono.id
+    )
+    session.add_all([snap, cartao])
     session.commit()
     session.refresh(snap)
+    session.refresh(cartao)
+
+    # A compra no cartão, com a fatura que a cobra e uma parcela dentro dela —
+    # o conjunto inteiro, pra o teste poder bater em cada um dos ids.
+    compra = Purchase(
+        user_id=dono.id, card_id=cartao.id, category_id=cat.id,
+        description=f"Compra de {dono.name}", total_amount=300.0,
+        installments=1, purchase_date=dt.date(2026, 9, 12),
+    )
+    fatura = Invoice(
+        user_id=dono.id, card_id=cartao.id, year=2026, month=10,
+        closing_date=dt.date(2026, 9, 25), due_date=dt.date(2026, 10, 2),
+    )
+    session.add_all([compra, fatura])
+    session.commit()
+    session.refresh(compra)
+    session.refresh(fatura)
+
+    parcela = Transaction(
+        date=dt.date(2026, 9, 12), description=f"Parcela de {dono.name}",
+        amount_paid=300.0, category_id=cat.id, user_id=dono.id,
+        payment_method=PaymentMethod.CREDIT, purchase_id=compra.id,
+        installment_no=1, invoice_id=fatura.id,
+    )
+    pagamento = InvoicePayment(
+        user_id=dono.id, invoice_id=fatura.id,
+        date=dt.date(2026, 10, 2), amount=100.0,
+    )
+    session.add_all([parcela, pagamento])
+    session.commit()
+    session.refresh(pagamento)
 
     return {
         "categoria": cat.id, "transacao": tx.id, "meta": meta.id,
         "ativo": ativo.id, "saldo": snap.id,
+        "cartao": cartao.id, "compra": compra.id,
+        "fatura": fatura.id, "pagamento": pagamento.id,
     }
 
 
@@ -87,6 +128,20 @@ ROTAS_POR_ID = [
     ("delete", "/assets/{ativo}", None),
     ("patch", "/assets/snapshots/{saldo}", {"value": 1.0}),
     ("delete", "/assets/snapshots/{saldo}", None),
+    # ---------- Cartão ----------
+    # Toda rota nova de app/rotas_cartao.py entra aqui. É este teste, e não o
+    # comentário no topo daquele arquivo, que garante que o router de lá também
+    # filtra por dono.
+    ("patch", "/cards/{cartao}", {"name": "invadido"}),
+    ("delete", "/cards/{cartao}", None),
+    ("get", "/purchases/{compra}", None),
+    ("patch", "/purchases/{compra}", {"description": "invadida"}),
+    ("delete", "/purchases/{compra}", None),
+    ("get", "/invoices/{fatura}", None),
+    ("get", "/invoices/{fatura}/candidatos-a-pagamento", None),
+    ("post", "/invoices/{fatura}/payments", {"amount": 1.0, "date": "2026-10-02"}),
+    ("delete", "/invoice_payments/{pagamento}", None),
+    ("post", "/transactions/{transacao}/forma-de-pagamento", {"metodo": "cash"}),
 ]
 
 
@@ -113,6 +168,7 @@ def test_listagens_so_trazem_o_proprio(cliente_de, duas_contas):
         ("/transactions", "description"),
         ("/categories", "name"),
         ("/assets", "name"),
+        ("/cards", "name"),
     ):
         itens = cliente.get(rota).json()
         assert itens, f"{rota} veio vazio — o teste não provaria nada"
@@ -128,13 +184,31 @@ def test_resumos_nao_somam_dinheiro_alheio(cliente_de, duas_contas):
     cliente = cliente_de(ana)
 
     resumo = cliente.get("/budgets/summary?year=2026&month=9").json()
-    # Cada uma tem exatamente um lançamento de 100.
-    assert resumo["totals"]["expense"]["paid"] == 100.0
+    # Cada uma tem um lançamento à vista de 100 e uma parcela de cartão de 300.
+    # Os dois contam como gasto — é o que a meta mede —, e nenhum dos 400 pode
+    # vir da outra conta.
+    assert resumo["totals"]["expense"]["paid"] == 400.0
 
     patrimonio = cliente.get("/assets/summary?year=2026&month=9").json()
     # Cada uma tem exatamente um ativo de 1000.
     assert patrimonio["assets"] == 1000.0
     assert len(patrimonio["items"]) == 1
+
+    # O resumo de caixa é o mais fácil de vazar sem ninguém ver: ele soma
+    # lançamentos e pagamentos de fatura sem mostrar linha nenhuma.
+    caixa = resumo["caixa"]
+    assert caixa["gasto_total"] == 400.0  # 100 à vista + 300 da parcela, só da Ana
+    assert caixa["no_cartao"] == 300.0
+    assert caixa["faturas_em_aberto"] == 200.0  # 300 de fatura − 100 pago
+
+    faturas = cliente.get("/invoices/summary?year=2026&month=10").json()
+    assert len(faturas["cards"]) == 1
+    assert faturas["cards"][0]["current"]["total"] == 300.0
+    assert faturas["open_total"] == 200.0
+    # O pagamento de outubro é um só, e é o dela.
+    assert len(faturas["payments"]) == 1
+
+    assert len(cliente.get("/invoices").json()) == 1
 
 
 def test_nao_da_pra_lancar_na_categoria_de_outra_conta(cliente_de, duas_contas):
@@ -153,6 +227,76 @@ def test_nao_da_pra_lancar_na_categoria_de_outra_conta(cliente_de, duas_contas):
     )
 
     assert r.status_code == 400
+
+
+def test_nao_da_pra_comprar_no_cartao_de_outra_conta(cliente_de, duas_contas):
+    """Informar o id do cartão alheio não pode plantar compra na fatura dele."""
+    ana, ids_da_ana = duas_contas["ana"]
+    _, ids_do_bruno = duas_contas["bruno"]
+
+    r = cliente_de(ana).post(
+        "/purchases",
+        json={
+            "card_id": ids_do_bruno["cartao"],
+            "category_id": ids_da_ana["categoria"],
+            "description": "enxerida",
+            "total_amount": 100.0,
+            "installments": 1,
+            "purchase_date": "2026-09-11",
+        },
+    )
+
+    assert r.status_code == 400
+
+
+def test_reconciliar_nao_cruza_contas(cliente_de, duas_contas):
+    """A rota recebe DOIS ids, e os dois precisam ser do dono.
+
+    É o caso mais fácil de deixar passar: quem revisa olha o primeiro `exigir` e
+    dá o segundo como coberto. Aqui as duas combinações são exercitadas.
+    """
+    ana, ids_da_ana = duas_contas["ana"]
+    bruno, ids_do_bruno = duas_contas["bruno"]
+
+    # Fatura dela, lançamento dele.
+    r = cliente_de(ana).post(
+        f"/invoices/{ids_da_ana['fatura']}/reconciliar",
+        json={"transaction_id": ids_do_bruno["transacao"]},
+    )
+    assert r.status_code == 404
+
+    # Fatura dele, lançamento dela.
+    r = cliente_de(ana).post(
+        f"/invoices/{ids_do_bruno['fatura']}/reconciliar",
+        json={"transaction_id": ids_da_ana["transacao"]},
+    )
+    assert r.status_code == 404
+
+    # E o lançamento do Bruno continua lá, inteiro.
+    assert cliente_de(bruno).get(f"/transactions/{ids_do_bruno['transacao']}").status_code == 200
+
+
+def test_classificar_em_lote_nao_alcanca_lancamento_alheio(cliente_de, duas_contas):
+    """O lote não pode ser a porta dos fundos das rotas por id.
+
+    Ele recebe uma lista, então um id alheio no meio não daria 404 na resposta
+    inteira — precisa ser ignorado item a item.
+    """
+    ana, _ = duas_contas["ana"]
+    bruno, ids_do_bruno = duas_contas["bruno"]
+
+    r = cliente_de(ana).post(
+        "/transactions/forma-de-pagamento",
+        json={"ids": [ids_do_bruno["transacao"]], "metodo": "cash"},
+    )
+
+    assert r.status_code == 200
+    assert r.json()["atualizados"] == 0
+    assert r.json()["ignorados"][0]["motivo"] == "não encontrado"
+
+    # E o lançamento do Bruno não foi tocado.
+    dele = cliente_de(bruno).get(f"/transactions/{ids_do_bruno['transacao']}").json()
+    assert dele["payment_method"] is None
 
 
 def test_meta_do_mesmo_mes_nao_colide_entre_contas(cliente_de, duas_contas, session):
@@ -180,6 +324,23 @@ ROTAS_DE_ESCRITA = [
     ("put", "/budgets", {"category_id": 1, "year": 2026, "month": 9, "amount": 1}),
     ("post", "/assets", {"name": "x", "asset_class": "checking"}),
     ("put", "/assets/snapshots", {"asset_id": 1, "year": 2026, "month": 9, "value": 1}),
+    # ---------- Cartão ----------
+    # A senha do demo é pública: se qualquer uma destas passar, o primeiro
+    # visitante cria cartão, compra e pagamento na conta de demonstração.
+    ("post", "/cards", {"name": "x", "closing_day": 25, "due_day": 2}),
+    ("patch", "/cards/1", {"name": "x"}),
+    ("delete", "/cards/1", None),
+    ("post", "/purchases", {
+        "card_id": 1, "category_id": 1, "description": "x",
+        "total_amount": 10, "installments": 1, "purchase_date": "2026-09-10",
+    }),
+    ("patch", "/purchases/1", {"description": "x"}),
+    ("delete", "/purchases/1", None),
+    ("post", "/invoices/1/payments", {"amount": 1, "date": "2026-10-02"}),
+    ("post", "/invoices/1/reconciliar", {"transaction_id": 1}),
+    ("delete", "/invoice_payments/1", None),
+    ("post", "/transactions/forma-de-pagamento", {"ids": [1], "metodo": "cash"}),
+    ("post", "/transactions/1/forma-de-pagamento", {"metodo": "cash"}),
 ]
 
 
@@ -192,7 +353,10 @@ def test_conta_de_demonstracao_nao_escreve(cliente_de, criar_usuario, metodo, ro
     """
     demo = criar_usuario("demo@exemplo.com", "Demo", "senha-do-demo-12345", read_only=True)
 
-    r = getattr(cliente_de(demo), metodo)(rota, json=corpo)
+    # DELETE do TestClient não aceita corpo, então a chamada só leva `json`
+    # quando há um.
+    cliente = cliente_de(demo)
+    r = getattr(cliente, metodo)(rota, **({"json": corpo} if corpo else {}))
 
     assert r.status_code == 403
 

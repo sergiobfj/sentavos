@@ -25,14 +25,21 @@ from sqlmodel import Session, select
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+from app.cartao import competencia_da_parcela, dividir_em_parcelas  # noqa: E402
 from app.database import engine  # noqa: E402
+from app.faturas import fatura_da_parcela  # noqa: E402
 from app.models import (  # noqa: E402
     Asset,
     AssetClass,
     AssetSnapshot,
     Budget,
+    Card,
     Category,
     CategoryType,
+    Invoice,
+    InvoicePayment,
+    PaymentMethod,
+    Purchase,
     Transaction,
     User,
 )
@@ -88,6 +95,115 @@ def valor(base: float, variacao: float) -> float:
     return round(base * (1 + rnd.uniform(-variacao, variacao)), 2)
 
 
+# (nome, fecha, vence)
+CARTOES = [("Nubank", 25, 2), ("Itaú", 5, 15)]
+
+# (cartão, categoria, descrição, valor, parcelas, meses atrás, dia)
+#
+# Uma compra parcelada atravessando os meses é o que faz o demo mostrar a coisa
+# que uma planilha não mostra bem: gasto que já aconteceu e dinheiro que ainda
+# não saiu. As outras são compras de uma parcela, pra a fatura não parecer feita
+# só de parcelamento.
+COMPRAS = [
+    ("Nubank", "Restaurante",  "Jantar de aniversário", 180.00, 1, 3, 12),
+    ("Nubank", "Mercado",      "Compra do mês",         420.00, 1, 2, 8),
+    ("Nubank", "Assinaturas",  "Fone de ouvido",        899.90, 6, 2, 14),
+    ("Nubank", "Restaurante",  "Almoço de domingo",      96.40, 1, 1, 9),
+    ("Nubank", "Mercado",      "Feira",                 138.20, 1, 1, 22),
+    ("Nubank", "Farmácia",     "Remédio",                74.30, 1, 0, 6),
+    ("Nubank", "Restaurante",  "Pizza",                  89.90, 0, 0, 12),
+    ("Itaú",   "Transporte",   "Pneus",                 760.00, 3, 2, 20),
+    ("Itaú",   "Assinaturas",  "Streaming do ano",      239.00, 1, 1, 4),
+]
+
+
+def semear_cartoes(dono: User, s: Session, categorias: dict[str, Category]) -> dict:
+    """Cartões, compras, faturas e pagamentos — tudo inventado.
+
+    As faturas NÃO são montadas à mão: saem de `fatura_da_parcela`, a mesma
+    função que a API usa. Calcular o ciclo aqui de outro jeito faria o demo
+    mostrar um app que não existe, e o erro só apareceria pra quem abrisse o
+    link.
+    """
+    contagem = {"cartoes": 0, "compras": 0, "parcelas": 0, "faturas": 0, "pagamentos": 0}
+
+    cartoes: dict[str, Card] = {}
+    for nome, fecha, vence in CARTOES:
+        c = Card(name=nome, closing_day=fecha, due_day=vence, user_id=dono.id)
+        s.add(c)
+        cartoes[nome] = c
+        contagem["cartoes"] += 1
+    s.commit()
+    for c in cartoes.values():
+        s.refresh(c)
+
+    for nome_cartao, nome_cat, descricao, preco, parcelas, meses_atras, dia in COMPRAS:
+        # `parcelas == 0` no COMPRAS é atalho pra "1x"; mantido só pra a tabela
+        # acima ficar legível com zeros alinhados.
+        n = max(1, parcelas)
+        ano, mes = periodos()[-1 - meses_atras]
+        data = dt.date(ano, mes, min(dia, 28))
+
+        compra = Purchase(
+            user_id=dono.id,
+            card_id=cartoes[nome_cartao].id,
+            category_id=categorias[nome_cat].id,
+            description=descricao,
+            total_amount=preco,
+            installments=n,
+            purchase_date=data,
+        )
+        s.add(compra)
+        s.commit()
+        s.refresh(compra)
+        contagem["compras"] += 1
+
+        for numero, parcela in enumerate(dividir_em_parcelas(preco, n), start=1):
+            fatura = fatura_da_parcela(s, dono, cartoes[nome_cartao], data, numero)
+            s.add(Transaction(
+                user_id=dono.id,
+                date=competencia_da_parcela(data, numero),
+                description=descricao,
+                amount_paid=parcela,
+                category_id=categorias[nome_cat].id,
+                payment_method=PaymentMethod.CREDIT,
+                purchase_id=compra.id,
+                installment_no=numero,
+                invoice_id=fatura.id,
+            ))
+            contagem["parcelas"] += 1
+        s.commit()
+
+    # As faturas já vencidas aparecem pagas; a que ainda vai vencer fica em
+    # aberto. Um demo com tudo pago não mostraria o botão de pagar, e um com
+    # tudo em aberto pareceria de alguém que nunca paga a fatura.
+    hoje = dt.date.today()
+    faturas = s.exec(select(Invoice).where(Invoice.user_id == dono.id)).all()
+    contagem["faturas"] = len(faturas)
+
+    for fatura in faturas:
+        if fatura.due_date >= hoje:
+            continue
+        total = sum(
+            t.amount_paid or 0.0
+            for t in s.exec(
+                select(Transaction).where(
+                    Transaction.user_id == dono.id, Transaction.invoice_id == fatura.id
+                )
+            ).all()
+        )
+        if total <= 0:
+            continue
+        s.add(InvoicePayment(
+            user_id=dono.id, invoice_id=fatura.id,
+            date=fatura.due_date, amount=round(total, 2),
+        ))
+        contagem["pagamentos"] += 1
+
+    s.commit()
+    return contagem
+
+
 def semear(dono: User, s: Session) -> dict:
     contagem = {"categorias": 0, "lancamentos": 0, "metas": 0, "ativos": 0, "saldos": 0}
 
@@ -119,6 +235,7 @@ def semear(dono: User, s: Session) -> dict:
                 amount_planned=round(base, 2),
                 amount_paid=pago,
                 category_id=cat.id,
+                payment_method=PaymentMethod.CASH,
             ))
             contagem["lancamentos"] += 1
 
@@ -142,10 +259,17 @@ def semear(dono: User, s: Session) -> dict:
                 ),
                 amount_paid=round(rnd.uniform(18, 140), 2),
                 category_id=cat.id,
+                # O demo nasce todo classificado: ele existe pra mostrar o app
+                # funcionando, não o estado de quem ainda vai organizar o
+                # histórico. O aviso de "sem forma de pagamento" não deve
+                # aparecer pra quem abre o link.
+                payment_method=PaymentMethod.CASH,
             ))
             contagem["lancamentos"] += 1
 
     s.commit()
+
+    contagem.update(semear_cartoes(dono, s, categorias))
 
     for nome, classe, nota, inicial, passo in ATIVOS:
         ativo = Asset(name=nome, asset_class=classe, note=nota, user_id=dono.id)
@@ -193,7 +317,12 @@ def main() -> int:
         if args.limpar:
             # Ordem importa: o que aponta pra outro sai primeiro, senão a chave
             # estrangeira barra o delete.
-            for modelo in (Transaction, Budget, AssetSnapshot, Asset, Category):
+            # Pagamento aponta pra fatura, parcela aponta pra compra e pra
+            # fatura, compra aponta pro cartao: o que depende sai primeiro.
+            for modelo in (
+                InvoicePayment, Transaction, Purchase, Invoice, Card,
+                Budget, AssetSnapshot, Asset, Category,
+            ):
                 for linha in s.exec(select(modelo).where(modelo.user_id == dono.id)).all():
                     s.delete(linha)
             s.commit()

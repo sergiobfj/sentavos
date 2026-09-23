@@ -7,8 +7,11 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlmodel import Session, SQLModel, and_, func, or_, select
 
 from app.auth import ConfiguracaoIncompleta, autenticar, exigir_escrita, require_user
+from app.cartao import limites_do_mes as month_bounds
 from app.escopo import buscar, consulta, exigir
+from app.faturas import enriquecer, resumo_de_caixa
 from app.rendimento import rendimento_do_mes
+from app.rotas_cartao import router_cartao
 from app.database import create_db_and_tables, get_session
 from app.security import RateLimitMiddleware, SecurityHeadersMiddleware
 from app.models import (
@@ -32,6 +35,8 @@ from app.models import (
     CategoryCreate,
     CategoryType,
     CategoryUpdate,
+    PaymentMethod,
+    Purchase,
     Transaction,
     TransactionCreate,
     TransactionUpdate,
@@ -102,13 +107,6 @@ app.add_middleware(RateLimitMiddleware)
 router = APIRouter(dependencies=[Depends(require_user)])
 
 
-def month_bounds(year: int, month: int) -> tuple[dt.date, dt.date]:
-    """Intervalo semiaberto [start, end) do mês. Dezembro vira janeiro do ano seguinte."""
-    start = dt.date(year, month, 1)
-    end = dt.date(year + 1, 1, 1) if month == 12 else dt.date(year, month + 1, 1)
-    return start, end
-
-
 def month_index(year: int, month: int) -> int:
     """Mês como número absoluto, pra comparar períodos sem cuidar de virada de ano."""
     return year * 12 + (month - 1)
@@ -162,6 +160,16 @@ def create_transaction(transaction: TransactionCreate, session: Session = Depend
     if not category:
         raise HTTPException(status_code=400, detail="Category not found")
 
+    # Compra no cartão não entra por aqui. Ela precisa de cartão, de parcelas e
+    # da fatura que vai cobrá-la — coisas que este endpoint não pede e não sabe
+    # montar. Deixar passar criaria um lançamento "no cartão" que não está em
+    # fatura nenhuma: contaria como gasto e nunca viraria saída de caixa.
+    if transaction.payment_method == PaymentMethod.CREDIT:
+        raise HTTPException(
+            status_code=400,
+            detail="Compra no cartão se registra em /purchases, que gera as parcelas e a fatura.",
+        )
+
     db_transaction = Transaction.model_validate(transaction, update={"user_id": dono.id})
     session.add(db_transaction)
     session.commit()
@@ -188,9 +196,13 @@ def list_transactions(
             start, end = month_bounds(year, month)
         query = query.where(Transaction.date >= start, Transaction.date < end)
 
-    return session.exec(
-        query.order_by(Transaction.date.desc(), Transaction.id.desc())
-    ).all()
+    # `enriquecer` junta cartão e "2 de 10" em duas consultas para a lista
+    # inteira. A alternativa seria o navegador buscar a compra de cada parcela.
+    return enriquecer(
+        session,
+        dono,
+        session.exec(query.order_by(Transaction.date.desc(), Transaction.id.desc())).all(),
+    )
 
 
 @router.get("/transactions/{transaction_id}")
@@ -198,7 +210,27 @@ def get_transaction(transaction_id: int, session: Session = Depends(get_session)
     dono: User = Depends(require_user)):
     transaction = exigir(session, Transaction, transaction_id, dono, "Transação")
 
-    return transaction
+    return enriquecer(session, dono, [transaction])[0]
+
+
+# Parcela não é um lançamento solto: ela é uma das N faces de uma compra, e as N
+# somam o valor dela. Apagar a 2 de 3 deixaria uma compra de R$ 900 valendo
+# R$ 600 sem ninguém ter decidido isso; mudar o valor de uma faria a fatura
+# divergir do total. As duas operações existem — na compra, onde a decisão tem
+# o escopo certo.
+def _recusar_parcela(transaction: Transaction, acao: str) -> None:
+    if transaction.purchase_id is None:
+        return
+    de = (
+        f"{transaction.installment_no} de" if transaction.installment_no else "uma parcela de"
+    )
+    raise HTTPException(
+        status_code=409,
+        detail=(
+            f"Este lançamento é a parcela {de} uma compra no cartão. "
+            f"Para {acao}, abra a compra — assim todas as parcelas andam juntas."
+        ),
+    )
 
 
 @router.delete("/transactions/{transaction_id}")
@@ -206,6 +238,7 @@ def delete_transaction(transaction_id: int, session: Session = Depends(get_sessi
     dono: User = Depends(require_user)):
     exigir_escrita(dono)
     transaction = exigir(session, Transaction, transaction_id, dono, "Transação")
+    _recusar_parcela(transaction, "excluir")
 
     session.delete(transaction)
     session.commit()
@@ -220,6 +253,7 @@ def update_transaction(
 ):
     exigir_escrita(dono)
     transaction = exigir(session, Transaction, transaction_id, dono, "Transação")
+    _recusar_parcela(transaction, "editar")
 
     update_data = transaction_data.model_dump(exclude_unset=True)
 
@@ -228,6 +262,18 @@ def update_transaction(
         if not category:
             raise HTTPException(status_code=400, detail="Category not found")
 
+    # Marcar "cartão" aqui deixaria o lançamento fora de qualquer fatura. A
+    # conversão de verdade é POST /transactions/{id}/forma-de-pagamento, que
+    # cria a compra e as parcelas.
+    if update_data.get("payment_method") == PaymentMethod.CREDIT:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "Para passar este lançamento pro cartão use "
+                "/transactions/{id}/forma-de-pagamento — é ela que cria a compra e a fatura."
+            ),
+        )
+
     for key, value in update_data.items():
         setattr(transaction, key, value)
 
@@ -235,7 +281,7 @@ def update_transaction(
     session.commit()
     session.refresh(transaction)
 
-    return transaction
+    return enriquecer(session, dono, [transaction])[0]
 
 
 @router.post("/categories")
@@ -348,6 +394,18 @@ def delete_category(
         ).all():
             t.category_id = mover_para
             session.add(t)
+
+        # A compra no cartão também aponta pra categoria, e as parcelas dela são
+        # justamente os lançamentos movidos acima. Sem mover a compra junto, a
+        # chave estrangeira de `purchases` barra o DELETE lá embaixo — e no
+        # Postgres isso é um 500, não um erro tratado. Mesma classe do bug de
+        # ordem de delete que já mordeu em asset_snapshots.
+        for compra in session.exec(
+            consulta(Purchase, dono).where(Purchase.category_id == category_id)
+        ).all():
+            compra.category_id = mover_para
+            session.add(compra)
+
         session.flush()
 
     elif lancamentos:
@@ -453,7 +511,18 @@ def get_budget_summary(
         total.planned += item.planned
         total.paid += item.paid
 
-    return BudgetSummary(year=year, month=month, items=items, totals=totals)
+    # O bloco de caixa viaja junto com o de orçamento porque a tela de Início
+    # já pede este resumo: uma rota separada seria uma ida a mais ao servidor
+    # na tela que mais se abre, pra buscar números derivados dos mesmos
+    # lançamentos. Os `totals` acima continuam medindo GASTO — meta não muda de
+    # significado por causa do cartão.
+    return BudgetSummary(
+        year=year,
+        month=month,
+        items=items,
+        totals=totals,
+        caixa=resumo_de_caixa(session, dono, year, month, start, end),
+    )
 
 
 @router.put("/budgets")
@@ -816,3 +885,8 @@ def delete_asset(asset_id: int, session: Session = Depends(get_session),
 # No fim de propósito: o router só é registrado depois de todas as rotas serem
 # declaradas nele.
 app.include_router(router)
+
+# As rotas de cartão moram em app/rotas_cartao.py por tamanho, num router
+# próprio que também exige token. É o test_isolamento.py que garante isso —
+# ele percorre as rotas de lá com o id da outra conta e exige 404.
+app.include_router(router_cartao)

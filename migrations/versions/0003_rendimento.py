@@ -28,9 +28,19 @@ branch_labels = None
 depends_on = None
 
 
+def tem_coluna(tabela: str, coluna: str) -> bool:
+    """Ver o comentário gêmeo na 0002: num banco vazio a 0001 já criou tudo."""
+    inspetor = sa.inspect(op.get_bind())
+    if tabela not in inspetor.get_table_names():
+        return False
+    return coluna in {c["name"] for c in inspetor.get_columns(tabela)}
+
+
 def upgrade() -> None:
-    op.add_column("assets", sa.Column("cdi_percent", sa.Float(), nullable=True))
-    op.add_column("users", sa.Column("cdi_annual", sa.Float(), nullable=True))
+    if not tem_coluna("assets", "cdi_percent"):
+        op.add_column("assets", sa.Column("cdi_percent", sa.Float(), nullable=True))
+    if not tem_coluna("users", "cdi_annual"):
+        op.add_column("users", sa.Column("cdi_annual", sa.Float(), nullable=True))
 
 
 def downgrade() -> None:
