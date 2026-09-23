@@ -325,6 +325,12 @@ def main() -> int:
             ):
                 for linha in s.exec(select(modelo).where(modelo.user_id == dono.id)).all():
                     s.delete(linha)
+                # Flush a cada modelo, e não um commit no fim. Sem `Relationship`
+                # declarado em lugar nenhum deste projeto, não dá pra confiar que
+                # o SQLAlchemy vá ordenar os DELETEs sozinho — e delete fora de
+                # ordem passa batido no SQLite e estoura FK no Postgres. Foi
+                # assim que um delete de ativo quebrou em produção uma vez.
+                s.flush()
             s.commit()
             print("Conta limpa.")
 
