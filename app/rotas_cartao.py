@@ -119,18 +119,59 @@ def atualizar_cartao(
     """
     exigir_escrita(dono)
     cartao = exigir(session, Card, card_id, dono, "Cartão")
+    mudancas = dados.model_dump(exclude_unset=True)
 
-    for chave, valor in dados.model_dump(exclude_unset=True).items():
+    # Todo cartão tem finalidade; o nulo só existe nos que vieram de antes dela.
+    # Voltar a nulo seria desfazer a classificação sem dizer pra quê.
+    if "finalidade" in mudancas and mudancas["finalidade"] is None:
+        raise HTTPException(
+            status_code=400, detail="Escolha uma finalidade: pessoal, família ou empresa."
+        )
+
+    for chave, valor in mudancas.items():
         if chave == "name":
             valor = (valor or "").strip()
             if not valor:
                 raise HTTPException(status_code=400, detail="O cartão precisa de um nome.")
         setattr(cartao, chave, valor)
-
     session.add(cartao)
+
+    if mudancas.get("finalidade") is not None:
+        _herdar_finalidade_do_cartao(session, dono, cartao)
+
     session.commit()
     session.refresh(cartao)
     return cartao
+
+
+def _herdar_finalidade_do_cartao(session: Session, dono: User, cartao: Card) -> int:
+    """As compras SEM finalidade deste cartão recebem a dele, com as parcelas.
+
+    É a transição: as compras lançadas antes de existir finalidade (ou num
+    cartão ainda não classificado) passam a ter uma no momento em que o dono
+    diz pra que o cartão serve. Compra que já tem finalidade — escolhida à mão
+    ou herdada antes — não muda: trocar o uso do cartão hoje não reescreve pra
+    que serviu uma compra do ano passado.
+    """
+    compras = session.exec(
+        consulta(Purchase, dono).where(
+            Purchase.card_id == cartao.id, Purchase.finalidade.is_(None)
+        )
+    ).all()
+    for compra in compras:
+        compra.finalidade = cartao.finalidade
+        session.add(compra)
+        _descer_finalidade(session, dono, compra)
+    return len(compras)
+
+
+def _descer_finalidade(session: Session, dono: User, compra: Purchase) -> None:
+    """Todas as parcelas carregam a finalidade da compra — a mesma, sempre."""
+    for parcela in session.exec(
+        consulta(Transaction, dono).where(Transaction.purchase_id == compra.id)
+    ).all():
+        parcela.finalidade = compra.finalidade
+        session.add(parcela)
 
 
 @router_cartao.delete("/cards/{card_id}")
@@ -285,6 +326,7 @@ def _gerar_parcelas(session: Session, dono: User, compra: Purchase, cartao: Card
                 amount_paid=valor,
                 note=compra.note,
                 category_id=compra.category_id,
+                finalidade=compra.finalidade,
                 payment_method=PaymentMethod.CREDIT,
                 purchase_id=compra.id,
                 installment_no=numero,
@@ -340,7 +382,14 @@ def criar_compra(
         raise HTTPException(status_code=400, detail="A compra precisa de uma descrição.")
 
     compra = Purchase.model_validate(
-        dados, update={"user_id": dono.id, "description": dados.description.strip()}
+        dados,
+        update={
+            "user_id": dono.id,
+            "description": dados.description.strip(),
+            # Sem escolha, a do cartão. Cartão ainda sem finalidade deixa a
+            # compra nula, e ela herda quando o cartão for classificado.
+            "finalidade": dados.finalidade or cartao.finalidade,
+        },
     )
     session.add(compra)
     # Flush pra a compra ter id antes das parcelas apontarem pra ela.
@@ -413,6 +462,10 @@ def atualizar_compra(
             valor = (valor or "").strip()
             if not valor:
                 raise HTTPException(status_code=400, detail="A compra precisa de uma descrição.")
+        if chave == "finalidade" and valor is None:
+            # "Sem escolha" numa edição é o mesmo que na criação: a do cartão.
+            cartao_atual = buscar(session, Card, mudancas.get("card_id") or compra.card_id, dono)
+            valor = cartao_atual.finalidade if cartao_atual else None
         setattr(compra, chave, valor)
     session.add(compra)
     session.flush()
@@ -440,6 +493,9 @@ def atualizar_compra(
             parcela.description = compra.description
             parcela.category_id = compra.category_id
             parcela.note = compra.note
+            # Finalidade é rótulo, como a categoria: muda mesmo com fatura
+            # paga, porque não mexe em quanto nenhuma fatura cobra.
+            parcela.finalidade = compra.finalidade
             session.add(parcela)
 
     session.commit()
@@ -698,6 +754,7 @@ def ver_fatura(
                 purchase_id=compra.id,
                 purchase_total=compra.total_amount,
                 purchase_date=compra.purchase_date,
+                finalidade=t.finalidade,
             )
         )
 
@@ -992,6 +1049,8 @@ def _classificar(
         installments=max(1, pedido.installments),
         purchase_date=lancamento.date,
         note=lancamento.note,
+        # O que o lançamento já dizia vale; sem nada, a do cartão.
+        finalidade=lancamento.finalidade or cartao.finalidade,
     )
     session.add(compra)
     session.flush()

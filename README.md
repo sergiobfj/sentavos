@@ -12,7 +12,7 @@ existe um e-mail e uma senha configurados no servidor, e mais ninguém entra.
 
 | Aba | O que responde |
 | --- | --- |
-| **Visão geral** | Como foi o mês: entrou, gastou, sobrou na conta. |
+| **Visão geral** | Como foi o mês: saldo do mês, pra onde o gasto foi (por finalidade), como ele evoluiu e as faturas. |
 | **Orçamento** | Orçado × previsto × pago por categoria, os lançamentos do mês e as faturas dos cartões. |
 | **Investimento** | Quanto tenho aplicado e como está dividido. Visão cruzada de Patrimônio — não guarda dado próprio. |
 | **Patrimônio** | Quanto cada coisa vale hoje, incluindo dívida (que entra subtraindo). |
@@ -29,8 +29,36 @@ cartão de crédito funcionar:
 
 | | O que é | Onde aparece |
 | --- | --- | --- |
-| **Gasto** | o que você consumiu no mês | "Gastou", metas, "para onde foi" |
-| **Saída de caixa** | o que saiu da conta no mês | "Carteira" |
+| **Gasto** | o que você consumiu no mês | "Gastou", metas, a rosca de categorias, a evolução |
+| **Saída de caixa** | o que saiu da conta no mês | "Saldo do mês" (a API ainda chama de `carteira`) |
+
+**Saldo do mês** = entradas − despesas à vista − investimentos − faturas pagas. É
+o que *sobrou do fluxo* do mês, não quanto há na conta — por isso deixou de se
+chamar "Carteira".
+
+## Finalidade: pessoal, família, empresa
+
+Responde "quanto **eu** gastei?", que o filtro por cartão não responde (PIX não
+tem cartão). É dimensão de **gasto**, não de caixa: a compra da família no meu
+cartão é Família, e continua saindo do meu saldo quando a fatura é paga.
+
+| Lançamento | Finalidade |
+| --- | --- |
+| à vista, sem escolha | Pessoal |
+| compra no cartão, sem escolha | a do cartão |
+| escolha explícita | vale a escolha — em todas as parcelas |
+| receita e investimento | nenhuma (reembolso da empresa ainda não tem regra) |
+| anterior à funcionalidade | nenhuma — nunca adivinhada |
+
+Mora em `Purchase.finalidade` (o valor lógico da compra) e é copiada pra cada
+parcela em `Transaction.finalidade`, que é a única coluna que os relatórios
+leem. Parcela não se edita sozinha, então uma compra em 10x não tem como ficar
+com finalidades diferentes. Classificar um cartão dá a finalidade dele às
+compras que **ainda não têm**; trocar depois não reescreve compra passada.
+
+O filtro **Todos** inclui o que não tem finalidade; Pessoal/Família/Empresa não,
+e a tela diz quanto ficou de fora. Metas continuam globais e não aparecem nos
+relatórios filtrados — comparar gasto filtrado com teto global mentiria.
 
 Compra no cartão é gasto **na hora** e saída de caixa **só quando a fatura é
 paga**. Pagar a fatura é saída de caixa e **não** é gasto novo — o gasto já foi
@@ -91,6 +119,9 @@ categoria.
 
 - **API** — FastAPI + SQLModel, Postgres (Neon)
 - **Front** — Vite + React + TypeScript
+- **Gráficos** — Recharts 2.15 (só rosca e linha). A 3.x puxaria Redux Toolkit e
+  Immer. Carrega num pedaço separado do bundle (`lazy`, ~97 KB gzip), então o
+  número do Início aparece antes do gráfico.
 - **Auth** — própria: Argon2id pra senha, JWT assinado pela própria API
 
 Sem dependência de serviço externo de autenticação. Já foi Supabase Auth, e saiu:
@@ -288,6 +319,7 @@ altera uma que já existe.
 | `0002_caixinhas` | categorias arquiváveis |
 | `0003_rendimento` | `cdi_percent` no ativo e `cdi_annual` no usuário |
 | `0004_cartao` | cartões, compras, faturas, pagamentos e a forma de pagamento |
+| `0005_finalidade` | `finalidade` nulável em cartões, compras e lançamentos — nada preenchido |
 
 Toda migração é **idempotente por coluna**: ela checa antes de adicionar. Num
 banco vazio a `0001` monta as tabelas com `create_all`, que usa o modelo de hoje
@@ -305,7 +337,17 @@ um JSON em `backups/` — use antes de qualquer script que escreva.
 > suíte não pegaria, porque os testes montam o banco com `create_all` e nunca
 > executam a migração. Erro que só aparece em produção.
 
+## Scripts opcionais
+
+- `scripts/redistribuir_cores.py --usuario <email>` — troca as cores das
+  categorias pelas da paleta fechada (`frontend/src/lib/paleta.ts`), a mais usada
+  primeiro. Seco por padrão; `--aplicar` tira backup e grava só a coluna `color`.
+
 ## Ainda não tem
+
+- **Finalidade em lote** para o histórico — hoje é lançamento a lançamento.
+- **Evolução do patrimônio** — escondida até existir histórico de saldo: com
+  saldos só recentes, a linha mostraria cadastro como crescimento.
 
 - **Backup automático** do Postgres.
 - **Cotação automática** de investimento — saldo é preenchido à mão, mês a mês.

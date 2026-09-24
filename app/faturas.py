@@ -31,6 +31,7 @@ from sqlmodel import Session, func, select
 
 from app.cartao import ciclo_da_parcela, referencia
 from app.escopo import consulta
+from app.relatorios import saldo_do_mes, somas_por_mes
 from app.models import (
     Caixa,
     Card,
@@ -40,7 +41,6 @@ from app.models import (
     InvoicePayment,
     InvoiceRead,
     InvoiceStatus,
-    PaymentMethod,
     Purchase,
     Transaction,
     TransactionRead,
@@ -203,6 +203,7 @@ def enriquecer(
             linha.card_id = compra.card_id
             cartao = cartoes.get(compra.card_id)
             linha.card_name = cartao.name if cartao else None
+            linha.card_finalidade = cartao.finalidade if cartao else None
         saida.append(linha)
     return saida
 
@@ -215,46 +216,10 @@ def resumo_de_caixa(
     Eram o mesmo número até o cartão existir. A diferença entre eles é
     exatamente o que foi comprado no cartão e ainda não foi pago.
     """
-    # Soma por (tipo de categoria, forma de pagamento). O agrupamento é o que
-    # permite tratar NULL como um caso explícito em vez de deixá-lo cair fora
-    # de um `!=` em SQL.
-    por_forma: dict[tuple[str, str | None], float] = {}
-    for tipo, forma, soma in session.exec(
-        select(
-            Category.type,
-            Transaction.payment_method,
-            func.coalesce(func.sum(Transaction.amount_paid), 0.0),
-        )
-        .join(
-            Category,
-            Transaction.category_id
-            == Category.id,
-        )
-        .where(
-            Transaction.user_id == dono.id,
-            Transaction.date >= inicio,
-            Transaction.date < fim,
-        )
-        .group_by(
-            Category.type,
-            Transaction.payment_method,
-        )
-    ).all():
-        chave = (CategoryType(tipo).value, PaymentMethod(forma).value if forma else None)
-        por_forma[chave] = por_forma.get(chave, 0.0) + float(soma or 0.0)
-
-    def somar(tipo: str, formas: tuple[str | None, ...]) -> float:
-        return sum(por_forma.get((tipo, f), 0.0) for f in formas)
-
-    entrou = somar("income", (None, "cash", "credit"))
-    investido = somar("investment", (None, "cash", "credit"))
-    no_cartao = somar("expense", ("credit",))
-    # Nulo entra no caixa junto com "à vista": é como esses lançamentos já eram
-    # contados antes do cartão existir, e mudar isso sem o dono revisar faria a
-    # Carteira de todo mês passado trocar de valor da noite pro dia.
-    sem_forma = somar("expense", (None,))
-    a_vista = somar("expense", ("cash",)) + sem_forma
-    gasto_total = a_vista + no_cartao
+    # A soma agrupada e a conta do saldo moram em `app/relatorios.py`, e a série
+    # mensal usa as mesmas duas funções. Um mês lido aqui e o mesmo mês lido na
+    # série não têm como discordar — é a regra que não pode ter duas cópias.
+    somas = somas_por_mes(session, dono, inicio, fim).get((ano, mes), {})
 
     sem_forma_qtd = session.exec(
         select(func.count(Transaction.id))
@@ -300,17 +265,18 @@ def resumo_de_caixa(
         total, pago, _ = agregados.get(f.id, (0.0, 0.0, 0))
         em_aberto += max(total - pago, 0.0)
 
-    carteira = entrou - a_vista - investido - faturas_pagas
+    conta = saldo_do_mes(somas, faturas_pagas)
+    carteira = conta["saldo"]
 
     return Caixa(
-        entrou=round(entrou, 2),
-        saiu_a_vista=round(a_vista, 2),
-        investido=round(investido, 2),
+        entrou=round(conta["entrou"], 2),
+        saiu_a_vista=round(conta["a_vista"], 2),
+        investido=round(conta["investido"], 2),
         faturas_pagas=round(faturas_pagas, 2),
         carteira=round(carteira, 2),
-        gasto_total=round(gasto_total, 2),
-        no_cartao=round(no_cartao, 2),
-        sem_forma_definida=round(sem_forma, 2),
+        gasto_total=round(conta["gasto_total"], 2),
+        no_cartao=round(conta["no_cartao"], 2),
+        sem_forma_definida=round(conta["sem_forma"], 2),
         sem_forma_definida_qtd=int(sem_forma_qtd or 0),
         faturas_do_mes=round(faturas_do_mes, 2),
         faturas_em_aberto=round(em_aberto, 2),

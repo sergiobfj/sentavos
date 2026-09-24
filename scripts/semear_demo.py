@@ -36,6 +36,7 @@ from app.models import (  # noqa: E402
     Card,
     Category,
     CategoryType,
+    Finalidade,
     Invoice,
     InvoicePayment,
     PaymentMethod,
@@ -50,23 +51,32 @@ rnd = random.Random(20260913)
 MESES = 12
 FIM = dt.date(2026, 9, 1)
 
-# (nome, tipo, cor, ícone, dia do mês, valor base, variação, orçado)
+# (nome, tipo, cor, ícone, dia do mês, valor base, variação, orçado, finalidade)
 #
 # A variação é o que separa "planilha de exemplo" de "vida real": aluguel não
 # muda, mercado muda todo mês. Sem isso o demo parece gerado — porque é.
+#
+# As cores são da paleta fechada do app (frontend/src/lib/paleta.ts), na ordem
+# dela: a rosca do Início sai com fatias distinguíveis, e não com cinco tons de
+# vermelho como a versão anterior.
+#
+# A finalidade mostra os três contextos: a casa e a escola são da família, o
+# software é da empresa, o resto é pessoal. Receita e investimento não têm.
+P, F, E = Finalidade.PESSOAL, Finalidade.FAMILIA, Finalidade.EMPRESA
 CATEGORIAS = [
-    ("Salário",        CategoryType.INCOME,     "#3ecf8e", "💰",  5, 4500.00, 0.00, 4500),
-    ("Freelance",      CategoryType.INCOME,     "#48c47d", "💻", 20,  800.00, 0.45,  600),
-    ("Aluguel",        CategoryType.EXPENSE,    "#ef5350", "🏠", 10, 1450.00, 0.00, 1450),
-    ("Mercado",        CategoryType.EXPENSE,    "#e07a5f", "🛒",  8,  820.00, 0.18,  750),
-    ("Restaurante",    CategoryType.EXPENSE,    "#d64550", "🍽️", 15,  310.00, 0.35,  250),
-    ("Transporte",     CategoryType.EXPENSE,    "#c9705a", "🚗", 12,  240.00, 0.25,  260),
-    ("Internet",       CategoryType.EXPENSE,    "#f07470", "🌐", 18,   99.90, 0.00,  100),
-    ("Academia",       CategoryType.EXPENSE,    "#ef5350", "🏋️", 10,  129.00, 0.00,  129),
-    ("Assinaturas",    CategoryType.EXPENSE,    "#e07a5f", "📺",  3,   69.90, 0.10,   70),
-    ("Farmácia",       CategoryType.EXPENSE,    "#d64550", "💊", 22,   85.00, 0.40,   80),
-    ("Reserva",        CategoryType.INVESTMENT, "#7c9bff", "🏦",  6,  600.00, 0.10,  600),
-    ("Tesouro Selic",  CategoryType.INVESTMENT, "#5a78e8", "📈",  6,  400.00, 0.15,  400),
+    ("Salário",        CategoryType.INCOME,     "#6aa84f", "💰",  5, 4500.00, 0.00, 4500, None),
+    ("Freelance",      CategoryType.INCOME,     "#199e70", "💻", 20,  800.00, 0.45,  600, None),
+    ("Aluguel",        CategoryType.EXPENSE,    "#3987e5", "🏠", 10, 1450.00, 0.00, 1450, F),
+    ("Mercado",        CategoryType.EXPENSE,    "#d95926", "🛒",  8,  820.00, 0.18,  750, F),
+    ("Restaurante",    CategoryType.EXPENSE,    "#199e70", "🍽️", 15,  310.00, 0.35,  250, P),
+    ("Transporte",     CategoryType.EXPENSE,    "#c98500", "🚗", 12,  240.00, 0.25,  260, P),
+    ("Escola",         CategoryType.EXPENSE,    "#9085e9", "🎓",  7,  690.00, 0.00,  690, F),
+    ("Academia",       CategoryType.EXPENSE,    "#6aa84f", "🏋️", 10,  129.00, 0.00,  129, P),
+    ("Assinaturas",    CategoryType.EXPENSE,    "#d55181", "📺",  3,   69.90, 0.10,   70, P),
+    ("Farmácia",       CategoryType.EXPENSE,    "#e66767", "💊", 22,   85.00, 0.40,   80, F),
+    ("Software",       CategoryType.EXPENSE,    "#1f94ad", "💼",  4,  189.00, 0.00,  190, E),
+    ("Reserva",        CategoryType.INVESTMENT, "#3987e5", "🏦",  6,  600.00, 0.10,  600, None),
+    ("Tesouro Selic",  CategoryType.INVESTMENT, "#9085e9", "📈",  6,  400.00, 0.15,  400, None),
 ]
 
 # (nome, classe, nota, valor inicial, crescimento mensal)
@@ -95,25 +105,32 @@ def valor(base: float, variacao: float) -> float:
     return round(base * (1 + rnd.uniform(-variacao, variacao)), 2)
 
 
-# (nome, fecha, vence)
-CARTOES = [("Nubank", 25, 2), ("Itaú", 5, 15)]
+# (nome, fecha, vence, finalidade) — um cartão por contexto, como na vida real
+# de quem separa o cartão da família e o da empresa.
+CARTOES = [
+    ("Nubank", 25, 2, Finalidade.PESSOAL),
+    ("Cartão Família", 5, 15, Finalidade.FAMILIA),
+    ("Cartão Empresa", 25, 5, Finalidade.EMPRESA),
+]
 
-# (cartão, categoria, descrição, valor, parcelas, meses atrás, dia)
+# (cartão, categoria, descrição, valor, parcelas, meses atrás, dia, finalidade)
 #
-# Uma compra parcelada atravessando os meses é o que faz o demo mostrar a coisa
-# que uma planilha não mostra bem: gasto que já aconteceu e dinheiro que ainda
-# não saiu. As outras são compras de uma parcela, pra a fatura não parecer feita
-# só de parcelamento.
+# Uma compra parcelada atravessando os meses é o que faz o demo mostrar o que
+# uma planilha não mostra bem: gasto que já aconteceu e dinheiro que ainda não
+# saiu. A finalidade `None` herda a do cartão; o "Presente da sobrinha" é a
+# exceção de propósito — compra da família no cartão pessoal.
 COMPRAS = [
-    ("Nubank", "Restaurante",  "Jantar de aniversário", 180.00, 1, 3, 12),
-    ("Nubank", "Mercado",      "Compra do mês",         420.00, 1, 2, 8),
-    ("Nubank", "Assinaturas",  "Fone de ouvido",        899.90, 6, 2, 14),
-    ("Nubank", "Restaurante",  "Almoço de domingo",      96.40, 1, 1, 9),
-    ("Nubank", "Mercado",      "Feira",                 138.20, 1, 1, 22),
-    ("Nubank", "Farmácia",     "Remédio",                74.30, 1, 0, 6),
-    ("Nubank", "Restaurante",  "Pizza",                  89.90, 0, 0, 12),
-    ("Itaú",   "Transporte",   "Pneus",                 760.00, 3, 2, 20),
-    ("Itaú",   "Assinaturas",  "Streaming do ano",      239.00, 1, 1, 4),
+    ("Nubank",         "Restaurante", "Jantar de aniversário", 180.00, 1, 3, 12, None),
+    ("Cartão Família", "Mercado",     "Compra do mês",         420.00, 1, 2, 8,  None),
+    ("Nubank",         "Assinaturas", "Fone de ouvido",        899.90, 6, 2, 14, None),
+    ("Nubank",         "Restaurante", "Almoço de domingo",      96.40, 1, 1, 9,  None),
+    ("Cartão Família", "Mercado",     "Feira",                 138.20, 1, 1, 22, None),
+    ("Cartão Família", "Farmácia",    "Remédio",                74.30, 1, 0, 6,  None),
+    ("Nubank",         "Restaurante", "Pizza",                  89.90, 0, 0, 12, None),
+    ("Nubank",         "Transporte",  "Pneus",                 760.00, 3, 2, 20, None),
+    ("Nubank",         "Assinaturas", "Presente da sobrinha",  159.00, 1, 0, 9,  Finalidade.FAMILIA),
+    ("Cartão Empresa", "Software",    "Notebook do trabalho", 4800.00, 10, 4, 3, None),
+    ("Cartão Empresa", "Transporte",  "Uber para cliente",      64.50, 1, 0, 11, None),
 ]
 
 
@@ -128,8 +145,10 @@ def semear_cartoes(dono: User, s: Session, categorias: dict[str, Category]) -> d
     contagem = {"cartoes": 0, "compras": 0, "parcelas": 0, "faturas": 0, "pagamentos": 0}
 
     cartoes: dict[str, Card] = {}
-    for nome, fecha, vence in CARTOES:
-        c = Card(name=nome, closing_day=fecha, due_day=vence, user_id=dono.id)
+    for nome, fecha, vence, finalidade in CARTOES:
+        c = Card(
+            name=nome, closing_day=fecha, due_day=vence, finalidade=finalidade, user_id=dono.id
+        )
         s.add(c)
         cartoes[nome] = c
         contagem["cartoes"] += 1
@@ -137,7 +156,7 @@ def semear_cartoes(dono: User, s: Session, categorias: dict[str, Category]) -> d
     for c in cartoes.values():
         s.refresh(c)
 
-    for nome_cartao, nome_cat, descricao, preco, parcelas, meses_atras, dia in COMPRAS:
+    for nome_cartao, nome_cat, descricao, preco, parcelas, meses_atras, dia, finalidade in COMPRAS:
         # `parcelas == 0` no COMPRAS é atalho pra "1x"; mantido só pra a tabela
         # acima ficar legível com zeros alinhados.
         n = max(1, parcelas)
@@ -152,6 +171,8 @@ def semear_cartoes(dono: User, s: Session, categorias: dict[str, Category]) -> d
             total_amount=preco,
             installments=n,
             purchase_date=data,
+            # Mesma regra da API: sem escolha, a do cartão.
+            finalidade=finalidade or cartoes[nome_cartao].finalidade,
         )
         s.add(compra)
         s.commit()
@@ -166,6 +187,7 @@ def semear_cartoes(dono: User, s: Session, categorias: dict[str, Category]) -> d
                 description=descricao,
                 amount_paid=parcela,
                 category_id=categorias[nome_cat].id,
+                finalidade=compra.finalidade,
                 payment_method=PaymentMethod.CREDIT,
                 purchase_id=compra.id,
                 installment_no=numero,
@@ -218,7 +240,7 @@ def semear(dono: User, s: Session) -> dict:
         s.refresh(c)
 
     for ano, mes in periodos():
-        for nome, _tipo, _cor, _icone, dia, base, var, orcado in CATEGORIAS:
+        for nome, _tipo, _cor, _icone, dia, base, var, orcado, finalidade in CATEGORIAS:
             cat = categorias[nome]
 
             # O mês corrente entra parcialmente: o demo é aberto "hoje", e um
@@ -236,6 +258,7 @@ def semear(dono: User, s: Session) -> dict:
                 amount_paid=pago,
                 category_id=cat.id,
                 payment_method=PaymentMethod.CASH,
+                finalidade=finalidade,
             ))
             contagem["lancamentos"] += 1
 
@@ -259,6 +282,8 @@ def semear(dono: User, s: Session) -> dict:
                 ),
                 amount_paid=round(rnd.uniform(18, 140), 2),
                 category_id=cat.id,
+                # Avulso à vista sem escolha é pessoal — o padrão da API.
+                finalidade=Finalidade.PESSOAL,
                 # O demo nasce todo classificado: ele existe pra mostrar o app
                 # funcionando, não o estado de quem ainda vai organizar o
                 # histórico. O aviso de "sem forma de pagamento" não deve

@@ -1,5 +1,6 @@
 from contextlib import asynccontextmanager
 import os
+import re
 import datetime as dt
 
 from fastapi import APIRouter, Depends, FastAPI, HTTPException, Query
@@ -12,6 +13,7 @@ from app.escopo import buscar, consulta, exigir
 from app.faturas import enriquecer, resumo_de_caixa
 from app.rendimento import rendimento_do_mes
 from app.rotas_cartao import router_cartao
+from app.rotas_relatorios import router_relatorios
 from app.database import create_db_and_tables, get_session
 from app.security import RateLimitMiddleware, SecurityHeadersMiddleware
 from app.models import (
@@ -33,8 +35,10 @@ from app.models import (
     BudgetUpdate,
     Category,
     CategoryCreate,
+    CategoryRead,
     CategoryType,
     CategoryUpdate,
+    Finalidade,
     PaymentMethod,
     Purchase,
     Transaction,
@@ -170,7 +174,13 @@ def create_transaction(transaction: TransactionCreate, session: Session = Depend
             detail="Compra no cartão se registra em /purchases, que gera as parcelas e a fatura.",
         )
 
-    db_transaction = Transaction.model_validate(transaction, update={"user_id": dono.id})
+    db_transaction = Transaction.model_validate(
+        transaction,
+        update={
+            "user_id": dono.id,
+            "finalidade": finalidade_efetiva(category, transaction.finalidade, padrao=True),
+        },
+    )
     session.add(db_transaction)
     session.commit()
     session.refresh(db_transaction)
@@ -274,8 +284,27 @@ def update_transaction(
             ),
         )
 
+    categoria_antes = buscar(session, Category, transaction.category_id, dono)
+
     for key, value in update_data.items():
         setattr(transaction, key, value)
+
+    # A finalidade segue o tipo da categoria que o lançamento tem DEPOIS da
+    # edição. Virou receita: sai (finalidade é dimensão de consumo). Virou
+    # despesa agora, sem escolha: PESSOAL, o mesmo padrão da criação. Despesa
+    # antiga editada só na descrição continua nula — responder por ela uma
+    # pergunta que ninguém fez é o que a migração também se recusou a fazer.
+    categoria = buscar(session, Category, transaction.category_id, dono)
+    virou_despesa = (
+        categoria is not None
+        and categoria.type == CategoryType.EXPENSE
+        and (categoria_antes is None or categoria_antes.type != CategoryType.EXPENSE)
+    )
+    transaction.finalidade = finalidade_efetiva(
+        categoria,
+        transaction.finalidade,
+        padrao=virou_despesa and "finalidade" not in update_data,
+    )
 
     session.add(transaction)
     session.commit()
@@ -284,11 +313,119 @@ def update_transaction(
     return enriquecer(session, dono, [transaction])[0]
 
 
+def finalidade_efetiva(
+    categoria: Category | None, escolhida: Finalidade | None, padrao: bool
+) -> Finalidade | None:
+    """A finalidade que o lançamento à vista grava de fato.
+
+    Só despesa tem finalidade. Com `padrao`, a despesa sem escolha vira PESSOAL
+    — é o caso de quem lança um PIX sem pensar nisso, que é quase sempre gasto
+    próprio. Sem `padrao`, o nulo fica nulo.
+    """
+    if categoria is None or categoria.type != CategoryType.EXPENSE:
+        return None
+    if escolhida is None and padrao:
+        return Finalidade.PESSOAL
+    return escolhida
+
+
+# ---------- Categorias: o que a API recusa ----------
+# A tela também valida, mas é daqui que vale: a conta demo tem senha pública e
+# qualquer um manda o POST na mão.
+
+NOME_MAX = 40
+# Em unidades de código, não em caracteres: emoji composto (família, bandeira,
+# tom de pele) passa de 4 fácil. O antigo maxLength=4 da tela cortava 👨‍👩‍👧 ao meio.
+ICONE_MAX = 16
+COR_HEX = re.compile(r"^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$")
+
+
+def _nome_de_categoria(bruto: str | None) -> str:
+    """Espaços colapsados e aparados. "  Mercado  " e "Mercado" são o mesmo nome."""
+    nome = " ".join((bruto or "").split())
+    if not nome:
+        raise HTTPException(status_code=400, detail="A categoria precisa de um nome.")
+    if len(nome) > NOME_MAX:
+        raise HTTPException(
+            status_code=400, detail=f"Nome de categoria tem no máximo {NOME_MAX} caracteres."
+        )
+    return nome
+
+
+def _recusar_nome_repetido(
+    session: Session, dono: User, nome: str, tipo: CategoryType, ignorar: int | None = None
+) -> None:
+    """Duas categorias de mesmo tipo e mesmo nome dividiriam o gasto em duas.
+
+    Sem distinguir maiúscula ("mercado" = "Mercado") e contando as arquivadas: a
+    saída pra quem quer o nome de volta é desarquivar, não criar uma gêmea.
+    Tipos diferentes podem repetir — "Outros" de despesa e de receita são coisas
+    distintas, e o seletor já separa por tipo.
+
+    Só roda quando o nome (ou o tipo) muda: categoria antiga que já estivesse
+    duplicada não passa a ser recusada numa edição de cor.
+    """
+    alvo = nome.casefold()
+    for outra in session.exec(consulta(Category, dono).where(Category.type == tipo)).all():
+        if outra.id != ignorar and " ".join(outra.name.split()).casefold() == alvo:
+            estado = " (arquivada — desarquive-a em vez de criar outra)" if outra.archived else ""
+            raise HTTPException(
+                status_code=409,
+                detail=f"Já existe a categoria '{outra.name}'{estado}.",
+            )
+
+
+def _icone(bruto: str | None) -> str:
+    icone = (bruto or "").strip()
+    if not icone:
+        raise HTTPException(status_code=400, detail="A categoria precisa de um ícone.")
+    if len(icone) > ICONE_MAX:
+        raise HTTPException(status_code=400, detail="O ícone é um emoji só.")
+    return icone
+
+
+def _cor(bruta: str | None) -> str:
+    cor = (bruta or "").strip()
+    if not COR_HEX.match(cor):
+        raise HTTPException(status_code=400, detail="Cor inválida: use o formato #rrggbb.")
+    return cor.lower()
+
+
+def _uso_da_categoria(session: Session, dono: User) -> dict[int, tuple[int, int, int]]:
+    """{category_id: (lançamentos, compras, metas)} em três consultas agregadas."""
+
+    def contar(modelo) -> dict[int, int]:
+        return {
+            cid: int(n)
+            for cid, n in session.exec(
+                select(modelo.category_id, func.count(modelo.id))
+                .where(modelo.user_id == dono.id)
+                .group_by(modelo.category_id)
+            ).all()
+        }
+
+    lanc, compras, metas = contar(Transaction), contar(Purchase), contar(Budget)
+    return {
+        cid: (lanc.get(cid, 0), compras.get(cid, 0), metas.get(cid, 0))
+        for cid in set(lanc) | set(compras) | set(metas)
+    }
+
+
 @router.post("/categories")
 def create_category(category: CategoryCreate, session: Session = Depends(get_session),
     dono: User = Depends(require_user)):
     exigir_escrita(dono)
-    db_category = Category.model_validate(category, update={"user_id": dono.id})
+    nome = _nome_de_categoria(category.name)
+    _recusar_nome_repetido(session, dono, nome, category.type)
+    db_category = Category.model_validate(
+        category,
+        update={
+            "user_id": dono.id,
+            "name": nome,
+            "icon": _icone(category.icon),
+            "color": _cor(category.color),
+        },
+    )
     session.add(db_category)
     session.commit()
     session.refresh(db_category)
@@ -300,6 +437,7 @@ def list_categories(
     session: Session = Depends(get_session),
     dono: User = Depends(require_user),
     incluir_arquivadas: bool = Query(default=False),
+    incluir_uso: bool = Query(default=False),
 ):
     """As categorias ativas. Arquivadas só com `incluir_arquivadas=1`.
 
@@ -311,7 +449,20 @@ def list_categories(
     query = consulta(Category, dono)
     if not incluir_arquivadas:
         query = query.where(Category.archived == False)  # noqa: E712
-    return session.exec(query.order_by(Category.type, Category.name)).all()
+    categorias = session.exec(query.order_by(Category.type, Category.name)).all()
+    if not incluir_uso:
+        return categorias
+
+    uso = _uso_da_categoria(session, dono)
+    return [
+        CategoryRead(
+            **c.model_dump(),
+            transactions=uso.get(c.id, (0, 0, 0))[0],
+            purchases=uso.get(c.id, (0, 0, 0))[1],
+            budgets=uso.get(c.id, (0, 0, 0))[2],
+        )
+        for c in categorias
+    ]
 
 
 @router.get("/categories/{category_id}")
@@ -331,6 +482,49 @@ def update_category(
     category = exigir(session, Category, category_id, dono, "Categoria")
 
     update_data = category_data.model_dump(exclude_unset=True)
+
+    # ---------- Trocar o tipo ----------
+    # Despesa virar receita troca o sinal de todo o histórico dela de uma vez:
+    # o mês em que se gastou 800 em Mercado passaria a ter "entrado" 800. Com
+    # qualquer uso (lançamento, compra no cartão ou meta) a troca é recusada;
+    # sem uso, ela é só a correção de um cadastro errado.
+    novo_tipo = update_data.get("type")
+    if "type" in update_data and novo_tipo is None:
+        raise HTTPException(status_code=400, detail="O tipo não pode ficar vazio.")
+    muda_tipo = novo_tipo is not None and CategoryType(novo_tipo) != CategoryType(category.type)
+    if muda_tipo:
+        lanc, compras, metas = _uso_da_categoria(session, dono).get(category.id, (0, 0, 0))
+        if lanc or compras or metas:
+            partes = [
+                f"{n} {rotulo}"
+                for n, rotulo in (
+                    (lanc, "lançamento(s)"), (compras, "compra(s) no cartão"), (metas, "meta(s)")
+                )
+                if n
+            ]
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    f"'{category.name}' já tem {', '.join(partes)}. Trocar o tipo "
+                    "inverteria o sinal desse histórico. Crie uma categoria do tipo "
+                    "certo e mova os lançamentos pra ela."
+                ),
+            )
+
+    if "name" in update_data:
+        update_data["name"] = _nome_de_categoria(update_data["name"])
+    nome_final = update_data.get("name", category.name)
+    if nome_final != category.name or muda_tipo:
+        _recusar_nome_repetido(
+            session, dono, nome_final, CategoryType(novo_tipo or category.type),
+            ignorar=category.id,
+        )
+    if "icon" in update_data:
+        update_data["icon"] = _icone(update_data["icon"])
+    if "color" in update_data:
+        update_data["color"] = _cor(update_data["color"])
+    if "archived" in update_data and update_data["archived"] is None:
+        del update_data["archived"]
 
     for key, value in update_data.items():
         setattr(category, key, value)
@@ -890,3 +1084,7 @@ app.include_router(router)
 # próprio que também exige token. É o test_isolamento.py que garante isso —
 # ele percorre as rotas de lá com o id da outra conta e exige 404.
 app.include_router(router_cartao)
+
+# Relatórios (app/rotas_relatorios.py): séries e distribuição já agregadas no
+# servidor, no mesmo arranjo — router próprio que também exige token.
+app.include_router(router_relatorios)

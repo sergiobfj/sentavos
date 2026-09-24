@@ -48,6 +48,27 @@ class CategoryType(str, Enum):
     INCOME = "income"
     INVESTMENT = "investment"
 
+class Finalidade(str, Enum):
+    """Quem, ou qual contexto, consumiu o gasto.
+
+    Responde "quanto EU gastei?" — pergunta que o filtro por cartão não
+    responde, porque PIX e débito não têm cartão. Não confundir com a conta de
+    onde o dinheiro saiu: a compra da família no meu cartão é FAMILIA e continua
+    saindo do MEU caixa quando a fatura é paga. Por isso finalidade filtra gasto
+    e nunca saldo, fatura ou patrimônio.
+
+    Só existe em DESPESA. Receita e investimento ficam nulos de propósito: ainda
+    não está decidido se reembolso da empresa é receita ou abatimento de gasto
+    empresarial, e codificar uma das duas agora seria inventar regra contábil.
+
+    Como em `PaymentMethod`, o banco grava o NOME (`PESSOAL`), não o valor.
+    """
+
+    PESSOAL = "pessoal"
+    FAMILIA = "familia"
+    EMPRESA = "empresa"
+
+
 class CategoryBase(SQLModel):
     name: str
     type: CategoryType
@@ -74,6 +95,21 @@ class CategoryUpdate(SQLModel):
     color: str | None = None
     icon: str | None = None
     archived: bool | None = None
+
+
+class CategoryRead(CategoryBase):
+    """A categoria com o quanto ela já foi usada — só com `incluir_uso=1`.
+
+    Serve à tela de Configurações, que precisa saber antes de oferecer a troca
+    de tipo se ela vai ser recusada. A trava de verdade é no servidor; isto é só
+    pra a tela não oferecer uma porta que dá em parede.
+    """
+
+    id: int
+    user_id: int
+    transactions: int = 0
+    purchases: int = 0
+    budgets: int = 0
 
 class PaymentMethod(str, Enum):
     """Como o dinheiro sai (ou não sai) da conta neste lançamento.
@@ -109,6 +145,19 @@ class TransactionBase(SQLModel):
     # tela de revisão existe pra transformar esse nulo em resposta.
     payment_method: PaymentMethod | None = None
 
+    # ---------- Quem consumiu ----------
+    # O valor EFETIVO, e é a única coluna que os relatórios consultam — à vista
+    # e parcela de cartão passam pelo mesmo filtro, sem join com compra.
+    #
+    #   à vista sem escolha  -> PESSOAL (decidido na rota, não aqui)
+    #   parcela de cartão    -> cópia de Purchase.finalidade
+    #   receita/investimento -> sempre nulo
+    #
+    # Nulo também é o estado de todo lançamento anterior a esta funcionalidade.
+    # Não se adivinha retroativamente: o filtro "Todos" os inclui, os outros
+    # não, e a tela diz quanto ficou de fora.
+    finalidade: Finalidade | None = None
+
 
 class Transaction(TransactionBase, table=True):
     __tablename__ = "transactions"
@@ -138,6 +187,7 @@ class TransactionUpdate(SQLModel):
     note: str | None = None
     category_id: int | None = None
     payment_method: PaymentMethod | None = None
+    finalidade: Finalidade | None = None
 
 
 class TransactionRead(TransactionBase):
@@ -158,6 +208,7 @@ class TransactionRead(TransactionBase):
     purchase_date: dt.date | None = None
     card_id: int | None = None
     card_name: str | None = None
+    card_finalidade: Finalidade | None = None
 
 
 # ---------- Cartão de crédito ----------
@@ -182,6 +233,14 @@ class CardBase(SQLModel):
     # categoria: as compras antigas apontam pra ele.
     archived: bool = False
 
+    # O uso padrão do cartão ("o da família"). Compra nele herda isto quando a
+    # pessoa não escolhe outra coisa.
+    #
+    # Nulo só nos cartões que existiam antes desta coluna: a migração não
+    # adivinha pelo nome ("Nubank - Família" parece óbvio, e é justamente o tipo
+    # de palpite que um dia erra calado). A tela pede a classificação.
+    finalidade: Finalidade | None = None
+
 
 class Card(CardBase, table=True):
     __tablename__ = "cards"
@@ -193,7 +252,9 @@ class Card(CardBase, table=True):
 
 
 class CardCreate(CardBase):
-    pass
+    # Cartão novo nasce com finalidade. A tela sempre manda a escolha; o padrão
+    # só vale pra quem chama a API sem ela, e é o mesmo do lançamento à vista.
+    finalidade: Finalidade | None = Finalidade.PESSOAL
 
 
 class CardUpdate(SQLModel):
@@ -201,6 +262,7 @@ class CardUpdate(SQLModel):
     closing_day: int | None = Field(default=None, ge=1, le=31)
     due_day: int | None = Field(default=None, ge=1, le=31)
     archived: bool | None = None
+    finalidade: Finalidade | None = None
 
 
 # Teto de parcelas. Não é regra de cartão nenhum — é o que impede um dedo errado
@@ -221,6 +283,17 @@ class PurchaseBase(SQLModel):
     # (que é a data de cada parcela) e da fatura que a cobra.
     purchase_date: dt.date
     note: str | None = None
+
+    # A finalidade LÓGICA da compra, que todas as parcelas copiam. Mora aqui, e
+    # não só nas parcelas, pra uma compra em 10x não ter como ficar com parcelas
+    # em finalidades diferentes: parcela não se edita sozinha, e editar a compra
+    # reescreve as dez de uma vez.
+    #
+    # Na criação, nulo quer dizer "a do cartão". Depois de gravada ela vale por
+    # si: trocar a finalidade do cartão em 2027 não reescreve pra que serviu uma
+    # compra de 2026. A única herança posterior é a da transição — compra sem
+    # finalidade nenhuma recebe a do cartão quando ele é classificado.
+    finalidade: Finalidade | None = None
 
 
 class Purchase(PurchaseBase, table=True):
@@ -259,6 +332,7 @@ class PurchaseUpdate(SQLModel):
     installments: int | None = Field(default=None, ge=1, le=MAX_PARCELAS)
     card_id: int | None = None
     purchase_date: dt.date | None = None
+    finalidade: Finalidade | None = None
 
 
 class Invoice(SQLModel, table=True):
@@ -353,6 +427,7 @@ class InvoiceItem(SQLModel):
     purchase_id: int
     purchase_total: float
     purchase_date: dt.date
+    finalidade: Finalidade | None = None
 
 
 class InvoiceRead(SQLModel):
@@ -512,7 +587,8 @@ class Caixa(SQLModel):
     saiu_a_vista: float = 0
     investido: float = 0
     faturas_pagas: float = 0
-    # entrou − saiu à vista − investido − faturas pagas
+    # entrou − saiu à vista − investido − faturas pagas. Na tela é o "Saldo do
+    # mês" — o nome do campo ficou pra não quebrar o front já publicado.
     carteira: float = 0
 
     # ---------- Eixo gasto: o que consumi ----------
@@ -531,8 +607,9 @@ class Caixa(SQLModel):
     # Faturas que vencem neste mês, e o que ainda falta pagar de todas elas.
     faturas_do_mes: float = 0
     faturas_em_aberto: float = 0
-    # Carteira − faturas em aberto. É projeção, não saldo: fica ao lado da
-    # Carteira, nunca no lugar dela.
+    # Carteira − faturas em aberto. Saiu da tela na V2: subtraía faturas de
+    # meses futuros do fluxo de UM mês, misturando dois horizontes. Continua
+    # aqui só pra o front antigo não quebrar durante o deploy.
     apos_faturas: float = 0
 
 
