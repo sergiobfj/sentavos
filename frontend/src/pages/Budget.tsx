@@ -147,11 +147,8 @@ function Metas() {
   if (isLoading) {
     return (
       <>
-        <div className="skel" style={{ height: 150, borderRadius: "var(--r-lg)" }} />
-        <div className="duo" style={{ gridTemplateColumns: "1fr 1fr" }}>
-          <div className="skel" style={{ height: 72 }} />
-          <div className="skel" style={{ height: 72 }} />
-        </div>
+        <div className="skel" style={{ height: 64, width: "60%", marginTop: "var(--s3)" }} />
+        <div className="skel" style={{ height: 64, marginTop: "var(--s4)" }} />
         <div className="sec-title"><h2>Despesas</h2></div>
         <div className="skel" style={{ height: 220, borderRadius: "var(--r)" }} />
       </>
@@ -176,20 +173,26 @@ function Metas() {
           e quanto falta — é o que se confere de cabeça na fila do mercado. */}
       <section className="hero">
         <div className="rot">Gasto em despesas</div>
-        <div className={`big tnum ${estourou ? "neg" : ""}`}>{formatMoney(gasto)}</div>
+        <div className="big tnum">{formatMoney(gasto)}</div>
         {orcadoDespesa > 0 ? (
           <>
-            <div className="delta" style={estourou ? { color: "var(--neg)" } : undefined}>
-              {estourou
-                ? `${formatMoney(-resta)} acima do teto de ${formatMoney(orcadoDespesa)}`
-                : `de ${formatMoney(orcadoDespesa)} — faltam ${formatMoney(resta)}`}
+            {/* Estourar fica claro sem gritar: a frase diz, a barra listra, e a
+                cor aparece só no trecho que importa. */}
+            <div className="delta">
+              {estourou ? (
+                <span style={{ color: "var(--neg)" }}>
+                  {formatMoney(-resta)} acima do teto de {formatMoney(orcadoDespesa)}
+                </span>
+              ) : (
+                <>de {formatMoney(orcadoDespesa)} · faltam {formatMoney(resta)}</>
+              )}
             </div>
             <div className="bar-track" style={{ marginTop: "var(--s3)" }}>
               <div
                 className={`bar-fill ${estourou ? "over" : ""}`}
                 style={{
                   width: `${Math.min(100, (gasto / orcadoDespesa) * 100)}%`,
-                  background: estourou ? "var(--neg)" : gasto / orcadoDespesa >= 0.8 ? "var(--gold)" : "var(--pos)",
+                  background: estourou ? "var(--neg)" : "var(--text-dim)",
                 }}
               />
             </div>
@@ -197,30 +200,24 @@ function Metas() {
         ) : (
           // Sem teto nenhum, o convite é definir o primeiro — não um zero que
           // parece número.
-          <div className="delta">Sem teto definido. Preencha ao lado de uma categoria.</div>
+          <div className="delta">Sem teto definido. Toque em “+ teto” numa categoria.</div>
         )}
       </section>
 
       {/* Entrou e sobrou vêm do realizado, não do orçado: número orçado em
-          cartão herói mostra intenção com cara de fato. */}
-      <div className="duo" style={{ gridTemplateColumns: "1fr 1fr" }}>
-        <div className="card">
+          destaque mostra intenção com cara de fato. */}
+      <div className="metricas">
+        <div className="metrica">
           <div className="rot">Entrou no mês</div>
-          <div className="val pos tnum">{formatMoney(entrou)}</div>
+          <div className="val tnum">{formatMoney(entrou)}</div>
         </div>
-        <div className="card">
+        <div className="metrica">
           <div className="rot">Sobrou</div>
-          <div className={`val tnum ${entrou - gasto - investido >= 0 ? "pos" : "neg"}`}>
-            {formatMoney(entrou - gasto - investido)}
-          </div>
-          {/* Este "sobrou" é do eixo do GASTO: desconta tudo que foi consumido,
-              inclusive o que está na fatura e ainda não saiu da conta. A linha
-              só aparece quando há cartão no mês, porque sem ele os dois eixos
-              dão o mesmo número e a explicação seria ruído. */}
+          <div className="val tnum">{formatMoney(entrou - gasto - investido)}</div>
+          {/* Este "sobrou" é do eixo do GASTO: desconta o que está na fatura e
+              ainda não saiu da conta. Só aparece quando há cartão no mês. */}
           {noCartao > 0 && (
-            <div className="s" style={{ marginTop: 2 }}>
-              {formatMoney(noCartao)} ainda na fatura
-            </div>
+            <div className="s">{formatMoney(noCartao)} ainda na fatura</div>
           )}
         </div>
       </div>
@@ -265,7 +262,9 @@ function Section({
   };
 
   const comDado = items
-    .filter((i) => i.budgeted > 0 || i.paid > 0 || i.planned > 0)
+    // `!== 0` e não `> 0`: retirada de investimento é negativa, e com `> 0` a
+    // seção mostrava "−R$ 1.300" no título e nenhuma linha embaixo.
+    .filter((i) => i.budgeted > 0 || i.paid !== 0 || i.planned > 0)
     .sort(ordenar);
   const ociosas = items.length - comDado.length;
   const [mostrarTodas, setMostrarTodas] = useState(false);
@@ -275,14 +274,13 @@ function Section({
     <>
       <div className="sec-title">
         <h2>{title}</h2>
-        <span className="tnum" style={{ fontSize: 13, color: "var(--text-dim)" }}>
+        <span className="extra tnum">
           {/* Sem teto na seção, "de R$ 0,00" não é informação — é um zero que
               parece meta de zero reais. */}
           {orcado > 0 ? `${formatMoney(pago)} de ${formatMoney(orcado)}` : formatMoney(pago)}
         </span>
       </div>
 
-      <div className="col-meta">teto do mês</div>
       <div className="list">
         {visiveis.map((item) => (
           <BudgetRow key={item.category_id} item={item} />
@@ -312,11 +310,10 @@ function BudgetRow({ item }: { item: BudgetSummaryItem }) {
   const razao = item.budgeted > 0 ? item.paid / item.budgeted : 0;
   const pct = Math.round(razao * 100);
 
-  const corBarra = estourou
-    ? estourarEhBom ? "var(--pos)" : "var(--neg)"
-    : razao >= 0.8
-      ? "var(--gold)"
-      : item.color;
+  // A barra tem a cor da categoria enquanto está dentro do teto. Estourou:
+  // terracota com listra (ou sálvia, se estourar for bom). O dourado que
+  // marcava "80%" saiu — dourado é ação e seleção, não alerta.
+  const corBarra = estourou ? (estourarEhBom ? "var(--pos)" : "var(--neg)") : item.color;
 
   return (
     <div className="row budget-row">
@@ -330,12 +327,12 @@ function BudgetRow({ item }: { item: BudgetSummaryItem }) {
         <div className="mid">
           <div className="t">{item.category_name}</div>
           <div className="s">
-            {item.paid > 0 ? (
+            {item.paid !== 0 ? (
               <>
                 {/* Sem a palavra, "R$ 770,00" solto embaixo do nome não diz se
                     é o que se gastou, o que se planejou ou o que sobrou. */}
-                <b style={{ color: "var(--text)" }}>{formatMoney(item.paid)}</b>
-                <span> {item.category_type === "income" ? "recebidos" : "gastos"}</span>
+                <b style={{ color: "var(--text)", fontWeight: 600 }}>{formatMoney(item.paid)}</b>
+                <span> {item.category_type === "income" ? "recebidos" : item.category_type === "investment" ? "no mês" : "gastos"}</span>
                 {/* "Faltam" só com teto: sem denominador, faltar não é nada. */}
                 {item.budgeted > 0 && (
                   <span style={{ color: estourou ? corEstouro(item) : "var(--text-faint)" }}>
@@ -398,6 +395,9 @@ function MetaInput({ item }: { item: BudgetSummaryItem }) {
       // de alguém tocar no campo e sair dele.
       saved={item.budget_id && item.budgeted !== 0 ? item.budgeted : null}
       ariaLabel={`Teto de ${item.category_name}`}
+      // Sem teto, um convite curto em vez do "0,00" que parecia valor e
+      // disputava o olho com o gasto ao lado.
+      placeholder="+ teto"
       pending={setBudget.isPending || deleteBudget.isPending}
       onCommit={(amount) => {
         // Esvaziar o campo apaga a meta, em vez de gravar zero. A API de

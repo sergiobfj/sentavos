@@ -2,10 +2,12 @@ import { useEffect, useState } from "react";
 import Modal from "./Modal";
 import ConfirmDialog from "./ConfirmDialog";
 import CategoryPicker from "./CategoryPicker";
+import Segmentado from "./Segmentado";
+import { OPCOES_FINALIDADE } from "../lib/finalidade";
 import { useDeletePurchase, usePurchase, useUpdatePurchase } from "../lib/queries";
 import { ApiError } from "../lib/api";
 import { formatDate, formatMoney } from "../lib/format";
-import type { Category } from "../lib/types";
+import type { Category, Finalidade } from "../lib/types";
 
 /** A compra no cartão, aberta a partir de qualquer uma das suas parcelas.
  *
@@ -32,7 +34,12 @@ export default function PurchaseForm({
   const update = useUpdatePurchase();
   const [confirmando, setConfirmando] = useState(false);
 
-  const [form, setForm] = useState({ description: "", category_id: 0, note: "" });
+  const [form, setForm] = useState({
+    description: "",
+    category_id: 0,
+    note: "",
+    finalidade: null as Finalidade | null,
+  });
 
   // O formulário só pode nascer depois que a compra chega. Sem isto, os campos
   // ficariam vazios e salvar apagaria a descrição.
@@ -42,6 +49,7 @@ export default function PurchaseForm({
         description: compra.description,
         category_id: compra.category_id,
         note: compra.note ?? "",
+        finalidade: compra.finalidade,
       });
     }
   }, [compra]);
@@ -94,6 +102,8 @@ export default function PurchaseForm({
                 description: form.description.trim(),
                 category_id: form.category_id,
                 note: form.note.trim() || null,
+                // Todas as parcelas recebem a mesma — o servidor reescreve as N.
+                ...(form.finalidade ? { finalidade: form.finalidade } : {}),
               },
             },
             { onSuccess: onClose }
@@ -136,7 +146,7 @@ export default function PurchaseForm({
         </div>
 
         {compra.locked && (
-          <div className="aviso-box">
+          <div className="aviso-box" style={{ marginBottom: "var(--s4)" }}>
             Uma fatura desta compra já foi paga, então <b>valor, parcelas, cartão
             e data não mudam mais</b> — alterar reescreveria uma fatura que já foi
             cobrada. Descrição, categoria e observação continuam livres.
@@ -163,6 +173,22 @@ export default function PurchaseForm({
             valor={form.category_id}
             aoEscolher={(id) => setForm({ ...form, category_id: id })}
           />
+        </div>
+
+        {/* Finalidade é rótulo, como a categoria: continua editável depois
+            da fatura paga, porque não muda quanto nenhuma fatura cobra. */}
+        <div className="field">
+          <span className="label">Finalidade</span>
+          <Segmentado
+            rotulo="Finalidade"
+            opcoes={OPCOES_FINALIDADE}
+            valor={form.finalidade}
+            aoEscolher={(f) => setForm({ ...form, finalidade: f })}
+            largo
+          />
+          {compra.installments > 1 && (
+            <div className="hint">Vale para as {compra.installments} parcelas.</div>
+          )}
         </div>
 
         <div className="field">

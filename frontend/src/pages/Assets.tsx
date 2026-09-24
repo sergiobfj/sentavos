@@ -3,6 +3,7 @@ import Modal from "../components/Modal";
 import ConfirmDialog from "../components/ConfirmDialog";
 import MoneyCell from "../components/MoneyCell";
 import { IconeLapis } from "../components/TransactionList";
+import { Rosca } from "../components/Graficos";
 import {
   useAssetSummary,
   useCreateAsset,
@@ -14,6 +15,7 @@ import {
 import { usePeriod } from "../lib/period";
 import { ApiError } from "../lib/api";
 import { formatMoney, formatYm, parseMoney } from "../lib/format";
+import { COR_CLASSE, fundoDaCor } from "../lib/paleta";
 import {
   ASSET_CLASS_LABEL,
   ASSET_CLASS_ORDER,
@@ -66,38 +68,84 @@ export default function Assets() {
     );
   }
 
-  const variacao = data.net_worth - data.previous_net_worth;
+  // A variação do mês separa o que CRESCEU do que foi só CADASTRADO. Ativo sem
+  // saldo no mês anterior entra inteiro como "variação" — com os dados reais,
+  // o patrimônio "subiu R$ 6.864" em setembro porque duas aplicações ganharam
+  // o primeiro saldo, não porque renderam. É a mesma armadilha que tira daqui
+  // a linha de evolução.
+  const novos = data.items.filter((i) => i.previous === 0 && i.value !== 0 && i.as_of === ym);
+  const cadastrados = novos.reduce((s, i) => s + (i.liability ? -i.value : i.value), 0);
+  const variacaoReal = data.net_worth - data.previous_net_worth - cadastrados;
   const temDividas = data.liabilities > 0;
+
+  // A composição é só do que é POSITIVO. Dívida numa rosca viraria uma fatia
+  // do mesmo tamanho visual que um ativo do mesmo valor — e ela subtrai, não
+  // soma. Por isso ela fica fora do anel, dita em texto logo abaixo.
+  const classesComValor = ASSET_CLASS_ORDER.filter(
+    (c) => c !== "debt" && (data.by_class[c]?.value ?? 0) > 0
+  );
 
   return (
     <>
       <section className="hero">
         <div className="rot">Patrimônio líquido</div>
-        <div className={`big tnum ${data.net_worth >= 0 ? "pos" : "neg"}`}>
-          {formatMoney(data.net_worth)}
-        </div>
-        {Math.abs(variacao) >= 0.01 && (
-          <div className={`delta ${variacao > 0 ? "pos" : "neg"}`}>
-            <span aria-hidden>{variacao > 0 ? "↑" : "↓"}</span>
-            {formatMoney(Math.abs(variacao))} no mês
+        <div className="big tnum">{formatMoney(data.net_worth)}</div>
+        {Math.abs(variacaoReal) >= 0.01 && (
+          <div className={`delta ${variacaoReal > 0 ? "pos" : "neg"}`}>
+            <span className="seta" aria-hidden>{variacaoReal > 0 ? "↑" : "↓"}</span>
+            {formatMoney(Math.abs(variacaoReal))} no mês
+          </div>
+        )}
+        {cadastrados > 0 && (
+          <div className="nota">
+            Sem contar {formatMoney(cadastrados)} de ativos com o primeiro saldo
+            lançado neste mês — cadastro não é crescimento.
           </div>
         )}
       </section>
 
-      {/* A linha de dívidas só aparece quando existe dívida. Um "R$ 0,00" fixo
-          ali ocuparia o mesmo espaço pra não informar nada. */}
-      <div className="duo" style={{ gridTemplateColumns: temDividas ? "1fr 1fr" : "1fr" }}>
-        <div className="card">
-          <div className="rot">Tudo que você tem</div>
-          <div className="val tnum">{formatMoney(data.assets)}</div>
-        </div>
-        {temDividas && (
-          <div className="card">
-            <div className="rot">Tudo que você deve</div>
-            <div className="val neg tnum">{formatMoney(data.liabilities)}</div>
+      {/* Sem dívida, "Tudo que você tem" era o mesmo número do herói, repetido
+          logo embaixo. Os dois só aparecem quando dizem coisas diferentes. */}
+      {temDividas && (
+        <div className="metricas">
+          <div className="metrica">
+            <div className="rot">Ativos</div>
+            <div className="val tnum">{formatMoney(data.assets)}</div>
           </div>
-        )}
-      </div>
+          <div className="metrica">
+            <div className="rot">Dívidas</div>
+            <div className="val tnum">−{formatMoney(data.liabilities)}</div>
+          </div>
+        </div>
+      )}
+
+      {/* A evolução do patrimônio NÃO aparece de propósito: a maioria dos
+          ativos só tem saldo recente, e uma linha mostraria como crescimento o
+          que foi só cadastro. Volta quando o histórico existir. */}
+      {classesComValor.length >= 2 && (
+        <>
+          <div className="sec-title">
+            <h2>Composição</h2>
+          </div>
+          <Rosca
+            total={data.assets}
+            rotuloCentro="em ativos"
+            fatias={classesComValor.map((c) => ({
+              id: c,
+              nome: ASSET_CLASS_LABEL[c],
+              cor: COR_CLASSE[c] ?? "#5b5a56",
+              valor: data.by_class[c].value,
+              pct: (data.by_class[c].value / data.assets) * 100,
+            }))}
+          />
+          {temDividas && (
+            <div className="nota">
+              Fora do anel: {formatMoney(data.liabilities)} em dívidas, que
+              subtraem dos ativos no patrimônio líquido.
+            </div>
+          )}
+        </>
+      )}
 
       {ASSET_CLASS_ORDER.map((classe) => {
         const items = byClass.get(classe) ?? [];
@@ -141,11 +189,7 @@ export default function Assets() {
 function Esqueleto() {
   return (
     <>
-      <div className="skel" style={{ height: 132, borderRadius: "var(--r-lg)" }} />
-      <div className="duo" style={{ gridTemplateColumns: "1fr 1fr" }}>
-        <div className="skel" style={{ height: 72 }} />
-        <div className="skel" style={{ height: 72 }} />
-      </div>
+      <div className="skel" style={{ height: 64, width: "60%", marginTop: "var(--s3)" }} />
       <div className="sec-title"><h2>Seus ativos</h2></div>
       <div className="skel" style={{ height: 200, borderRadius: "var(--r)" }} />
     </>
@@ -175,11 +219,8 @@ function ClassSection({
     <>
       <div className="sec-title">
         <h2>{ASSET_CLASS_LABEL[classe]}</h2>
-        <span
-          className="tnum"
-          style={{ fontSize: 13, color: ehDivida ? "var(--neg)" : "var(--text-dim)" }}
-        >
-          {formatMoney(total)}
+        <span className="extra tnum">
+          {ehDivida ? "−" : ""}{formatMoney(total)}
         </span>
       </div>
       <div className="list">
@@ -226,7 +267,7 @@ function AssetRow({
         aria-label={`Editar ${item.name}`}
         style={{
           border: 0, cursor: "pointer",
-          background: `color-mix(in srgb, ${item.liability ? "var(--neg)" : "var(--gold)"} 20%, transparent)`,
+          background: fundoDaCor(item.liability ? "#da8b70" : COR_CLASSE[item.asset_class] ?? "#5b5a56", 22),
         }}
       >
         {ICONE_CLASSE[item.asset_class] ?? "💰"}

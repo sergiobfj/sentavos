@@ -13,6 +13,14 @@ export interface Category {
   archived: boolean;
 }
 
+// Com `incluir_uso=1`: quanto a categoria já foi usada. É o que trava a troca
+// de tipo — a API recusa, e a tela nem oferece.
+export interface CategoryComUso extends Category {
+  transactions: number;
+  purchases: number;
+  budgets: number;
+}
+
 export type CategoryCreate = Omit<Category, "id" | "archived">;
 export type CategoryUpdate = Partial<CategoryCreate> & { archived?: boolean };
 
@@ -29,6 +37,22 @@ export const PAYMENT_METHOD_LABEL: Record<PaymentMethod, string> = {
   credit: "Cartão",
 };
 
+// Quem consumiu o gasto. Só existe em despesa — receita e investimento ficam
+// nulos, porque reembolso da empresa ainda não tem regra decidida.
+//
+// `null` num lançamento antigo é "não definida": o filtro Todos inclui, os
+// outros não, e a tela avisa quanto ficou de fora.
+export type Finalidade = "pessoal" | "familia" | "empresa";
+export type FiltroFinalidade = Finalidade | "todos";
+
+export const FINALIDADES: Finalidade[] = ["pessoal", "familia", "empresa"];
+
+export const FINALIDADE_LABEL: Record<Finalidade, string> = {
+  pessoal: "Pessoal",
+  familia: "Família",
+  empresa: "Empresa",
+};
+
 export interface Transaction {
   id: number;
   date: string; // ISO date (YYYY-MM-DD) — a competência: o mês em que isto conta
@@ -38,6 +62,7 @@ export interface Transaction {
   note: string | null;
   category_id: number;
   payment_method: PaymentMethod | null;
+  finalidade?: Finalidade | null;
 
   // ---------- Só em parcela de compra no cartão ----------
   // Vêm calculados do backend pra a linha da lista poder dizer
@@ -50,12 +75,13 @@ export interface Transaction {
   purchase_date?: string | null;
   card_id?: number | null;
   card_name?: string | null;
+  card_finalidade?: Finalidade | null;
 }
 
 export type TransactionCreate = Omit<
   Transaction,
   | "id" | "purchase_id" | "installment_no" | "invoice_id" | "installments"
-  | "purchase_total" | "purchase_date" | "card_id" | "card_name"
+  | "purchase_total" | "purchase_date" | "card_id" | "card_name" | "card_finalidade"
 >;
 export type TransactionUpdate = Partial<TransactionCreate>;
 
@@ -125,6 +151,8 @@ export interface Caixa {
   // Compromisso
   faturas_do_mes: number;
   faturas_em_aberto: number;
+  // Continua vindo da API, mas saiu da tela: subtraía faturas de meses futuros
+  // do fluxo de UM mês, misturando dois horizontes num número só.
   apos_faturas: number;
 }
 
@@ -146,9 +174,11 @@ export interface Card {
   closing_day: number;
   due_day: number;
   archived: boolean;
+  // Nulo só nos cartões anteriores à finalidade — a tela pede a classificação.
+  finalidade: Finalidade | null;
 }
 
-export type CardCreate = Omit<Card, "id" | "archived">;
+export type CardCreate = Omit<Card, "id" | "archived" | "finalidade"> & { finalidade: Finalidade };
 export type CardUpdate = Partial<CardCreate> & { archived?: boolean };
 
 export type InvoiceStatus = "aberta" | "parcial" | "paga" | "atrasada";
@@ -191,6 +221,7 @@ export interface InvoiceItem {
   purchase_id: number;
   purchase_total: number;
   purchase_date: string;
+  finalidade: Finalidade | null;
 }
 
 export interface InvoicePayment {
@@ -244,6 +275,7 @@ export interface Purchase {
   installments: number;
   purchase_date: string;
   note: string | null;
+  finalidade: Finalidade | null;
   installment_amounts: number[];
   paid_installments: number;
   // Com fatura paga, valor/parcelas/cartão/data não mudam mais: mexer
@@ -259,9 +291,55 @@ export interface PurchaseCreate {
   installments: number;
   purchase_date: string;
   note?: string | null;
+  // Sem ela, a do cartão.
+  finalidade?: Finalidade | null;
 }
 
 export type PurchaseUpdate = Partial<PurchaseCreate>;
+
+// ---------- Relatórios ----------
+// Agregados no servidor: a tela desenha, não soma. Reagrupar lançamento cru
+// aqui duplicaria a regra de gasto × caixa.
+
+export interface MonthlyPoint {
+  year: number;
+  month: number;
+  // Gasto por competência, estreitado pela finalidade.
+  expense: number;
+  expense_total: number;
+  expense_sem_finalidade: number;
+  // Caixa — sempre da conta inteira.
+  income: number;
+  investment: number;
+  invoice_payments: number;
+  cash_flow: number;
+}
+
+export interface MonthlyReport {
+  finalidade: FiltroFinalidade;
+  months: MonthlyPoint[];
+}
+
+export interface CategorySlice {
+  category_id: number;
+  name: string;
+  icon: string;
+  color: string;
+  archived: boolean;
+  value: number;
+  // Sobre o total do filtro, sem arredondar.
+  pct: number;
+}
+
+export interface CategoryReport {
+  year: number;
+  month: number;
+  finalidade: Finalidade | null;
+  total: number;
+  categories: CategorySlice[];
+  others: { value: number; pct: number; count: number } | null;
+  sem_finalidade: { count: number; value: number };
+}
 
 export interface CandidatoAPagamento {
   id: number;

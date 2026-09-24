@@ -26,7 +26,9 @@ import {
 // fechar, e pintá-la de alerta faria o app parecer sempre em apuro.
 const COR_STATUS: Record<InvoiceStatus, string> = {
   aberta: "var(--text-dim)",
-  parcial: "var(--gold)",
+  // Parcial é informação, não ação: texto claro, sem o dourado que agora é só
+  // de botão e seleção.
+  parcial: "var(--text)",
   paga: "var(--pos)",
   atrasada: "var(--neg)",
 };
@@ -67,7 +69,7 @@ export default function Invoices() {
       {data.open_total > 0 && (
         <section className="hero">
           <div className="rot">Em aberto nas faturas</div>
-          <div className="big tnum neg">{formatMoney(data.open_total)}</div>
+          <div className="big tnum">{formatMoney(data.open_total)}</div>
           <div className="delta">
             Dinheiro que já foi gasto e ainda vai sair da conta
           </div>
@@ -93,7 +95,7 @@ export default function Invoices() {
                   <div className="t">Fatura {p.card_name}</div>
                   <div className="s">{formatDiaMes(p.date)} · pagamento de fatura</div>
                 </div>
-                <div className="amt tnum neg">−{formatMoney(p.amount)}</div>
+                <div className="amt tnum">−{formatMoney(p.amount)}</div>
                 <MarcaEditavel />
               </button>
             ))}
@@ -125,7 +127,7 @@ function CartaoNaLista({
           </div>
         </div>
         {cartao.open_total > 0 && (
-          <div className="tnum" style={{ color: "var(--text-dim)", fontSize: 13 }}>
+          <div className="tnum" style={{ color: "var(--text-dim)", fontSize: "var(--fs-small)" }}>
             {formatMoney(cartao.open_total)} em aberto
           </div>
         )}
@@ -213,9 +215,7 @@ function DetalheFatura({ id, onVoltar }: { id: number; onVoltar: () => void }) {
 
       <div className="sec-title">
         <h2>Compras</h2>
-        <span className="tnum" style={{ fontSize: 13, color: "var(--text-dim)" }}>
-          fecha {formatDiaMes(fatura.closing_date)}
-        </span>
+        <span className="extra tnum">fecha {formatDiaMes(fatura.closing_date)}</span>
       </div>
 
       {fatura.items.length === 0 ? (
@@ -258,7 +258,7 @@ function DetalheFatura({ id, onVoltar }: { id: number; onVoltar: () => void }) {
         </div>
         <div className="fatura-total">
           <span>Pago</span>
-          <b className="tnum pos">{formatMoney(fatura.paid)}</b>
+          <b className="tnum">{formatMoney(fatura.paid)}</b>
         </div>
         <div className="fatura-total destaque">
           <span>Restante</span>
@@ -303,7 +303,7 @@ function DetalheFatura({ id, onVoltar }: { id: number; onVoltar: () => void }) {
                   <div className="t">{formatDate(p.date)}</div>
                   {p.note && <div className="s">{p.note}</div>}
                 </div>
-                <div className="amt tnum pos">{formatMoney(p.amount)}</div>
+                <div className="amt tnum">{formatMoney(p.amount)}</div>
                 {podeEscrever && <DesfazerPagamento id={p.id} valor={p.amount} />}
               </div>
             ))}
@@ -338,7 +338,7 @@ function DesfazerPagamento({ id, valor }: { id: number; valor: number }) {
           itemName={formatMoney(valor)}
           consequences={[
             "A fatura volta a ficar em aberto por este valor.",
-            "O dinheiro volta para a Carteira do mês em que foi pago.",
+            "O dinheiro volta para o saldo do mês em que foi pago.",
           ]}
           confirmLabel="Desfazer"
           pending={undo.isPending}
@@ -441,7 +441,7 @@ function PagarFatura({
         )}
 
         <div className="hint">
-          Isto tira o dinheiro da Carteira e <b>não</b> conta como gasto novo — o
+          Isto sai do saldo do mês e <b>não</b> conta como gasto novo — o
           gasto já foi contado quando cada compra foi lançada.
         </div>
 
@@ -529,7 +529,7 @@ function Reconciliar({
           consequences={[
             "Este lançamento deixa de existir como despesa e some do gasto do mês.",
             `Vira um pagamento de ${formatMoney(alvo.amount)} nesta fatura, na mesma data.`,
-            "O dinheiro continua saindo da Carteira uma vez só.",
+            "O dinheiro continua saindo do saldo uma vez só.",
           ]}
           confirmLabel="Associar"
           pending={reconciliar.isPending}

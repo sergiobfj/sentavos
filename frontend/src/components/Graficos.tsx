@@ -1,188 +1,111 @@
+import { lazy, Suspense } from "react";
 import { formatMoney } from "../lib/format";
+import type { PontoEvolucao } from "./graficos/EvolucaoSvg";
 
 /* ===========================================================================
    Gráficos do Sentavos
    ===========================================================================
 
-   As cores das marcas NÃO são as mesmas do texto. O app usa verde e vermelho
-   vivos pra "+R$ 942" e "−R$ 120", que é a convenção de dinheiro e lê bem. Mas
-   como preenchimento de barra, aquele par reprovou na verificação de daltonismo
-   (ΔE 5,5 em deuteranopia — abaixo do piso de 6). Quem não distingue verde de
-   vermelho veria duas barras da mesma cor.
+   Dois só: a rosca (composição de UM total) e a linha (um valor ao longo do
+   tempo). As barras de "Previsto × pago" e "Fluxo" saíram do Início — a
+   segunda somava entrou + gastou + investido como partes de um mesmo todo, o
+   que não tem significado financeiro nenhum.
 
-   As marcas usam um trio validado contra a superfície escura: aqua, laranja e
-   azul, com pior par ΔE 9,4 — acima da meta de 8. Texto segue com as cores
-   vivas, porque ali o sinal (+/−) e a palavra já carregam o significado.
-
-   Toda série também vem com rótulo direto, então a cor nunca é a única pista.
+   O Recharts carrega num pedaço separado do bundle (`lazy`). O número herói e
+   as legendas aparecem na hora; o desenho chega um instante depois, no mesmo
+   espaço reservado, sem a tela pular.
    =========================================================================== */
 
-export const VIZ = {
-  entrou: "#199e70",
-  saiu: "#d95926",
-  investido: "#3987e5",
-} as const;
+const RoscaSvg = lazy(() => import("./graficos/RoscaSvg"));
+const EvolucaoSvg = lazy(() => import("./graficos/EvolucaoSvg"));
 
-/** Barras pareadas: previsto ao lado de pago, por categoria.
- *
- * Duas barras finas e não uma barra com marcador: o marcador ("bullet") mostra
- * bem "cheguei em X% da meta", mas some quando o previsto é zero — e aqui
- * lançamento sem previsto é comum. Duas barras sempre dizem a verdade, mesmo
- * quando uma delas é zero.
- */
-export function PrevistoVsPago({
-  linhas,
-  limite = 6,
-}: {
-  linhas: { id: number; nome: string; previsto: number; pago: number }[];
-  limite?: number;
-}) {
-  const visiveis = linhas
-    .filter((l) => l.previsto > 0 || l.pago > 0)
-    .sort((a, b) => Math.max(b.previsto, b.pago) - Math.max(a.previsto, a.pago))
-    .slice(0, limite);
+export type { PontoEvolucao };
 
-  if (visiveis.length === 0) return null;
-
-  // Uma escala só pra todas as linhas: escalar cada uma pelo próprio máximo
-  // faria uma categoria de R$ 50 desenhar a mesma barra de uma de R$ 2.000.
-  const max = Math.max(...visiveis.flatMap((l) => [l.previsto, l.pago]), 1);
-
-  return (
-    <div className="viz">
-      <div className="viz-legenda">
-        <span><i style={{ background: "var(--surface-3)" }} />Previsto</span>
-        <span><i style={{ background: VIZ.saiu }} />Pago</span>
-      </div>
-
-      {visiveis.map((l) => {
-        const estourou = l.previsto > 0 && l.pago > l.previsto;
-        return (
-          <div className="viz-linha" key={l.id}>
-            <div className="viz-rot">
-              <span className="nome">{l.nome}</span>
-              <span className="val tnum">
-                {formatMoney(l.pago)}
-                <span className="de"> de {formatMoney(l.previsto)}</span>
-              </span>
-            </div>
-
-            <div className="viz-par">
-              <div
-                className="viz-barra"
-                style={{ width: `${(l.previsto / max) * 100}%`, background: "var(--surface-3)" }}
-                title={`Previsto: ${formatMoney(l.previsto)}`}
-              />
-              <div
-                className="viz-barra"
-                style={{
-                  width: `${(l.pago / max) * 100}%`,
-                  // Estourar o previsto é o que se quer notar de relance, então
-                  // ganha cor própria em vez de só um número diferente.
-                  background: estourou ? "var(--neg)" : VIZ.saiu,
-                }}
-                title={`Pago: ${formatMoney(l.pago)}`}
-              />
-            </div>
-          </div>
-        );
-      })}
-    </div>
-  );
+export interface Fatia {
+  id: string;
+  nome: string;
+  icone?: string;
+  cor: string;
+  valor: number;
+  // Sobre o total real do filtro, já calculado pelo servidor.
+  pct: number;
 }
 
-/** Barras horizontais por categoria, cada uma na cor que o dono deu pra ela.
- *
- * Aqui a cor vem do usuário e não dá pra validar contra daltonismo — por isso
- * cada barra carrega o nome ao lado. O rótulo direto é o que torna a cor
- * dispensável pra entender o gráfico.
- */
-export function PorCategoria({
-  linhas,
-  limite = 5,
-}: {
-  linhas: { id: number; nome: string; icone: string; cor: string; valor: number }[];
-  limite?: number;
-}) {
-  const visiveis = linhas
-    .filter((l) => l.valor > 0)
-    .sort((a, b) => b.valor - a.valor)
-    .slice(0, limite);
+/** Percentual pra leitura: inteiro, com "<1%" em vez de um "0%" que mente. */
+export function formatPct(pct: number): string {
+  if (pct > 0 && pct < 1) return "<1%";
+  return `${Math.round(pct)}%`;
+}
 
-  if (visiveis.length === 0) return null;
-  const max = visiveis[0].valor;
-  const total = visiveis.reduce((s, l) => s + l.valor, 0);
+/** Rosca com o total no centro e a legenda-tabela ao lado (ou embaixo).
+ *
+ * A legenda não é enfeite: ela é a tabela dos números e o que torna a cor
+ * dispensável. Nenhum texto vai dentro das fatias — em 400px ele não cabe.
+ */
+export function Rosca({
+  fatias,
+  total,
+  rotuloCentro,
+  tamanho = 184,
+  semLegenda = false,
+}: {
+  fatias: Fatia[];
+  total: number;
+  rotuloCentro: string;
+  tamanho?: number;
+  // Quando a lista da própria tela já faz o papel de legenda (Investir), uma
+  // segunda legenda repetiria os mesmos nomes e valores logo abaixo.
+  semLegenda?: boolean;
+}) {
+  const descricao = fatias
+    .map((f) => `${f.nome} ${formatMoney(f.valor)} (${formatPct(f.pct)})`)
+    .join("; ");
 
   return (
-    <div className="viz">
-      {visiveis.map((l) => (
-        <div className="viz-linha" key={l.id}>
-          <div className="viz-rot">
-            <span className="nome">{l.icone} {l.nome}</span>
-            <span className="val tnum">
-              {formatMoney(l.valor)}
-              <span className="de"> · {Math.round((l.valor / total) * 100)}%</span>
-            </span>
-          </div>
-          <div className="viz-par">
-            <div
-              className="viz-barra alta"
-              style={{ width: `${Math.max((l.valor / max) * 100, 2)}%`, background: l.cor }}
-            />
-          </div>
+    <div className={semLegenda ? "rosca so" : "rosca"}>
+      <div
+        className="rosca-grafico"
+        style={{ width: tamanho, height: tamanho }}
+        role="img"
+        aria-label={`${rotuloCentro}: ${formatMoney(total)}. ${descricao}`}
+      >
+        <Suspense fallback={<div className="skel" style={{ width: "100%", height: "100%", borderRadius: "50%" }} />}>
+          <RoscaSvg fatias={fatias} tamanho={tamanho} />
+        </Suspense>
+        <div className="rosca-centro" aria-hidden>
+          <b className="tnum">{formatMoney(total)}</b>
+          <span>{rotuloCentro}</span>
         </div>
-      ))}
+      </div>
+
+      {!semLegenda && (
+      <ul className="legenda">
+        {fatias.map((f) => (
+          <li key={f.id}>
+            <i className="cor" style={{ background: f.cor }} aria-hidden />
+            <span className="nome">
+              {f.icone && <span className="ic" aria-hidden>{f.icone}</span>}
+              {f.nome}
+            </span>
+            <span className="v tnum">{formatMoney(f.valor)}</span>
+            <span className="p tnum">{formatPct(f.pct)}</span>
+          </li>
+        ))}
+      </ul>
+      )}
     </div>
   );
 }
 
-/** Uma faixa só com entrou, saiu e investido, na proporção do mês.
- *
- * Substitui três gráficos separados. A pergunta que ela responde — "o que
- * entrou cobriu o que saiu?" — se lê melhor com as três partes lado a lado do
- * que com três desenhos que obrigam a comparar de cabeça.
- */
-export function Fluxo({
-  entrou,
-  saiu,
-  investido,
-}: {
-  entrou: number;
-  saiu: number;
-  investido: number;
-}) {
-  const total = entrou + saiu + investido;
-  if (total <= 0) return null;
-
-  const partes = [
-    { rot: "Entrou", valor: entrou, cor: VIZ.entrou },
-    // "Gastou" e não "Saiu": com cartão, o que se gastou e o que saiu da conta
-    // deixaram de ser o mesmo número, e esta faixa mostra o do gasto. O cartão
-    // de cima usa a mesma palavra — duas palavras pro mesmo número fariam
-    // parecer que são dois.
-    { rot: "Gastou", valor: saiu, cor: VIZ.saiu },
-    { rot: "Investido", valor: investido, cor: VIZ.investido },
-  ].filter((p) => p.valor > 0);
-
+export function Evolucao({ pontos }: { pontos: PontoEvolucao[] }) {
+  const resumo = pontos
+    .map((p) => `${p.mesLongo}: ${p.valor == null ? "sem dado" : formatMoney(p.valor)}`)
+    .join("; ");
   return (
-    <div className="viz">
-      <div className="seg" style={{ height: 14 }}>
-        {partes.map((p) => (
-          <div
-            key={p.rot}
-            style={{ width: `${(p.valor / total) * 100}%`, background: p.cor }}
-            title={`${p.rot}: ${formatMoney(p.valor)}`}
-          />
-        ))}
-      </div>
-      <div className="viz-legenda" style={{ marginTop: "var(--s3)" }}>
-        {partes.map((p) => (
-          <span key={p.rot}>
-            <i style={{ background: p.cor }} />
-            {p.rot} <b className="tnum">{formatMoney(p.valor)}</b>
-          </span>
-        ))}
-      </div>
+    <div className="evolucao" role="img" aria-label={`Evolução dos gastos. ${resumo}`}>
+      <Suspense fallback={<div className="skel" style={{ height: "100%" }} />}>
+        <EvolucaoSvg pontos={pontos} />
+      </Suspense>
     </div>
   );
 }

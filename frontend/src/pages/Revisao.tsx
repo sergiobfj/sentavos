@@ -137,7 +137,7 @@ export default function Revisao() {
         Estes lançamentos são anteriores ao cartão. Enquanto não forem
         respondidos, eles contam como <b>saída da conta</b> — que é como já
         contavam, então nenhum número do passado mudou. Marcar "Cartão" tira o
-        valor da Carteira e joga numa fatura.
+        valor do saldo do mês e joga numa fatura.
       </div>
 
       <div className="chip-linha" style={{ marginTop: "var(--s4)" }} role="tablist">

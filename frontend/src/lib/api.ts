@@ -15,11 +15,15 @@ import type {
   CardCreate,
   CardUpdate,
   Category,
+  CategoryComUso,
   CategoryCreate,
+  CategoryReport,
   CategoryUpdate,
   Invoice,
   InvoiceDetail,
   InvoicesSummary,
+  FiltroFinalidade,
+  MonthlyReport,
   PaymentMethod,
   Purchase,
   PurchaseCreate,
@@ -251,6 +255,10 @@ export const categoriesApi = {
     request<Category[]>(
       `/categories${incluirArquivadas ? "?incluir_arquivadas=1" : ""}`
     ),
+  // Com o uso de cada uma (lançamentos, compras, metas) — é o que Configurações
+  // precisa pra saber, antes de oferecer, se a troca de tipo vai ser recusada.
+  listComUso: () =>
+    request<CategoryComUso[]>("/categories?incluir_arquivadas=1&incluir_uso=1"),
   get: (id: number) => request<Category>(`/categories/${id}`),
   create: (data: CategoryCreate) =>
     request<Category>("/categories", { method: "POST", body: JSON.stringify(data) }),
@@ -265,3 +273,21 @@ export const categoriesApi = {
       { method: "DELETE" }
     ),
 };
+
+// ---------- Relatórios ----------
+// Uma chamada por gráfico, nunca uma por mês: a série de 12 meses é UMA ida ao
+// servidor, que agrega tudo de uma vez.
+export const reportsApi = {
+  monthly: (de: Period, ate: Period, finalidade: FiltroFinalidade) =>
+    request<MonthlyReport>(
+      `/reports/monthly?from=${ym(de)}&to=${ym(ate)}&finalidade=${finalidade}`
+    ),
+  categories: ({ year, month }: Period, finalidade: FiltroFinalidade, top = 5) =>
+    request<CategoryReport>(
+      `/reports/categories?year=${year}&month=${month}&finalidade=${finalidade}&top=${top}`
+    ),
+};
+
+function ym({ year, month }: Period): string {
+  return `${year}-${String(month).padStart(2, "0")}`;
+}

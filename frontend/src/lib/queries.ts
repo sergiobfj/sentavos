@@ -8,9 +8,10 @@ import {
   invoicesApi,
   perfilApi,
   purchasesApi,
+  reportsApi,
   transactionsApi,
 } from "./api";
-import { usePeriod } from "./period";
+import { shiftPeriod, toYm, usePeriod } from "./period";
 import type {
   AssetCreate,
   AssetSnapshotSet,
@@ -20,6 +21,7 @@ import type {
   CardUpdate,
   CategoryCreate,
   CategoryUpdate,
+  FiltroFinalidade,
   PaymentMethod,
   PurchaseCreate,
   PurchaseUpdate,
@@ -34,6 +36,7 @@ const keys = {
   assets: ["assets"] as const,
   cards: ["cards"] as const,
   invoices: ["invoices"] as const,
+  reports: ["reports"] as const,
 };
 
 // O summary de orçamento soma amount_planned/amount_paid das transações, então
@@ -47,6 +50,8 @@ function invalidateMovement(qc: QueryClient) {
   qc.invalidateQueries({ queryKey: keys.transactions });
   qc.invalidateQueries({ queryKey: keys.budgets });
   qc.invalidateQueries({ queryKey: keys.invoices });
+  // Os relatórios são as mesmas somas vistas de outro ângulo.
+  qc.invalidateQueries({ queryKey: keys.reports });
 }
 
 // ---------- Transações ----------
@@ -166,7 +171,39 @@ export function useDeleteAssetSnapshot() {
   });
 }
 
+// ---------- Relatórios ----------
+// Finalidade e janela entram na chave: sem elas, trocar de "Pessoal" pra
+// "Família" serviria do cache o número do filtro anterior.
+
+export function useCategoryReport(finalidade: FiltroFinalidade) {
+  const { period, ym } = usePeriod();
+  return useQuery({
+    queryKey: [...keys.reports, "categories", ym, finalidade],
+    queryFn: () => reportsApi.categories(period, finalidade),
+  });
+}
+
+/** Os `meses` terminados no mês selecionado, inclusive. */
+export function useMonthlyReport(meses: number, finalidade: FiltroFinalidade) {
+  const { period } = usePeriod();
+  const de = shiftPeriod(period, -(meses - 1));
+  return useQuery({
+    queryKey: [...keys.reports, "monthly", toYm(de), toYm(period), finalidade],
+    queryFn: () => reportsApi.monthly(de, period, finalidade),
+    // Trocar 6 ↔ 12 meses mantém a linha anterior na tela até a nova chegar,
+    // em vez de piscar um esqueleto no lugar do gráfico.
+    placeholderData: (anterior) => anterior,
+  });
+}
+
 // ---------- Categorias ----------
+export function useCategoriesComUso() {
+  return useQuery({
+    queryKey: [...keys.categories, "uso"],
+    queryFn: categoriesApi.listComUso,
+  });
+}
+
 export function useCategories(incluirArquivadas = false) {
   // A chave leva o parâmetro: sem isso as duas listas (a do formulário e a de
   // Configurações) compartilhariam cache, e arquivar uma categoria a faria
@@ -196,8 +233,9 @@ export function useUpdateCategory() {
       categoriesApi.update(id, data),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: keys.categories });
-      // O summary carrega nome, cor e ícone da categoria.
+      // O summary e os relatórios carregam nome, cor e ícone da categoria.
       qc.invalidateQueries({ queryKey: keys.budgets });
+      qc.invalidateQueries({ queryKey: keys.reports });
     },
   });
 }
@@ -241,6 +279,8 @@ export function useUpdateCard() {
     mutationFn: ({ id, data }: { id: number; data: CardUpdate }) => cardsApi.update(id, data),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: keys.cards });
+      // Classificar o cartão dá finalidade às compras dele que não tinham.
+      qc.invalidateQueries({ queryKey: keys.reports });
       // O nome do cartão aparece na linha da parcela e no resumo de faturas.
       qc.invalidateQueries({ queryKey: keys.invoices });
       qc.invalidateQueries({ queryKey: keys.transactions });

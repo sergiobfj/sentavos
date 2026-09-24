@@ -2,90 +2,120 @@ import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import TransactionForm from "../components/TransactionForm";
 import { LinhaLancamento } from "../components/TransactionList";
-import { IconeCartao } from "../components/TransactionList";
-import { useCategories, useInvoicesSummary, useTransactions } from "../lib/queries";
+import Segmentado from "../components/Segmentado";
+import { Evolucao, Rosca, type Fatia, type PontoEvolucao } from "../components/Graficos";
+import {
+  useBudgetSummary,
+  useCards,
+  useCategories,
+  useCategoryReport,
+  useInvoicesSummary,
+  useMonthlyReport,
+  useTransactions,
+} from "../lib/queries";
 import { usePeriod } from "../lib/period";
-import { shiftPeriod } from "../lib/period";
-import { budgetsApi } from "../lib/api";
-import { useQuery } from "@tanstack/react-query";
 import { ApiError } from "../lib/api";
-import { formatMoney } from "../lib/format";
-import { Fluxo, PorCategoria, PrevistoVsPago } from "../components/Graficos";
-import { useBudgetSummary } from "../lib/queries";
-import type { Category, Transaction } from "../lib/types";
+import { formatDiaMes, formatMoney } from "../lib/format";
+import { FRASE_FILTRO, OPCOES_FILTRO, useFiltroFinalidade } from "../lib/finalidade";
+import { COR_OUTRAS } from "../lib/paleta";
+import type { CardInvoices, Category, Invoice, Transaction } from "../lib/types";
+
+/* O Início é relatório, não painel. A ordem responde as perguntas na ordem em
+   que elas são feitas ao abrir o app:
+
+     1. como foi o mês            -> saldo do mês, e o que entrou/saiu
+     2. pra onde foi o dinheiro   -> gastos por categoria, com a finalidade
+     3. isso é normal?            -> evolução dos gastos
+     4. o que ainda vem           -> faturas
+     5. o que aconteceu por último -> quatro lançamentos
+
+   Saíram daqui: o "Fluxo" (somava entrou + gastou + investido como partes de
+   um mesmo todo), o "Previsto × pago" (é pergunta de Metas, e compra no cartão
+   não tem previsto — aparecia "R$ 120 de R$ 0"), o delta percentual do herói
+   ("↓ 160% vs mês anterior" sobre um saldo que troca de sinal) e o "Após
+   faturas", que subtraía faturas de meses futuros do fluxo de UM mês. */
+
+const MESES_OPCOES = [
+  { valor: "6", rotulo: "6 meses" },
+  { valor: "12", rotulo: "12 meses" },
+] as const;
 
 export default function Dashboard() {
   const { period } = usePeriod();
-  // Tocar num lançamento recente abre ele, e não a lista onde ele está. Levar
-  // pra outra aba pra depois procurar a mesma linha de novo é trabalho que a
-  // tela pode poupar — e era a distância que fazia "corrigir" parecer difícil.
   const [editando, setEditando] = useState<Transaction | null>(null);
+  const [filtro, setFiltro] = useFiltroFinalidade();
+  const [janela, setJanela] = useState<"6" | "12">("6");
+
   const { data: transactions, isLoading, error } = useTransactions();
   const { data: categories } = useCategories(true);
-  // O resumo do orçamento traz duas coisas: o previsto × pago por categoria e o
-  // bloco de caixa (Carteira, Gastou, faturas). Uma chamada, dois assuntos.
   const { data: resumo } = useBudgetSummary();
   const { data: faturas } = useInvoicesSummary();
-
-  // O mês anterior existe só pra comparação do cartão herói. Sem ele o número
-  // grande diria "quanto sobrou" sem dizer se isso é bom — e "R$ 1.200" só
-  // significa alguma coisa ao lado do mês passado.
-  //
-  // Vem do mesmo resumo, e não da lista de lançamentos: a Carteira desconta
-  // pagamento de fatura, que não é lançamento — calculá-la aqui daria um
-  // número diferente do que o herói mostra.
-  const anterior = shiftPeriod(period, -1);
-  const { data: resumoAnterior } = useQuery({
-    queryKey: ["budgets", "summary", `${anterior.year}-${anterior.month}`],
-    queryFn: () => budgetsApi.summary(anterior),
-  });
+  const { data: cards } = useCards();
+  const distribuicao = useCategoryReport(filtro);
+  const serie = useMonthlyReport(Number(janela), filtro);
 
   const caixa = resumo?.caixa;
+  const nomeDoMes = new Date(period.year, period.month - 1, 1).toLocaleDateString("pt-BR", {
+    month: "long",
+  });
+
   const catMap = useMemo(() => {
     const m = new Map<number, Category>();
     categories?.forEach((c) => m.set(c.id, c));
     return m;
   }, [categories]);
 
+  // Quatro e não seis: aqui o lançamento é consulta rápida. A lista inteira
+  // mora em Lançamentos, que existe pra isso.
   const recentes = useMemo(
     () =>
       [...(transactions ?? [])]
         .sort((a, b) => b.date.localeCompare(a.date) || b.id - a.id)
-        .slice(0, 6),
+        .slice(0, 4),
     [transactions]
   );
 
-  const porCategoria = useMemo(() => {
-    const acc = new Map<number, number>();
-    for (const t of transactions ?? []) {
-      const cat = catMap.get(t.category_id);
-      if (cat?.type !== "expense") continue;
-      acc.set(cat.id, (acc.get(cat.id) ?? 0) + (t.amount_paid ?? 0));
+  const fatias: Fatia[] = useMemo(() => {
+    const d = distribuicao.data;
+    if (!d) return [];
+    const lista: Fatia[] = d.categories.map((c) => ({
+      id: String(c.category_id),
+      nome: c.name,
+      icone: c.icon,
+      cor: c.color,
+      valor: c.value,
+      pct: c.pct,
+    }));
+    if (d.others) {
+      lista.push({
+        id: "outras",
+        nome: `Outras (${d.others.count})`,
+        cor: COR_OUTRAS,
+        valor: d.others.value,
+        pct: d.others.pct,
+      });
     }
-    const linhas = [...acc.entries()]
-      .map(([id, valor]) => ({ cat: catMap.get(id)!, valor }))
-      .filter((r) => r.cat && r.valor > 0)
-      .map((r) => ({
-        id: r.cat.id,
-        nome: r.cat.name,
-        icone: r.cat.icon,
-        cor: r.cat.color,
-        valor: r.valor,
-      }));
-    return { linhas };
-  }, [transactions, catMap]);
+    return lista;
+  }, [distribuicao.data]);
 
-  const previstoVsPago = useMemo(
+  const pontos: PontoEvolucao[] = useMemo(
     () =>
-      (resumo?.items ?? [])
-        .filter((i) => i.category_type === "expense")
-        .map((i) => ({
-          id: i.category_id,
-          nome: i.category_name,
-          previsto: i.planned,
-          pago: i.paid,
-        })),
-    [resumo]
+      (serie.data?.months ?? []).map((m) => {
+        const data = new Date(m.year, m.month - 1, 1);
+        return {
+          chave: `${m.year}-${m.month}`,
+          rotulo: data.toLocaleDateString("pt-BR", { month: "short" }).replace(".", ""),
+          mesLongo: data.toLocaleDateString("pt-BR", { month: "long", year: "numeric" }),
+          // Filtrado, um mês cujo gasto é TODO sem finalidade (o histórico
+          // antes dela existir) não é zero: é desconhecido.
+          valor:
+            filtro !== "todos" && m.expense === 0 && m.expense_sem_finalidade > 0
+              ? null
+              : m.expense,
+          atual: m.year === period.year && m.month === period.month,
+        };
+      }),
+    [serie.data, period, filtro]
   );
 
   if (isLoading) return <Esqueleto />;
@@ -93,161 +123,147 @@ export default function Dashboard() {
 
   const pagamentos = faturas?.payments ?? [];
   const vazio = (transactions ?? []).length === 0 && pagamentos.length === 0;
-  const variacao = calcularVariacao(
-    caixa?.carteira ?? 0,
-    resumoAnterior?.caixa.carteira ?? 0
-  );
+  const saldo = caixa?.carteira ?? 0;
+  const cartaoMexeNoSaldo = (caixa?.no_cartao ?? 0) > 0 || (caixa?.faturas_pagas ?? 0) > 0;
 
-  // O cartão de fatura só entra quando há fatura. Pra quem não usa cartão, um
-  // "Fatura atual R$ 0,00" ocuparia um terço da primeira dobra pra não dizer
-  // nada — e aí o terceiro cartão continua sendo o investimento, como era.
-  //
-  // Quando há fatura em aberto mas nenhuma vence NESTE mês, o cartão mostra o
-  // que está em aberto em vez de "R$ 0,00 vence neste mês". Foi o que a tela
-  // mostrou: em setembro a fatura das compras só vence em outubro, e o zero
-  // fazia parecer que não havia cartão nenhum.
-  const venceNoMes = (caixa?.faturas_do_mes ?? 0) > 0;
-  const emAberto = (caixa?.faturas_em_aberto ?? 0) > 0;
-  const temFatura = venceNoMes || emAberto;
+  // Cartão ainda sem finalidade: as compras dele ficam fora de Pessoal/Família/
+  // Empresa até alguém dizer pra que ele serve. A tela avisa uma vez, baixo.
+  const cartoesSemFinalidade = (cards ?? []).filter((c) => !c.archived && c.finalidade == null);
+
+  const d = distribuicao.data;
+  const semFinalidade = filtro !== "todos" && d && d.sem_finalidade.count > 0 ? d.sem_finalidade : null;
+
+  const conhecidos = pontos.filter((p) => p.valor != null);
+  const media = conhecidos.length
+    ? conhecidos.reduce((s, p) => s + (p.valor ?? 0), 0) / conhecidos.length
+    : 0;
+  // Meses em que parte do gasto não tem finalidade: o filtro mostra só um
+  // pedaço deles, e a tela diz isso uma vez, sem alarde.
+  const mesesIncompletos =
+    filtro === "todos" ? 0 : (serie.data?.months ?? []).filter((m) => m.expense_sem_finalidade > 0).length;
 
   return (
     <>
-      {/* ---------- Carteira ----------
-          Dinheiro de verdade: entrou, menos o que saiu à vista, menos o que foi
-          investido, menos as faturas pagas no mês. Compra no cartão NÃO entra
-          aqui — ela ainda não tirou nada da conta. */}
-      <section className="hero">
-        <div className="rot">Carteira</div>
-        <div className={`big tnum ${(caixa?.carteira ?? 0) >= 0 ? "pos" : "neg"}`}>
-          {formatMoney(caixa?.carteira ?? 0)}
+      {/* ---------- Saldo do mês ----------
+          Era "Carteira", e o nome dizia uma coisa que o número não é: não é
+          quanto há na conta, é quanto SOBROU do fluxo deste mês — entradas
+          menos o que saiu da conta (à vista, investido e faturas pagas). */}
+      <section className="hero" aria-labelledby="saldo-rotulo">
+        <div className="big tnum">{formatMoney(saldo)}</div>
+        <div className="rot" id="saldo-rotulo">Saldo do mês</div>
+        <div className="indicadores">
+          <span><i style={{ background: "var(--pos)" }} aria-hidden /><b className="tnum">{formatMoney(caixa?.entrou ?? 0)}</b> entrou</span>
+          <span><i style={{ background: "var(--neg)" }} aria-hidden /><b className="tnum">{formatMoney(caixa?.gasto_total ?? 0)}</b> gastou</span>
+          <span><i style={{ background: "var(--inv)" }} aria-hidden /><b className="tnum">{formatMoney(caixa?.investido ?? 0)}</b> investiu</span>
         </div>
-        {variacao && (
-          <div className={`delta ${variacao.melhorou ? "pos" : "neg"}`}>
-            <span aria-hidden>{variacao.melhorou ? "↑" : "↓"}</span>
-            {variacao.texto}
-          </div>
-        )}
-        {/* "Após faturas" fica ao lado da Carteira, nunca no lugar dela: é
-            projeção do que já está comprometido, e não o dinheiro que está na
-            conta agora. Trocar um pelo outro faria o app dizer que você tem
-            menos do que tem. */}
-        {(caixa?.faturas_em_aberto ?? 0) > 0 && (
-          <div className="hero-secundario">
-            <span>Após faturas</span>
-            <b className={`tnum ${(caixa?.apos_faturas ?? 0) >= 0 ? "" : "neg"}`}>
-              {formatMoney(caixa?.apos_faturas ?? 0)}
-            </b>
+        {/* Entrou − gastou − investiu não fecha com o saldo quando há cartão, e
+            a frase diz por quê em vez de deixar a conta parecer errada. */}
+        {cartaoMexeNoSaldo && (
+          <div className="nota">
+            O saldo desconta as faturas pagas no mês ({formatMoney(caixa?.faturas_pagas ?? 0)}),
+            não as compras no cartão.
           </div>
         )}
       </section>
 
-      {/* O aviso da transição: lançamentos anteriores ao cartão que ainda não
-          têm forma de pagamento. Até serem revisados eles contam como saída de
-          caixa — que é como já eram contados —, mas a tela diz isso em vez de
-          fingir que a resposta está completa. */}
       {(caixa?.sem_forma_definida_qtd ?? 0) > 0 && (
         <Link className="aviso-acao" to="/rever">
           <div>
             <b>
               {caixa!.sem_forma_definida_qtd}{" "}
-              {caixa!.sem_forma_definida_qtd === 1 ? "lançamento" : "lançamentos"} sem
-              forma de pagamento
-            </b>
-            <div>
-              Somam {formatMoney(caixa!.sem_forma_definida)} e estão contando como
-              saída da conta.
-            </div>
+              {caixa!.sem_forma_definida_qtd === 1 ? "lançamento" : "lançamentos"} sem forma de pagamento
+            </b>{" "}
+            · {formatMoney(caixa!.sem_forma_definida)} contando como saída da conta
           </div>
           <span aria-hidden>›</span>
         </Link>
       )}
 
-      <div className="duo">
-        <div className="card">
-          <div className="rot"><Bolinha cor="var(--pos)" /> Entrou</div>
-          <div className="val pos tnum">{formatMoney(caixa?.entrou ?? 0)}</div>
-        </div>
-        {/* "Saiu" virou "Gastou", e a mudança não é de palavra: com cartão, o
-            que você gastou e o que saiu da conta deixaram de ser o mesmo
-            número. Este é o do gasto — inclui a compra no cartão. */}
-        <div className="card">
-          <div className="rot"><Bolinha cor="var(--neg)" /> Gastou</div>
-          <div className="val neg tnum">{formatMoney(caixa?.gasto_total ?? 0)}</div>
-          {(caixa?.no_cartao ?? 0) > 0 && (
-            <div className="s">{formatMoney(caixa!.no_cartao)} no cartão</div>
-          )}
-        </div>
-        {/* Com cartão são quatro cartões, em duas fileiras de dois — e não três
-            com um órfão embaixo. O de fatura entra; o de investimento fica,
-            porque tirar um número da tela pra caber outro é resolver espaço
-            perdendo informação. */}
-        {temFatura && (
-          <Link className="card" to="/orcamento?aba=faturas">
-            <div className="rot">
-              <span className="bolinha-icone" aria-hidden><IconeCartao /></span> Fatura
-            </div>
-            <div className="val tnum">
-              {formatMoney(venceNoMes ? caixa!.faturas_do_mes : caixa!.faturas_em_aberto)}
-            </div>
-            <div className="s">{venceNoMes ? "vence neste mês" : "em aberto"}</div>
-          </Link>
-        )}
-        <div className="card">
-          <div className="rot"><Bolinha cor="var(--inv)" /> Investido</div>
-          <div className="val inv tnum">{formatMoney(caixa?.investido ?? 0)}</div>
-        </div>
-      </div>
-
-      {/* A proporção entre os três, logo abaixo deles e sem título próprio: são
-          os mesmos números, então merecem a faixa mas não uma seção inteira. */}
-      {((caixa?.entrou ?? 0) > 0 || (caixa?.gasto_total ?? 0) > 0) && (
-        <div style={{ marginTop: "var(--s3)" }}>
-          <Fluxo
-            entrou={caixa?.entrou ?? 0}
-            saiu={caixa?.gasto_total ?? 0}
-            investido={caixa?.investido ?? 0}
-          />
-        </div>
-      )}
-
       {vazio ? (
         <div className="empty" style={{ marginTop: "var(--s6)" }}>
           <div className="big">🪙</div>
-          <div className="tit">Nenhum lançamento neste mês</div>
+          <div className="tit">Nenhum lançamento em {nomeDoMes}</div>
           <div>Toque no <b>+</b> para registrar o primeiro.</div>
         </div>
       ) : (
         <>
-          {/* Previsto x pago primeiro: é a pergunta que mais importa no meio
-              do mês ("estou dentro do que planejei?"). O detalhamento de onde
-              o dinheiro foi vem depois, porque responde ao passado. */}
-          {previstoVsPago.length > 0 && (
+          {/* ---------- Gastos ---------- */}
+          <div className="sec-title">
+            <h2>Gastos</h2>
+          </div>
+          <Segmentado
+            rotulo="Finalidade dos gastos"
+            opcoes={OPCOES_FILTRO}
+            valor={filtro}
+            aoEscolher={setFiltro}
+            largo
+          />
+
+          <div className="total-filtro">
+            <div className="v tnum">{formatMoney(d?.total ?? 0)}</div>
+            <div className="r">{FRASE_FILTRO[filtro]} em {nomeDoMes}</div>
+          </div>
+
+          {distribuicao.isLoading ? (
+            <div className="skel" style={{ height: 184 }} />
+          ) : fatias.length > 0 ? (
+            <Rosca fatias={fatias} total={d?.total ?? 0} rotuloCentro="gastos" />
+          ) : (
+            <div className="hint">Nenhum gasto com esta finalidade em {nomeDoMes}.</div>
+          )}
+
+          {semFinalidade && (
+            <div className="nota">
+              {semFinalidade.count}{" "}
+              {semFinalidade.count === 1 ? "lançamento" : "lançamentos"} deste mês (
+              {formatMoney(semFinalidade.value)}) não {semFinalidade.count === 1 ? "tem" : "têm"} finalidade
+              definida e {semFinalidade.count === 1 ? "fica" : "ficam"} fora deste filtro.
+            </div>
+          )}
+          {cartoesSemFinalidade.length > 0 && (
             <>
-              <div className="sec-title">
-                <h2>Previsto × pago</h2>
-                <Link to="/orcamento">Orçamento</Link>
+              <div className="nota">
+                {cartoesSemFinalidade.map((c) => c.name).join(", ")}{" "}
+                {cartoesSemFinalidade.length === 1 ? "ainda não tem" : "ainda não têm"} finalidade,
+                e as compras {cartoesSemFinalidade.length === 1 ? "dele" : "deles"} só aparecem em Todos.
               </div>
-              <div className="card card-pad">
-                <PrevistoVsPago linhas={previstoVsPago} />
-              </div>
+              <Link className="link-seta" to="/configuracoes">Classificar cartões</Link>
             </>
           )}
 
-          {porCategoria.linhas.length > 0 && (
-            <>
-              <div className="sec-title">
-                <h2>Para onde foi</h2>
-                <Link to="/orcamento?aba=lancamentos">Ver tudo</Link>
+          {/* ---------- Evolução ---------- */}
+          <div className="sec-title">
+            <h2>Evolução dos gastos</h2>
+          </div>
+          <div className="cabeca-grafico">
+            <Segmentado
+              rotulo="Período da evolução"
+              opcoes={[...MESES_OPCOES]}
+              valor={janela}
+              aoEscolher={setJanela}
+            />
+            {conhecidos.length > 0 && (
+              <div className="resumo-linha">
+                média <b className="tnum">{formatMoney(media)}</b>/mês
               </div>
-              <div className="card card-pad">
-                <PorCategoria linhas={porCategoria.linhas} />
-              </div>
-            </>
+            )}
+          </div>
+          {serie.isLoading ? (
+            <div className="skel" style={{ height: 176 }} />
+          ) : (
+            <Evolucao pontos={pontos} />
+          )}
+          {mesesIncompletos > 0 && (
+            <div className="nota">
+              Parte dos lançamentos de {mesesIncompletos}{" "}
+              {mesesIncompletos === 1 ? "mês" : "meses"} deste período não tem finalidade
+              definida. Mês sem nenhuma aparece como um vão na linha.
+            </div>
           )}
 
-          {/* A lista fecha a tela. Início virou a aba de relatório, e nela o
-              lançamento individual é consulta rápida -- quem quer a lista
-              inteira vai em Lançamentos, que existe pra isso. */}
+          <ResumoDeFaturas cartoes={faturas?.cards ?? []} />
+
+          {/* ---------- Últimos lançamentos ---------- */}
           <div className="sec-title">
             <h2>Últimos lançamentos</h2>
             <Link to="/orcamento?aba=lancamentos">Ver todos</Link>
@@ -276,51 +292,62 @@ export default function Dashboard() {
   );
 }
 
-function Bolinha({ cor }: { cor: string }) {
+/** As faturas em uma linha por cartão: quanto e quando.
+ *
+ * A que vence no mês selecionado, se houver; senão a próxima. É informação,
+ * não assunto — a tela de Faturas é que é operacional.
+ */
+function ResumoDeFaturas({ cartoes }: { cartoes: CardInvoices[] }) {
+  const linhas = cartoes
+    .map((c) => ({ cartao: c, fatura: c.current ?? c.next }))
+    .filter((l): l is { cartao: CardInvoices; fatura: Invoice } => l.fatura != null);
+
+  if (linhas.length === 0) return null;
+
   return (
-    <span
-      style={{
-        width: 7, height: 7, borderRadius: 99, background: cor, display: "inline-block",
-      }}
-    />
+    <>
+      <div className="sec-title">
+        <h2>Faturas</h2>
+        <Link to="/orcamento?aba=faturas">Ver faturas</Link>
+      </div>
+      <ul className="faturas-mini">
+        {linhas.map(({ cartao, fatura }) => {
+          const paga = fatura.status === "paga";
+          return (
+            <li key={cartao.card_id}>
+              <div style={{ minWidth: 0 }}>
+                <div className="n">{cartao.name}</div>
+                <div className="d">
+                  {/* Paga antes do vencimento é comum: "venceu 2 out" em
+                      setembro seria mentira. Paga é paga, a data sai. */}
+                  {paga
+                    ? "paga"
+                    : fatura.status === "atrasada"
+                      ? `atrasada · venceu ${formatDiaMes(fatura.due_date)}`
+                      : `vence ${formatDiaMes(fatura.due_date)}`}
+                </div>
+              </div>
+              <div className="v tnum">
+                {formatMoney(paga ? fatura.total : fatura.remaining)}
+                {!paga && fatura.paid > 0 && <small>de {formatMoney(fatura.total)}</small>}
+              </div>
+            </li>
+          );
+        })}
+      </ul>
+    </>
   );
 }
 
 function Esqueleto() {
   return (
     <>
-      <div className="skel" style={{ height: 132, borderRadius: "var(--r-lg)" }} />
-      <div className="duo">
-        {[0, 1, 2].map((i) => (
-          <div key={i} className="skel" style={{ height: 72 }} />
-        ))}
-      </div>
-      <div className="sec-title"><h2>Últimos lançamentos</h2></div>
-      <div className="skel" style={{ height: 240, borderRadius: "var(--r)" }} />
+      <div className="skel" style={{ height: 40, width: "60%", marginTop: "var(--s3)" }} />
+      <div className="skel" style={{ height: 16, width: "40%", marginTop: "var(--s2)" }} />
+      <div className="skel" style={{ height: 16, width: "85%", marginTop: "var(--s3)" }} />
+      <div className="sec-title"><h2>Gastos</h2></div>
+      <div className="skel" style={{ height: 44, borderRadius: "var(--r-pill)" }} />
+      <div className="skel" style={{ height: 184, marginTop: "var(--s4)" }} />
     </>
   );
-}
-
-/** Compara o saldo com o do mês anterior.
- *
- * Em porcentagem só quando ela significa alguma coisa: sair de -50 para +200 dá
- * "-500%", um número tecnicamente correto e completamente inútil. Quando o mês
- * anterior foi negativo ou perto de zero, a comparação vira o valor absoluto.
- */
-function calcularVariacao(
-  atual: number,
-  anterior: number
-): { texto: string; melhorou: boolean } | null {
-  if (!Number.isFinite(anterior) || anterior === 0) return null;
-  const diferenca = atual - anterior;
-  if (Math.abs(diferenca) < 0.01) return null;
-
-  const melhorou = diferenca > 0;
-  if (anterior > 0) {
-    const pct = Math.round((diferenca / anterior) * 100);
-    if (Math.abs(pct) <= 300) {
-      return { texto: `${Math.abs(pct)}% vs. mês anterior`, melhorou };
-    }
-  }
-  return { texto: `${formatMoney(Math.abs(diferenca))} vs. mês anterior`, melhorou };
 }

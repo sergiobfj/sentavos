@@ -1,5 +1,5 @@
 import { Link } from "react-router-dom";
-import type { Card } from "../lib/types";
+import { FINALIDADE_LABEL, type Card } from "../lib/types";
 
 /** Escolha do cartão: botões lado a lado, não uma folha.
  *
@@ -42,7 +42,7 @@ export default function CardPicker({
         >
           <b>{c.name}</b>
           <span>
-            fecha {c.closing_day} · vence {c.due_day}
+            {c.finalidade ? `${FINALIDADE_LABEL[c.finalidade]} · ` : ""}fecha {c.closing_day}, vence {c.due_day}
           </span>
         </button>
       ))}

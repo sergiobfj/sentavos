@@ -80,7 +80,9 @@ export function LinhaLancamento({
   // Sem valor pago é promessa, não movimento: marcar isso evita ler o
   // mês como fechado quando metade ainda não saiu da conta.
   const soPrevisto = t.amount_paid == null;
-  const tom = cat?.type === "income" ? "pos" : cat?.type === "expense" ? "neg" : "inv";
+  // Só a entrada ganha cor. Despesa em vermelho transformava a lista inteira
+  // num relatório de erros; o sinal de menos já diz que saiu.
+  const tom = cat?.type === "income" ? "pos" : "";
   const sinal = sinalDoValor(cat?.type, valor);
 
   // "Nubank 2/10" em vez de só "Nubank": numa parcela, saber que faltam oito é
@@ -143,7 +145,7 @@ function LinhaPagamento({
           {formatDiaMes(pagamento.date)} · pagamento de fatura
         </div>
       </div>
-      <div className="amt tnum neg">−{formatMoney(pagamento.amount)}</div>
+      <div className="amt tnum">−{formatMoney(pagamento.amount)}</div>
       {onAbrir && <MarcaEditavel />}
     </button>
   );

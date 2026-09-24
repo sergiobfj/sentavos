@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import TransactionForm from "../components/TransactionForm";
 import { MarcaEditavel } from "../components/TransactionList";
+import { Rosca } from "../components/Graficos";
 import {
   useAssetSummary,
   usePerfil,
@@ -12,11 +13,10 @@ import {
 import { usePeriod } from "../lib/period";
 import { ApiError } from "../lib/api";
 import { formatDiaMes, formatMoney, formatYm } from "../lib/format";
+import { PALETA_CATEGORIAS, fundoDaCor } from "../lib/paleta";
 import {
   ASSET_CLASS_LABEL,
-  ASSET_CLASS_ORDER,
   INVESTMENT_CLASSES,
-  type AssetClass,
   type AssetSummaryItem,
   type Transaction,
 } from "../lib/types";
@@ -26,11 +26,13 @@ import {
 // "investimento". Se ela tivesse números próprios, começaria a divergir das
 // outras duas telas sobre o mesmo dinheiro.
 
-const COR_CLASSE: Record<string, string> = {
-  fixed_income: "var(--pos)",
-  equity: "var(--inv)",
-  crypto: "var(--gold)",
-};
+/** A cor de cada aplicação segue o ATIVO, não a posição no ranking: se o
+ *  Mercado Pago passar o Nubank no mês que vem, os dois não trocam de cor.
+ *  O id é estável; a ordem por valor não é. */
+function corDoAtivo(itens: AssetSummaryItem[], id: number): string {
+  const ids = itens.map((i) => i.asset_id).sort((a, b) => a - b);
+  return PALETA_CATEGORIAS[ids.indexOf(id) % PALETA_CATEGORIAS.length].cor;
+}
 
 export default function Investments() {
   const { label, ym } = usePeriod();
@@ -85,6 +87,7 @@ export default function Investments() {
     ? comTaxa.reduce((s, i) => s + (i.expected_yield ?? 0), 0)
     : null;
   const rendimento = variacao - aporte;
+  const comValor = itens.filter((i) => i.value > 0);
 
   if (itens.length === 0) {
     return (
@@ -115,33 +118,32 @@ export default function Investments() {
         <div className="big tnum">{formatMoney(total)}</div>
         {temBase && Math.abs(variacao) >= 0.01 && (
           <div className={`delta ${variacao > 0 ? "pos" : "neg"}`}>
-            <span aria-hidden>{variacao > 0 ? "↑" : "↓"}</span>
+            <span className="seta" aria-hidden>{variacao > 0 ? "↑" : "↓"}</span>
             {formatMoney(Math.abs(variacao))} no mês
           </div>
         )}
       </section>
 
-      {/* Dois números, não quatro. O total já está no cartão acima, e a
-          "variação" virou o selo dele — repetir os dois como cartão próprio era
-          dizer a mesma coisa três vezes. */}
-      <div className="duo" style={{ gridTemplateColumns: "1fr 1fr" }}>
-        <div className="card">
+      {/* Dois números em linha, separados por fio — não dois cards. O total
+          já é o herói, e a variação virou a linha dele. */}
+      <div className="metricas">
+        <div className="metrica">
           <div className="rot">Aportado no mês</div>
-          <div className="val inv tnum">{formatMoney(aporte)}</div>
+          <div className="val tnum">{formatMoney(aporte)}</div>
         </div>
-        <div className="card">
+        <div className="metrica">
           <div className="rot">Rendeu</div>
           {temBase ? (
-            <div className={`val tnum ${rendimento >= 0 ? "pos" : "neg"}`}>
+            <div className="val tnum">
               {rendimento > 0 ? "+" : ""}{formatMoney(rendimento)}
             </div>
           ) : (
             // Sem mês anterior o número seria o saldo inteiro travestido de
             // lucro. Melhor um traço honesto do que um número bonito e falso.
-            <div className="val" style={{ color: "var(--text-faint)" }}>—</div>
+            <div className="val fraco">—</div>
           )}
           {esperadoTotal !== null && (
-            <div style={{ fontSize: 11, color: "var(--text-faint)", marginTop: 3 }}>
+            <div className="s">
               esperado <span className="tnum">{formatMoney(esperadoTotal)}</span>
             </div>
           )}
@@ -154,7 +156,7 @@ export default function Investments() {
         itens.some((i) => i.cdi_percent != null) && (
           <div className="aviso-box" style={{ marginTop: "var(--s4)" }}>
             Você marcou a taxa das aplicações, mas falta informar o <b>CDI atual</b>{" "}
-            para eu calcular o rendimento. <Link to="/configuracoes">Informar agora</Link>
+            para calcular o rendimento. <Link to="/configuracoes">Informar agora</Link>
           </div>
         )}
 
@@ -163,21 +165,37 @@ export default function Investments() {
         <Link to="/patrimonio">Editar</Link>
       </div>
 
-      {/* Barra empilhada só quando há mais de um tipo de aplicação. Com uma só,
-          ela seria uma faixa de 100% de uma cor — enfeite ocupando espaço. */}
-      <Composicao itens={itens} total={total} />
+      {/* Rosca por APLICAÇÃO, não por classe: hoje as duas são renda fixa, e
+          uma rosca de classe seria um anel inteiro de uma cor só. Com uma
+          aplicação só ela também some — 100% de um lugar não precisa de
+          gráfico pra ser entendido. A lista embaixo é a legenda: o círculo de
+          cada linha tem a cor da fatia. */}
+      {comValor.length >= 2 && (
+        <div style={{ marginBottom: "var(--s4)" }}>
+          <Rosca
+            semLegenda
+            total={total}
+            rotuloCentro="investido"
+            fatias={comValor.map((i) => ({
+              id: String(i.asset_id),
+              nome: i.name,
+              cor: corDoAtivo(itens, i.asset_id),
+              valor: i.value,
+              pct: (i.value / total) * 100,
+            }))}
+          />
+        </div>
+      )}
 
       <div className="list">
         {itens.map((item) => (
-          // Ativo se edita em Patrimônio, e a linha leva pra lá em vez de
-          // abrir um formulário duplicado aqui — duas telas editando o mesmo
-          // ativo é como as duas começam a discordar.
+          // Ativo se edita em Patrimônio: duas telas editando o mesmo ativo é
+          // como as duas começam a discordar.
           <Link className="row" key={item.asset_id} to="/patrimonio">
             <div
               className="avatar"
-              style={{
-                background: `color-mix(in srgb, ${COR_CLASSE[item.asset_class] ?? "var(--gold)"} 22%, transparent)`,
-              }}
+              style={{ background: fundoDaCor(corDoAtivo(itens, item.asset_id), 26) }}
+              aria-hidden
             >
               {item.asset_class === "crypto" ? "₿" : item.asset_class === "equity" ? "📊" : "🏦"}
             </div>
@@ -186,18 +204,15 @@ export default function Investments() {
               <div className="s">
                 {ASSET_CLASS_LABEL[item.asset_class]}
                 {item.cdi_percent != null && <> · {item.cdi_percent}% do CDI</>}
-                {item.expected_yield != null && item.expected_yield > 0 && (
-                  <span style={{ color: "var(--pos)" }}>
-                    {" · +"}{formatMoney(item.expected_yield)}
-                  </span>
-                )}
-                {total > 0 && <> · {Math.round((item.value / total) * 100)}%</>}
                 {/* Saldo herdado de mês anterior: sem avisar, o número parece
                     atual e a pessoa confia num dado que não atualizou. */}
                 {item.as_of && item.as_of !== ym && <> · de {formatYm(item.as_of)}</>}
               </div>
             </div>
-            <div className="amt tnum">{formatMoney(item.value)}</div>
+            <div className="amt tnum">
+              {formatMoney(item.value)}
+              {total > 0 && <span className="sub">{Math.round((item.value / total) * 100)}%</span>}
+            </div>
             <MarcaEditavel />
           </Link>
         ))}
@@ -215,17 +230,14 @@ export default function Investments() {
                 de lançamentos, que é onde eles moram. */}
             {aportes.slice(0, 3).map((t) => (
               <button className="row" key={t.id} onClick={() => setEditando(t)}>
-                <div
-                  className="avatar"
-                  style={{ background: "color-mix(in srgb, var(--inv) 20%, transparent)" }}
-                >
+                <div className="avatar" style={{ background: fundoDaCor("#93a6dc", 18) }} aria-hidden>
                   🏦
                 </div>
                 <div className="mid">
                   <div className="t">{t.description}</div>
                   <div className="s">{formatDiaMes(t.date)}</div>
                 </div>
-                <div className="amt inv tnum">{formatMoney(t.amount_paid)}</div>
+                <div className="amt tnum">{formatMoney(t.amount_paid)}</div>
                 <MarcaEditavel />
               </button>
             ))}
@@ -244,54 +256,11 @@ export default function Investments() {
   );
 }
 
-function Composicao({ itens, total }: { itens: AssetSummaryItem[]; total: number }) {
-  const porClasse = useMemo(() => {
-    const acc = new Map<AssetClass, number>();
-    for (const item of itens) {
-      acc.set(item.asset_class, (acc.get(item.asset_class) ?? 0) + item.value);
-    }
-    return ASSET_CLASS_ORDER.filter((c) => acc.has(c)).map((c) => ({
-      classe: c,
-      valor: acc.get(c) ?? 0,
-    }));
-  }, [itens]);
-
-  if (total <= 0 || porClasse.length < 2) return null;
-
-  return (
-    <div style={{ marginBottom: "var(--s3)" }}>
-      <div className="seg">
-        {porClasse.map(({ classe, valor }) => (
-          <div
-            key={classe}
-            style={{
-              width: `${(valor / total) * 100}%`,
-              background: COR_CLASSE[classe] ?? "var(--gold)",
-            }}
-            title={`${ASSET_CLASS_LABEL[classe]}: ${formatMoney(valor)}`}
-          />
-        ))}
-      </div>
-      <div className="seg-legend">
-        {porClasse.map(({ classe, valor }) => (
-          <span key={classe}>
-            <i style={{ background: COR_CLASSE[classe] ?? "var(--gold)" }} />
-            {ASSET_CLASS_LABEL[classe]} {Math.round((valor / total) * 100)}%
-          </span>
-        ))}
-      </div>
-    </div>
-  );
-}
-
 function Esqueleto() {
   return (
     <>
-      <div className="skel" style={{ height: 132, borderRadius: "var(--r-lg)" }} />
-      <div className="duo" style={{ gridTemplateColumns: "1fr 1fr" }}>
-        <div className="skel" style={{ height: 72 }} />
-        <div className="skel" style={{ height: 72 }} />
-      </div>
+      <div className="skel" style={{ height: 64, width: "60%", marginTop: "var(--s3)" }} />
+      <div className="skel" style={{ height: 64, marginTop: "var(--s4)" }} />
       <div className="sec-title"><h2>Onde está</h2></div>
       <div className="skel" style={{ height: 160, borderRadius: "var(--r)" }} />
     </>

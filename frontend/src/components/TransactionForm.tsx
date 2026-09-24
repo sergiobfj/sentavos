@@ -4,6 +4,8 @@ import ConfirmDialog from "./ConfirmDialog";
 import CategoryPicker from "./CategoryPicker";
 import CardPicker from "./CardPicker";
 import PurchaseForm from "./PurchaseForm";
+import Segmentado from "./Segmentado";
+import { OPCOES_FINALIDADE } from "../lib/finalidade";
 import {
   useCards,
   useCreatePurchase,
@@ -25,6 +27,7 @@ import {
 import {
   ehParcela,
   type Category,
+  type Finalidade,
   type CategoryType,
   type PaymentMethod,
   type Transaction,
@@ -32,10 +35,10 @@ import {
 
 // Tres tipos, os mesmos que a categoria ja tinha. Os rotulos sao os do dia a
 // dia -- "Saida" e nao "Despesa", porque e a palavra que se usa ao lancar.
-const TIPOS: { valor: CategoryType; rotulo: string; cor: string }[] = [
-  { valor: "expense", rotulo: "Saída", cor: "var(--neg)" },
-  { valor: "income", rotulo: "Entrada", cor: "var(--pos)" },
-  { valor: "investment", rotulo: "Investir", cor: "var(--inv)" },
+const TIPOS: { valor: CategoryType; rotulo: string }[] = [
+  { valor: "expense", rotulo: "Saída" },
+  { valor: "income", rotulo: "Entrada" },
+  { valor: "investment", rotulo: "Investir" },
 ];
 
 // Até 12 cabem em duas fileiras de chips no celular; 18 e 24 existem porque
@@ -93,6 +96,14 @@ function Lancamento({
   const [cardId, setCardId] = useState<number | null>(null);
   const [parcelas, setParcelas] = useState(1);
 
+  // Criando: pessoal, até a pessoa escolher outra ou escolher um cartão — aí
+  // vale a do cartão. Editando um lançamento antigo, nula: a tela não
+  // responde por ele o que ninguém respondeu.
+  const [finalidade, setFinalidade] = useState<Finalidade | null>(
+    isEdit ? transaction!.finalidade ?? null : "pessoal"
+  );
+  const [escolheuFinalidade, setEscolheuFinalidade] = useState(isEdit);
+
   const [form, setForm] = useState({
     date: transaction?.date ?? todayIso(),
     description: transaction?.description ?? "",
@@ -104,6 +115,13 @@ function Lancamento({
 
   const ativas = useMemo(() => categories.filter((c) => !c.archived), [categories]);
   const { data: cards } = useCards();
+
+  function escolherCartao(id: number) {
+    setCardId(id);
+    const cartao = cards?.find((c) => c.id === id);
+    // O cartão sugere; a escolha feita à mão continua valendo.
+    if (!escolheuFinalidade && cartao) setFinalidade(cartao.finalidade);
+  }
 
   // Trocar de tipo limpa a categoria escolhida se ela nao pertence ao novo
   // tipo. Sem isso dava pra sair com "Saida" selecionado e a categoria
@@ -161,6 +179,8 @@ function Lancamento({
           installments: parcelas,
           purchase_date: form.date,
           note: form.note.trim() || null,
+          // Nula = a do cartão, decidido no servidor.
+          finalidade,
         },
         { onSuccess: () => irParaOMesSalvo(form.date) }
       );
@@ -177,6 +197,8 @@ function Lancamento({
       // Entrada e investimento são dinheiro que se move na hora; só despesa
       // pode ficar pendurada numa fatura.
       payment_method: (tipo === "expense" ? forma : "cash") as PaymentMethod | null,
+      // Só despesa tem finalidade; o servidor também garante isso.
+      finalidade: tipo === "expense" ? finalidade : null,
     };
 
     if (!isEdit) {
@@ -244,12 +266,11 @@ function Lancamento({
         <div className="field">
           <label>Tipo</label>
           <div className="tipo-toggle" role="group" aria-label="Tipo do lançamento">
-            {TIPOS.map(({ valor, rotulo, cor }) => (
+            {TIPOS.map(({ valor, rotulo }) => (
               <button
                 type="button"
                 key={valor}
                 className={tipo === valor ? "on" : ""}
-                style={tipo === valor ? { color: cor, borderColor: cor } : undefined}
                 onClick={() => trocarTipo(valor)}
                 aria-pressed={tipo === valor}
               >
@@ -319,7 +340,7 @@ function Lancamento({
           <>
             <div className="field">
               <label>Cartão</label>
-              <CardPicker cards={cards ?? []} valor={cardId} aoEscolher={setCardId} />
+              <CardPicker cards={cards ?? []} valor={cardId} aoEscolher={escolherCartao} />
             </div>
 
             <div className="field">
@@ -339,6 +360,32 @@ function Lancamento({
               </div>
             </div>
           </>
+        )}
+
+        {/* ---------- Finalidade ----------
+            Quem consumiu: responde "quanto EU gastei", que o cartão sozinho
+            não responde (PIX não tem cartão). Só em saída. */}
+        {tipo === "expense" && (
+          <div className="field">
+            <span className="label">Finalidade</span>
+            <Segmentado
+              rotulo="Finalidade"
+              opcoes={OPCOES_FINALIDADE}
+              valor={finalidade}
+              aoEscolher={(f) => {
+                setFinalidade(f);
+                setEscolheuFinalidade(true);
+              }}
+              largo
+            />
+            {finalidade === null && (
+              <div className="hint">
+                {noCartao
+                  ? "Este cartão ainda não tem finalidade. Sem escolha, a compra herda a dele quando ele for classificado."
+                  : "Lançamento anterior à finalidade. Sem escolha, ele só aparece no filtro Todos."}
+              </div>
+            )}
+          </div>
         )}
 
         {/* No cartão, "Previsto" sai em vez de ficar cinza: compra já
@@ -364,7 +411,7 @@ function Lancamento({
         {/* A conta na frente de quem lança, antes de salvar: quanto fica cada
             parcela, quando começa e em qual fatura cai. */}
         {previa.length > 0 && ano && mes && (
-          <div className="aviso-box">
+          <div className="aviso-box" style={{ marginBottom: "var(--s4)" }}>
             {parcelas === 1 ? (
               <>Uma parcela de <b>{formatMoney(previa[0])}</b> em {formatMesPorExtenso(ano, mes)}.</>
             ) : (
