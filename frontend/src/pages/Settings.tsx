@@ -19,6 +19,7 @@ import {
   useSetCdi,
 } from "../lib/queries";
 import { ApiError } from "../lib/api";
+import { useAuth } from "../lib/auth";
 import { OPCOES_FINALIDADE } from "../lib/finalidade";
 import {
   EMOJIS,
@@ -61,7 +62,36 @@ export default function Settings() {
         <h2>Rendimento</h2>
       </div>
       <CdiCard />
+
+      <div className="sec-title">
+        <h2>Conta</h2>
+      </div>
+      <Conta />
     </>
+  );
+}
+
+/** Sair, no fim da tela e sem cor de alerta.
+ *
+ * Sem confirmação: sair não apaga nada e se desfaz entrando de novo. Um
+ * diálogo aqui seria pedágio, e o vermelho diria "perigo" pra uma ação que não
+ * tem nenhum. No celular esta era a única porta — o "Sair" da barra lateral só
+ * existe no desktop.
+ */
+function Conta() {
+  const { sessao, sair } = useAuth();
+  return (
+    <div className="field" style={{ marginBottom: 0 }}>
+      {sessao && (
+        <div className="hint" style={{ margin: "0 0 var(--s3)" }}>
+          Conectado como <b style={{ color: "var(--text)", fontWeight: 600 }}>{sessao.email}</b>
+          {sessao.somenteLeitura && " · demonstração"}
+        </div>
+      )}
+      <button type="button" className="btn btn-block" onClick={sair}>
+        Sair da conta
+      </button>
+    </div>
   );
 }
 
