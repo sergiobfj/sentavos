@@ -32,6 +32,22 @@ import type {
   TransactionCreate,
   TransactionUpdate,
 } from "./types";
+import type {
+  Commitment,
+  CommitmentCreate,
+  CommitmentDetail,
+  CommitmentUpdate,
+  Comparacao,
+  PlanoResposta,
+  Provision,
+  ProvisionCreate,
+  ProvisionUpdate,
+  ReconciliationItem,
+  ReconciliationItemCreate,
+  ReconciliationList,
+  Scenario,
+  ScenarioItemCreate,
+} from "./tiposPlanejamento";
 
 const BASE_URL = import.meta.env.VITE_API_URL ?? "http://localhost:8000";
 
@@ -291,3 +307,109 @@ export const reportsApi = {
 function ym({ year, month }: Period): string {
   return `${year}-${String(month).padStart(2, "0")}`;
 }
+
+// ---------- Planejamento ----------
+// A conta do mês sai pronta do servidor. Simular é POST só porque a hipótese
+// vai no corpo — não grava nada, e por isso a conta demo também simula.
+export const planningApi = {
+  month: ({ year, month }: Period, scenarioId?: number | null) =>
+    request<PlanoResposta>(
+      `/planning/month?year=${year}&month=${month}${scenarioId ? `&scenario_id=${scenarioId}` : ""}`
+    ),
+  horizon: (months: number, scenarioId?: number | null) =>
+    request<PlanoResposta>(
+      `/planning/horizon?months=${months}${scenarioId ? `&scenario_id=${scenarioId}` : ""}`
+    ),
+  compare: ({ year, month }: Period, scenarioId: number) =>
+    request<Comparacao>(`/planning/compare?year=${year}&month=${month}&scenario_id=${scenarioId}`),
+  simulate: (data: { year: number; month: number; scenario_id?: number | null; extras: ScenarioItemCreate[] }) =>
+    request<PlanoResposta>("/planning/simulate", { method: "POST", body: JSON.stringify(data) }),
+};
+
+export const commitmentsApi = {
+  list: () => request<Commitment[]>("/commitments"),
+  get: (id: number) => request<CommitmentDetail>(`/commitments/${id}`),
+  create: (data: CommitmentCreate) =>
+    request<CommitmentDetail>("/commitments", { method: "POST", body: JSON.stringify(data) }),
+  update: (id: number, data: CommitmentUpdate) =>
+    request<CommitmentDetail>(`/commitments/${id}`, { method: "PATCH", body: JSON.stringify(data) }),
+  remove: (id: number) =>
+    request<{ message: string; reservas_soltas: number }>(`/commitments/${id}`, { method: "DELETE" }),
+  // A baixa num toque: cria o lançamento realizado já vinculado à ocorrência.
+  pay: (id: number, numero: number, data: { date?: string; amount?: number; note?: string | null }) =>
+    request<CommitmentDetail>(`/commitments/${id}/ocorrencias/${numero}/pagar`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+  // "Já paguei": o lançamento existe, só não sabia que era esta ocorrência.
+  link: (id: number, numero: number, transactionId: number) =>
+    request<CommitmentDetail>(`/commitments/${id}/ocorrencias/${numero}/vincular`, {
+      method: "POST",
+      body: JSON.stringify({ transaction_id: transactionId }),
+    }),
+  unlink: (id: number, numero: number) =>
+    request<CommitmentDetail>(`/commitments/${id}/ocorrencias/${numero}/vincular`, { method: "DELETE" }),
+  skip: (id: number, numero: number, note?: string | null) =>
+    request<CommitmentDetail>(`/commitments/${id}/ocorrencias/${numero}/dispensar`, {
+      method: "POST",
+      body: JSON.stringify({ note: note ?? null }),
+    }),
+  unskip: (id: number, numero: number) =>
+    request<CommitmentDetail>(`/commitments/${id}/ocorrencias/${numero}/dispensar`, { method: "DELETE" }),
+};
+
+export const provisionsApi = {
+  list: () => request<Provision[]>("/provisions"),
+  create: (data: ProvisionCreate) =>
+    request<Provision>("/provisions", { method: "POST", body: JSON.stringify(data) }),
+  update: (id: number, data: ProvisionUpdate) =>
+    request<Provision>(`/provisions/${id}`, { method: "PATCH", body: JSON.stringify(data) }),
+  remove: (id: number) => request<{ message: string }>(`/provisions/${id}`, { method: "DELETE" }),
+};
+
+export const scenariosApi = {
+  list: () => request<Scenario[]>("/scenarios"),
+  create: (data: { name: string; note?: string | null }) =>
+    request<Scenario>("/scenarios", { method: "POST", body: JSON.stringify(data) }),
+  update: (id: number, data: { name?: string; note?: string | null }) =>
+    request<Scenario>(`/scenarios/${id}`, { method: "PATCH", body: JSON.stringify(data) }),
+  remove: (id: number) => request<{ message: string }>(`/scenarios/${id}`, { method: "DELETE" }),
+  duplicate: (id: number, name?: string) =>
+    request<Scenario>(`/scenarios/${id}/duplicar`, { method: "POST", body: JSON.stringify({ name }) }),
+  addItem: (id: number, data: ScenarioItemCreate) =>
+    request<Scenario>(`/scenarios/${id}/items`, { method: "POST", body: JSON.stringify(data) }),
+  removeItem: (id: number, itemId: number) =>
+    request<Scenario>(`/scenarios/${id}/items/${itemId}`, { method: "DELETE" }),
+};
+
+// ---------- Conferência do mês ----------
+// Revisar e aplicar, item a item. Cada criação aqui é UM toque do dono.
+export const reconciliationApi = {
+  list: ({ year, month }: Period) =>
+    request<ReconciliationList>(`/reconciliation?year=${year}&month=${month}`),
+  add: (data: ReconciliationItemCreate) =>
+    request<ReconciliationItem>("/reconciliation", { method: "POST", body: JSON.stringify(data) }),
+  update: (id: number, data: Partial<Pick<ReconciliationItem, "status" | "note" | "description" | "amount">>) =>
+    request<ReconciliationItem>(`/reconciliation/${id}`, { method: "PATCH", body: JSON.stringify(data) }),
+  remove: (id: number) => request<{ message: string }>(`/reconciliation/${id}`, { method: "DELETE" }),
+  link: (id: number, data: { transaction_id?: number; commitment_id?: number }) =>
+    request<ReconciliationItem>(`/reconciliation/${id}/vincular`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+  createTransaction: (id: number, data: TransactionCreate) =>
+    request<ReconciliationItem>(`/reconciliation/${id}/lancamento`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+  createCommitment: (id: number, data: CommitmentCreate) =>
+    request<ReconciliationItem>(`/reconciliation/${id}/compromisso`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+  createProvision: (id: number, data: ProvisionCreate) =>
+    request<ReconciliationItem>(`/reconciliation/${id}/reserva`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+};

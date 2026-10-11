@@ -55,6 +55,9 @@ export default function Layout() {
               <Icon /> {label}
             </NavLink>
           ))}
+          {/* Planejamento não está na pílula do celular (quatro abas do
+              polegar), mas aqui sobra espaço: no mouse não há zona do polegar. */}
+          <NavLink to="/planejamento"><IconCalendario /> Planejamento</NavLink>
           <NavLink to="/configuracoes"><IconEngrenagem /> Configurações</NavLink>
         </nav>
         <div className="foot">
@@ -162,6 +165,14 @@ function IconGrafico() {
     <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
       <path d="M3 17.5 9 11l4 4 8-8.5" />
       <path d="M15 6.5h6v6" />
+    </svg>
+  );
+}
+function IconCalendario() {
+  return (
+    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
+      <rect x="3.5" y="5" width="17" height="15.5" rx="2.5" />
+      <path d="M3.5 10h17M8 3v4M16 3v4" />
     </svg>
   );
 }

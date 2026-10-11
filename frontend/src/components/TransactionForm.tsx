@@ -458,6 +458,17 @@ function ExcluirTransacao({
     valor != null
       ? `O lançamento de ${formatMoney(valor)} em ${formatDiaMes(transacao.date)} deixa de contar.`
       : "O lançamento sai da lista do mês.",
+    // Apagar a baixa desfaz o pagamento — é o jeito certo de desfazer, e a
+    // pessoa precisa saber que a parcela volta a aparecer como "a pagar".
+    ...(transacao.commitment_id != null
+      ? [
+          `${transacao.commitment_description ?? "O compromisso"}${
+            transacao.commitment_installments && transacao.commitment_installments > 1
+              ? ` ${transacao.commitment_no}/${transacao.commitment_installments}`
+              : ""
+          } volta a ficar em aberto no planejamento.`,
+        ]
+      : []),
   ];
 
   return (

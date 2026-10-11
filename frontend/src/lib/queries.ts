@@ -10,8 +10,22 @@ import {
   purchasesApi,
   reportsApi,
   transactionsApi,
+  planningApi,
+  commitmentsApi,
+  provisionsApi,
+  scenariosApi,
+  reconciliationApi,
 } from "./api";
-import { shiftPeriod, toYm, usePeriod } from "./period";
+import type {
+  CommitmentCreate,
+  CommitmentUpdate,
+  ProvisionCreate,
+  ProvisionUpdate,
+  ReconciliationItem,
+  ReconciliationItemCreate,
+  ScenarioItemCreate,
+} from "./tiposPlanejamento";
+import { shiftPeriod, toYm, usePeriod, type Period } from "./period";
 import type {
   AssetCreate,
   AssetSnapshotSet,
@@ -37,7 +51,23 @@ const keys = {
   cards: ["cards"] as const,
   invoices: ["invoices"] as const,
   reports: ["reports"] as const,
+  // Planejamento: tudo que deriva de lançamento, fatura, saldo e compromisso.
+  planning: ["planning"] as const,
+  commitments: ["commitments"] as const,
+  provisions: ["provisions"] as const,
+  scenarios: ["scenarios"] as const,
+  reconciliation: ["reconciliation"] as const,
 };
+
+// O planejamento lê tudo: lançamento previsto, fatura, saldo, compromisso,
+// reserva. E a conferência sugere correspondências entre lançamentos. Mexer em
+// qualquer um desses deixa os três velhos.
+function invalidatePlanning(qc: QueryClient) {
+  qc.invalidateQueries({ queryKey: keys.planning });
+  qc.invalidateQueries({ queryKey: keys.commitments });
+  qc.invalidateQueries({ queryKey: keys.provisions });
+  qc.invalidateQueries({ queryKey: keys.reconciliation });
+}
 
 // O summary de orçamento soma amount_planned/amount_paid das transações, então
 // mexer em transação (ou em categoria) desatualiza o orçamento também.
@@ -52,6 +82,8 @@ function invalidateMovement(qc: QueryClient) {
   qc.invalidateQueries({ queryKey: keys.invoices });
   // Os relatórios são as mesmas somas vistas de outro ângulo.
   qc.invalidateQueries({ queryKey: keys.reports });
+  // Apagar um lançamento pode desfazer a baixa de um compromisso.
+  invalidatePlanning(qc);
 }
 
 // ---------- Transações ----------
@@ -135,7 +167,10 @@ export function useCreateAsset() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (data: AssetCreate) => assetsApi.create(data),
-    onSuccess: () => qc.invalidateQueries({ queryKey: keys.assets }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: keys.assets });
+      qc.invalidateQueries({ queryKey: keys.planning });
+    },
   });
 }
 
@@ -143,7 +178,10 @@ export function useUpdateAsset() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: ({ id, data }: { id: number; data: AssetUpdate }) => assetsApi.update(id, data),
-    onSuccess: () => qc.invalidateQueries({ queryKey: keys.assets }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: keys.assets });
+      qc.invalidateQueries({ queryKey: keys.planning });
+    },
   });
 }
 
@@ -151,7 +189,10 @@ export function useDeleteAsset() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (id: number) => assetsApi.remove(id),
-    onSuccess: () => qc.invalidateQueries({ queryKey: keys.assets }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: keys.assets });
+      qc.invalidateQueries({ queryKey: keys.planning });
+    },
   });
 }
 
@@ -159,7 +200,10 @@ export function useSetAssetSnapshot() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (data: AssetSnapshotSet) => assetsApi.setSnapshot(data),
-    onSuccess: () => qc.invalidateQueries({ queryKey: keys.assets }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: keys.assets });
+      qc.invalidateQueries({ queryKey: keys.planning });
+    },
   });
 }
 
@@ -167,7 +211,10 @@ export function useDeleteAssetSnapshot() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (id: number) => assetsApi.removeSnapshot(id),
-    onSuccess: () => qc.invalidateQueries({ queryKey: keys.assets }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: keys.assets });
+      qc.invalidateQueries({ queryKey: keys.planning });
+    },
   });
 }
 
@@ -434,3 +481,183 @@ export function useSetCdi() {
     },
   });
 }
+
+
+// ---------- Planejamento ----------
+// O mês e o cenário entram na chave: sem eles, trocar de cenário serviria do
+// cache a conta do anterior.
+
+export function usePlanningMonth(period: Period, scenarioId: number | null, enabled = true) {
+  return useQuery({
+    queryKey: [...keys.planning, "month", toYm(period), scenarioId],
+    queryFn: () => planningApi.month(period, scenarioId),
+    enabled,
+    placeholderData: (anterior) => anterior,
+  });
+}
+
+export function usePlanningHorizon(months: number, scenarioId: number | null = null) {
+  return useQuery({
+    queryKey: [...keys.planning, "horizon", months, scenarioId],
+    queryFn: () => planningApi.horizon(months, scenarioId),
+    placeholderData: (anterior) => anterior,
+  });
+}
+
+export function useComparacao(period: Period, scenarioId: number | null) {
+  return useQuery({
+    queryKey: [...keys.planning, "compare", toYm(period), scenarioId],
+    queryFn: () => planningApi.compare(period, scenarioId!),
+    enabled: scenarioId != null,
+  });
+}
+
+/** "E se eu gastar 500?" — calcula e esquece. Não invalida nada: nada mudou. */
+export function useSimular() {
+  return useMutation({ mutationFn: planningApi.simulate });
+}
+
+// ---------- Compromissos ----------
+// Toda mudança aqui pode criar ou desfazer um lançamento (a baixa), então
+// invalida o movimento inteiro — que já inclui o planejamento.
+
+export function useCommitments() {
+  return useQuery({ queryKey: [...keys.commitments, "list"], queryFn: commitmentsApi.list });
+}
+
+export function useCommitment(id: number | null) {
+  return useQuery({
+    queryKey: [...keys.commitments, "detalhe", id],
+    queryFn: () => commitmentsApi.get(id!),
+    enabled: id != null,
+  });
+}
+
+function useMutacaoDeCompromisso<T>(fn: (v: T) => Promise<unknown>) {
+  const qc = useQueryClient();
+  return useMutation({ mutationFn: fn, onSuccess: () => invalidateMovement(qc) });
+}
+
+export const useCreateCommitment = () =>
+  useMutacaoDeCompromisso((data: CommitmentCreate) => commitmentsApi.create(data));
+export const useUpdateCommitment = () =>
+  useMutacaoDeCompromisso(({ id, data }: { id: number; data: CommitmentUpdate }) =>
+    commitmentsApi.update(id, data)
+  );
+export const useDeleteCommitment = () =>
+  useMutacaoDeCompromisso((id: number) => commitmentsApi.remove(id));
+export const usePagarOcorrencia = () =>
+  useMutacaoDeCompromisso(
+    ({ id, numero, date, amount }: { id: number; numero: number; date?: string; amount?: number }) =>
+      commitmentsApi.pay(id, numero, { date, amount })
+  );
+export const useVincularOcorrencia = () =>
+  useMutacaoDeCompromisso(
+    ({ id, numero, transactionId }: { id: number; numero: number; transactionId: number }) =>
+      commitmentsApi.link(id, numero, transactionId)
+  );
+export const useDesvincularOcorrencia = () =>
+  useMutacaoDeCompromisso(({ id, numero }: { id: number; numero: number }) =>
+    commitmentsApi.unlink(id, numero)
+  );
+export const useDispensarOcorrencia = () =>
+  useMutacaoDeCompromisso(({ id, numero, note }: { id: number; numero: number; note?: string | null }) =>
+    commitmentsApi.skip(id, numero, note)
+  );
+export const useDesfazerDispensa = () =>
+  useMutacaoDeCompromisso(({ id, numero }: { id: number; numero: number }) =>
+    commitmentsApi.unskip(id, numero)
+  );
+
+// ---------- Reservas ----------
+// Reserva não mexe em lançamento: só o planejamento e a lista dela.
+
+function useMutacaoDePlanejamento<T>(fn: (v: T) => Promise<unknown>) {
+  const qc = useQueryClient();
+  return useMutation({ mutationFn: fn, onSuccess: () => invalidatePlanning(qc) });
+}
+
+export function useProvisions() {
+  return useQuery({ queryKey: [...keys.provisions, "list"], queryFn: provisionsApi.list });
+}
+
+export const useCreateProvision = () =>
+  useMutacaoDePlanejamento((data: ProvisionCreate) => provisionsApi.create(data));
+export const useUpdateProvision = () =>
+  useMutacaoDePlanejamento(({ id, data }: { id: number; data: ProvisionUpdate }) =>
+    provisionsApi.update(id, data)
+  );
+export const useDeleteProvision = () =>
+  useMutacaoDePlanejamento((id: number) => provisionsApi.remove(id));
+
+// ---------- Cenários ----------
+
+export function useScenarios() {
+  return useQuery({ queryKey: [...keys.scenarios, "list"], queryFn: scenariosApi.list });
+}
+
+function useMutacaoDeCenario<T, R>(fn: (v: T) => Promise<R>) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: fn,
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: keys.scenarios });
+      qc.invalidateQueries({ queryKey: keys.planning });
+    },
+  });
+}
+
+export const useCreateScenario = () =>
+  useMutacaoDeCenario((data: { name: string; note?: string | null }) => scenariosApi.create(data));
+export const useUpdateScenario = () =>
+  useMutacaoDeCenario(({ id, data }: { id: number; data: { name?: string; note?: string | null } }) =>
+    scenariosApi.update(id, data)
+  );
+export const useDeleteScenario = () => useMutacaoDeCenario((id: number) => scenariosApi.remove(id));
+export const useDuplicateScenario = () =>
+  useMutacaoDeCenario(({ id, name }: { id: number; name?: string }) => scenariosApi.duplicate(id, name));
+export const useAddScenarioItem = () =>
+  useMutacaoDeCenario(({ id, data }: { id: number; data: ScenarioItemCreate }) =>
+    scenariosApi.addItem(id, data)
+  );
+export const useRemoveScenarioItem = () =>
+  useMutacaoDeCenario(({ id, itemId }: { id: number; itemId: number }) =>
+    scenariosApi.removeItem(id, itemId)
+  );
+
+// ---------- Conferência ----------
+
+export function useReconciliation(period: Period) {
+  return useQuery({
+    queryKey: [...keys.reconciliation, toYm(period)],
+    queryFn: () => reconciliationApi.list(period),
+  });
+}
+
+export const useAddReconciliation = () =>
+  useMutacaoDePlanejamento((data: ReconciliationItemCreate) => reconciliationApi.add(data));
+export const useUpdateReconciliation = () =>
+  useMutacaoDePlanejamento(
+    ({ id, data }: { id: number; data: Partial<Pick<ReconciliationItem, "status" | "note" | "description" | "amount">> }) =>
+      reconciliationApi.update(id, data)
+  );
+export const useDeleteReconciliation = () =>
+  useMutacaoDePlanejamento((id: number) => reconciliationApi.remove(id));
+export const useLinkReconciliation = () =>
+  useMutacaoDePlanejamento(
+    ({ id, data }: { id: number; data: { transaction_id?: number; commitment_id?: number } }) =>
+      reconciliationApi.link(id, data)
+  );
+// Estes três criam dado de verdade: invalidam o movimento inteiro.
+export const useReconTransaction = () =>
+  useMutacaoDeCompromisso(({ id, data }: { id: number; data: TransactionCreate }) =>
+    reconciliationApi.createTransaction(id, data)
+  );
+export const useReconCommitment = () =>
+  useMutacaoDeCompromisso(({ id, data }: { id: number; data: CommitmentCreate }) =>
+    reconciliationApi.createCommitment(id, data)
+  );
+export const useReconProvision = () =>
+  useMutacaoDePlanejamento(({ id, data }: { id: number; data: ProvisionCreate }) =>
+    reconciliationApi.createProvision(id, data)
+  );

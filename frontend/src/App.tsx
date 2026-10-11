@@ -6,6 +6,8 @@ import Investments from "./pages/Investments";
 import Assets from "./pages/Assets";
 import Settings from "./pages/Settings";
 import Revisao from "./pages/Revisao";
+import Planejamento from "./pages/Planejamento";
+import Organizar from "./pages/Organizar";
 import Login from "./pages/Login";
 import { useAuth } from "./lib/auth";
 
@@ -53,6 +55,10 @@ export default function App() {
         {/* Fora da barra de abas: é uma tarefa de mutirão, feita uma vez
             enquanto o histórico é organizado, não uma seção do app. */}
         <Route path="/rever" element={<Revisao />} />
+        {/* Também fora da barra: planejar é semanal, não diário. A porta é a
+            linha "Disponível" do Início e a lateral do desktop. */}
+        <Route path="/planejamento" element={<Planejamento />} />
+        <Route path="/organizar" element={<Organizar />} />
         {/* Rotas antigas: Transações virou sub-aba de Orçamento e Categorias
             entrou em Configurações. Redirecionar evita quebrar link salvo. */}
         <Route path="/transacoes" element={<Navigate to="/orcamento?aba=lancamentos" replace />} />

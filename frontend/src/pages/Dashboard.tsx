@@ -11,9 +11,10 @@ import {
   useCategoryReport,
   useInvoicesSummary,
   useMonthlyReport,
+  usePlanningMonth,
   useTransactions,
 } from "../lib/queries";
-import { usePeriod } from "../lib/period";
+import { currentPeriod, usePeriod } from "../lib/period";
 import { ApiError } from "../lib/api";
 import { formatDiaMes, formatMoney } from "../lib/format";
 import { FRASE_FILTRO, OPCOES_FILTRO, useFiltroFinalidade } from "../lib/finalidade";
@@ -41,7 +42,7 @@ const MESES_OPCOES = [
 ] as const;
 
 export default function Dashboard() {
-  const { period } = usePeriod();
+  const { period, isCurrent } = usePeriod();
   const [editando, setEditando] = useState<Transaction | null>(null);
   const [filtro, setFiltro] = useFiltroFinalidade();
   const [janela, setJanela] = useState<"6" | "12">("6");
@@ -165,6 +166,11 @@ export default function Dashboard() {
           </div>
         )}
       </section>
+
+      {/* A porta do planejamento: "quanto posso gastar?" é a pergunta que
+          aparece olhando o saldo do mês, então a resposta mora logo abaixo dele.
+          Só no mês corrente — o planejamento olha de hoje pra frente. */}
+      {isCurrent && <LinhaDoPlanejamento />}
 
       {(caixa?.sem_forma_definida_qtd ?? 0) > 0 && (
         <Link className="aviso-acao" to="/rever">
@@ -336,6 +342,30 @@ function ResumoDeFaturas({ cartoes }: { cartoes: CardInvoices[] }) {
         })}
       </ul>
     </>
+  );
+}
+
+/** Disponível no mês corrente, com a porta pro planejamento. Pedido à parte e
+ *  sem esqueleto: a tela de Início não espera por ele. */
+function LinhaDoPlanejamento() {
+  const atual = currentPeriod();
+  const { data } = usePlanningMonth(atual, null);
+  const mes = data?.months[0];
+  const nome = new Date(atual.year, atual.month - 1, 1).toLocaleDateString("pt-BR", { month: "long" });
+  return (
+    <Link className="aviso-acao" to="/planejamento">
+      <div>
+        {mes ? (
+          <>
+            <b className="tnum">{formatMoney(mes.available)}</b> disponível em {nome}
+            {mes.expense > 0 && <> · {formatMoney(mes.expense)} ainda a pagar</>}
+          </>
+        ) : (
+          <b>Planejar {nome}</b>
+        )}
+      </div>
+      <span aria-hidden>›</span>
+    </Link>
   );
 }
 

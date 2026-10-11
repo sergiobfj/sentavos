@@ -88,10 +88,16 @@ export function LinhaLancamento({
   // "Nubank 2/10" em vez de só "Nubank": numa parcela, saber que faltam oito é
   // metade da informação. Em compra de uma vez, o "1/1" some — não diz nada.
   const marca =
-    t.card_name &&
-    (t.installments && t.installments > 1
-      ? `${t.card_name} ${t.installment_no}/${t.installments}`
-      : t.card_name);
+    (t.card_name &&
+      (t.installments && t.installments > 1
+        ? `${t.card_name} ${t.installment_no}/${t.installments}`
+        : t.card_name)) ||
+    // A baixa de um compromisso diz de qual ocorrência ela é.
+    (t.commitment_id != null &&
+      (t.commitment_installments && t.commitment_installments > 1
+        ? `compromisso ${t.commitment_no}/${t.commitment_installments}`
+        : "compromisso")) ||
+    null;
 
   return (
     <button className="row" onClick={onEdit}>

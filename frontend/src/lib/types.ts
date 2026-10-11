@@ -76,12 +76,21 @@ export interface Transaction {
   card_id?: number | null;
   card_name?: string | null;
   card_finalidade?: Finalidade | null;
+
+  // ---------- Só na baixa de um compromisso ----------
+  // "Financiamento 3/48": o lançamento que pagou aquela ocorrência. Apagá-lo
+  // devolve a ocorrência para "a pagar".
+  commitment_id?: number | null;
+  commitment_no?: number | null;
+  commitment_description?: string | null;
+  commitment_installments?: number | null;
 }
 
 export type TransactionCreate = Omit<
   Transaction,
   | "id" | "purchase_id" | "installment_no" | "invoice_id" | "installments"
   | "purchase_total" | "purchase_date" | "card_id" | "card_name" | "card_finalidade"
+  | "commitment_id" | "commitment_no" | "commitment_description" | "commitment_installments"
 >;
 export type TransactionUpdate = Partial<TransactionCreate>;
 
@@ -376,10 +385,13 @@ export interface Asset {
   // Quanto do CDI a aplicação paga (115 = 115% do CDI). Nulo = não rende, que
   // é o caso de conta corrente, imóvel e carro.
   cdi_percent: number | null;
+  // Entra no "quanto tenho agora" do planejamento? Nulo = o padrão (só Conta).
+  include_in_planning?: boolean | null;
 }
 
-export type AssetCreate = Omit<Asset, "id" | "cdi_percent"> & {
+export type AssetCreate = Omit<Asset, "id" | "cdi_percent" | "include_in_planning"> & {
   cdi_percent?: number | null;
+  include_in_planning?: boolean | null;
 };
 export type AssetUpdate = Partial<AssetCreate>;
 
@@ -388,6 +400,9 @@ export interface AssetSnapshotSet {
   year: number;
   month: number;
   value: number;
+  // O dia em que o saldo foi lido. Sem ele, o servidor usa hoje quando o mês
+  // é o corrente.
+  observed_on?: string | null;
 }
 
 export interface AssetSummaryItem {
