@@ -22,6 +22,20 @@
    - O polegar manda: navegação e ação primária nos 40% de baixo.
    - Um número herói por tela.
    - Alvo de toque nunca abaixo de 44px.
+
+   Densidade (a partir do Planejamento, out/2026 — vale pra tela nova):
+
+   - Até três métricas secundárias na primeira dobra.
+   - Uma visualização principal por seção.
+   - Lista grande sempre resumida; o resto atrás de "Ver detalhes"/"Ver todos".
+   - Ação avançada em folha (bottom sheet) ou tela secundária.
+   - O mesmo número não aparece em dois componentes vizinhos.
+   - Fórmula inteira não fica na tela: vai pra um "Ver cálculo".
+   - O estado normal não ganha marca: só a exceção (estimado, vencido) tem
+     palavra. Nada de pílula colorida por linha.
+   - Nenhum termo interno na tela (nome de tabela, de campo, de estado).
+   - Em 3 segundos a pessoa tem que achar o número que responde a pergunta
+     da tela; o resto pode exigir toque.
    =========================================================================== */
 
 :root {
@@ -155,6 +169,11 @@ h1, h2, h3 { margin: 0; letter-spacing: -0.01em; line-height: 1.25; font-weight:
   max-width: 640px;
   width: 100%;
   margin: 0 auto;
+}
+
+/* Sem o botão +, o fim da página só precisa livrar a barra de abas. */
+.main.sem-fab {
+  padding-bottom: calc(var(--tab-h) + var(--s7) + env(safe-area-inset-bottom));
 }
 
 /* ---------- Barra superior ----------
@@ -1077,104 +1096,154 @@ textarea { min-height: 76px; resize: vertical; }
 
 /* --------------------------------------------------------- Planejamento --- */
 
-/* ---------- A conta do mês ----------
-   Saldo + entradas − saídas = projetado − reservas = disponível, em linhas
-   com divisor. É uma conta que se confere de cabeça, então ela aparece como
-   conta: operador à esquerda, número à direita, total com fio mais forte. */
-.conta-plano { list-style: none; margin: var(--s4) 0 0; padding: 0; }
-.conta-plano li {
-  display: grid; grid-template-columns: 16px 1fr auto; align-items: baseline;
-  gap: var(--s2); min-height: 40px; padding: var(--s2) 0;
-  border-bottom: 1px solid var(--border-soft); font-size: var(--fs-body);
+/* Regra de densidade (vale pras telas novas do app): uma métrica herói por
+   tela, até três secundárias na primeira dobra, lista resumida com o detalhe
+   atrás de um toque, e nada de card onde divisor resolve. */
+
+.pagina-titulo {
+  font-size: var(--fs-title); font-weight: var(--w-bold);
+  margin: 0 0 var(--s1);
 }
-.conta-plano .op { color: var(--text-faint); font-weight: var(--w-medium); text-align: center; }
+
+/* O herói do planejamento: o número, o rótulo, duas linhas e o "ver cálculo". */
+.plano-hero { padding-bottom: 0; }
+/* As duas linhas embaixo do número são UM alvo de toque (abre o que entra e
+   o que sai): duas linhas de texto num botão de 52px, em vez de dois botões
+   de 44px empilhados. */
+.hero-linhas {
+  display: flex; flex-direction: column; gap: 2px; align-items: flex-start;
+  margin-top: var(--s3); padding: var(--s1) 0; background: none; border: 0;
+  text-align: left; color: var(--text-dim); font: inherit; cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+div.hero-linhas { cursor: default; }
+.hero-linhas > span { display: flex; align-items: baseline; gap: 6px; font-size: var(--fs-body); }
+button.hero-linhas > span:last-child::after { content: "›"; color: var(--text-faint); margin-left: 2px; }
+.hero-linhas b { color: var(--text); font-weight: var(--w-medium); }
+.plano-hero .link-seta { min-height: 40px; }
+.folha-grupo + .folha-grupo { margin-top: var(--s5); }
+.plano-acao { margin-top: var(--s5); }
+
+/* ---------- Lista compacta ----------
+   A linha padrão do planejamento: nome e legenda à esquerda, valor à direita,
+   divisor embaixo. Sem fundo e sem caixa — a mesma linguagem das faturas do
+   Início, e não a lista com avatar dos lançamentos. */
+.lista-compacta { list-style: none; margin: 0; padding: 0; }
+.lista-compacta > li { border-bottom: 1px solid var(--border-soft); }
+.lista-compacta > li:last-child { border-bottom: 0; }
+.lista-compacta > li > button,
+.lista-compacta > li > a,
+.lista-compacta > li > div {
+  display: flex; align-items: center; gap: var(--s3);
+  width: 100%; min-height: 48px; padding: 6px 0;
+  background: none; border: 0; text-align: left; color: inherit; font: inherit;
+  -webkit-tap-highlight-color: transparent;
+}
+.lista-compacta > li > button, .lista-compacta > li > a { cursor: pointer; }
+.lista-compacta > li > button:active, .lista-compacta > li > a:active { background: var(--surface); }
+.lista-compacta .esq { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.lista-compacta .n {
+  font-size: var(--fs-body); color: var(--text);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.lista-compacta .d { font-size: var(--fs-caption); color: var(--text-faint); line-height: 1.4; }
+.lista-compacta .d.neg { color: var(--neg); }
+.lista-compacta .v { flex: none; text-align: right; font-weight: var(--w-medium); }
+.lista-compacta .v small {
+  display: block; font-size: var(--fs-caption); font-weight: var(--w-regular); color: var(--text-faint);
+}
+.lista-compacta .v s { color: var(--text-faint); font-weight: var(--w-regular); margin-right: 6px; }
+.lista-compacta .v.apagado { color: var(--text-faint); font-weight: var(--w-regular); }
+.lista-compacta .seta { flex: none; color: var(--text-faint); }
+.lista-compacta .tirar {
+  flex: none; width: 36px; min-height: 36px; border: 0; background: none;
+  color: var(--text-faint); cursor: pointer; border-radius: var(--r-pill);
+}
+.lista-compacta .tirar:active { background: var(--surface-2); }
+.lista-compacta .com-campo { gap: var(--s2); }
+.lista-compacta .com-campo .saldo-input { width: 116px; flex: none; }
+.lista-compacta .com-campo .saldo-input input { min-height: 40px; padding: var(--s2); text-align: right; font-size: var(--fs-body); }
+.plano-mais { margin-top: var(--s6); }
+
+/* Certeza e situação: uma palavra com um marcador. Cheio é confirmado, vazado
+   é estimado, tracejado é hipótese. Sem pílula e sem cor — só o vencido ganha
+   tom, porque pede ação. */
+.situ { display: inline-flex; align-items: center; gap: 4px; }
+.situ.confirmado::before, .situ.estimado::before, .situ.hipotetico::before {
+  content: ""; width: 6px; height: 6px; border-radius: var(--r-pill); flex: none;
+  background: var(--text-faint);
+}
+.situ.estimado::before { background: transparent; border: 1px solid var(--text-faint); width: 5px; height: 5px; }
+.situ.hipotetico::before { background: transparent; border: 1px dashed var(--text-faint); width: 5px; height: 5px; }
+.situ.vencido { color: var(--neg); }
+
+.ok { color: var(--pos); }
+.neg { color: var(--neg); }
+.nota.neg { color: var(--neg); }
+
+/* ---------- Telas secundárias ---------- */
+.cabecalho-sec { margin-bottom: var(--s4); }
+.cabecalho-sec .voltar {
+  display: inline-flex; align-items: center; min-height: 36px; padding: 0;
+  background: none; border: 0; cursor: pointer;
+  font-size: var(--fs-small); font-weight: var(--w-medium); color: var(--text-dim);
+}
+.cabecalho-sec h1 { font-size: var(--fs-title); font-weight: var(--w-bold); text-transform: none; }
+.cabecalho-sec h1::first-letter { text-transform: uppercase; }
+.acoes-linha { display: flex; flex-wrap: wrap; gap: var(--s2); margin: var(--s3) 0; }
+
+/* Dentro das folhas: o número do assunto em cima, uma legenda, e só. */
+.folha-total { display: flex; flex-direction: column; gap: 2px; margin-bottom: var(--s3); }
+.folha-total b { font-size: var(--fs-metric); font-weight: var(--w-bold); letter-spacing: -0.02em; }
+.folha-total span { font-size: var(--fs-small); color: var(--text-dim); }
+.pergunta { margin: 0 0 var(--s2); font-size: var(--fs-body); font-weight: var(--w-medium); }
+.rotulo-secao {
+  font-size: var(--fs-caption); font-weight: var(--w-medium); color: var(--text-faint);
+  text-transform: uppercase; letter-spacing: 0.06em; margin: var(--s4) 0 var(--s2);
+}
+.link-inline {
+  background: none; border: 0; padding: 0; cursor: pointer; font: inherit;
+  color: var(--text-dim); text-decoration: underline; text-underline-offset: 2px;
+}
+
+/* "Ver detalhes" que abre no lugar: o resumo fica, o resto aparece embaixo. */
+.detalhe { margin-top: var(--s3); }
+.detalhe > summary {
+  list-style: none; cursor: pointer; min-height: 40px; display: flex; align-items: center; gap: 6px;
+  font-size: var(--fs-small); font-weight: var(--w-medium); color: var(--text-dim);
+}
+.detalhe > summary::-webkit-details-marker { display: none; }
+.detalhe > summary::after { content: "▾"; font-size: var(--fs-caption); color: var(--text-faint); }
+.detalhe[open] > summary::after { content: "▴"; }
+
+/* ---------- A conta (na folha "Ver cálculo") ---------- */
+.conta-plano { list-style: none; margin: 0; padding: 0; }
+.conta-plano li {
+  display: grid; grid-template-columns: 14px 1fr auto; align-items: baseline;
+  gap: var(--s2); padding: var(--s2) 0; border-bottom: 1px solid var(--border-soft);
+}
+.conta-plano .op { color: var(--text-faint); text-align: center; }
 .conta-plano .rot { color: var(--text-dim); min-width: 0; }
 .conta-plano .rot small { display: block; font-size: var(--fs-caption); color: var(--text-faint); }
 .conta-plano .v { font-weight: var(--w-medium); text-align: right; }
+.conta-plano .v.neg { color: var(--neg); }
+.conta-plano li.parcial .rot, .conta-plano li.parcial .v { color: var(--text); }
 .conta-plano li.total { border-bottom: 0; border-top: 1px solid var(--border); }
 .conta-plano li.total .rot { color: var(--text); font-weight: var(--w-bold); }
 .conta-plano li.total .v { font-weight: var(--w-bold); font-size: var(--fs-title); }
-.conta-plano li.parcial .rot, .conta-plano li.parcial .v { color: var(--text); }
-.conta-plano button.rot {
-  background: none; border: 0; padding: 0; text-align: left; cursor: pointer; font: inherit;
-}
+.conta-plano.compacta { margin: var(--s2) 0; }
 
-/* ---------- Grau de certeza ----------
-   Sem cor: a forma do marcador diz. Cheio é confirmado, vazado é estimado,
-   tracejado é hipótese. A palavra vai junto — o marcador sozinho seria
-   código pra decorar. */
-.selo {
-  display: inline-flex; align-items: center; gap: 5px;
-  font-size: var(--fs-caption); color: var(--text-faint); white-space: nowrap;
-}
-.selo::before {
-  content: ""; width: 8px; height: 8px; border-radius: var(--r-pill); flex: none;
-  background: var(--text-dim);
-}
-.selo.estimado::before { background: transparent; border: 1.5px solid var(--text-dim); width: 7px; height: 7px; }
-.selo.hipotetico::before { background: transparent; border: 1.5px dashed var(--text-dim); width: 7px; height: 7px; }
-.selo.vencido { color: var(--neg); }
-.selo.vencido::before { background: var(--neg); }
-.selo.pago { color: var(--pos); }
-.selo.pago::before { background: var(--pos); }
+/* ---------- Próximos meses: um bloco por mês, separados por fio ---------- */
+.mes-bloco { padding: var(--s5) 0 var(--s3); border-bottom: 1px solid var(--border-soft); }
+.mes-bloco:last-child { border-bottom: 0; }
+.mes-cab { display: flex; align-items: baseline; justify-content: space-between; gap: var(--s3); }
+.mes-cab h2 { font-size: var(--fs-title); text-transform: capitalize; }
+.mes-cab span { font-size: var(--fs-caption); color: var(--text-faint); }
+.mes-numero { margin-top: var(--s2); font-size: var(--fs-small); color: var(--text-dim); }
+.mes-numero b { font-size: var(--fs-metric); font-weight: var(--w-bold); color: var(--text); letter-spacing: -0.02em; margin-right: 4px; }
+.mes-legenda { font-size: var(--fs-caption); color: var(--text-faint); margin: 2px 0 var(--s2); }
 
-/* Linha de item do plano: o valor que conta à direita; pago fica apagado. */
-.list .row.plano-row { cursor: default; }
-.list .row.plano-row.pago .t, .list .row.plano-row.pago .amt { color: var(--text-faint); }
-.list .row.plano-row.pago .amt { text-decoration: line-through; text-decoration-thickness: 1px; }
-.list .row.plano-row .mid .s { display: flex; flex-wrap: wrap; align-items: center; gap: 2px var(--s2); white-space: normal; }
-.list button.row.plano-row { cursor: pointer; }
-.plano-row .riscado { text-decoration: line-through; color: var(--text-faint); font-weight: var(--w-regular); margin-right: 4px; }
-
-/* ---------- Cenário escolhido ---------- */
-.cenarios { margin-bottom: var(--s3); }
-.cenarios .chip-linha button.novo { border-style: dashed; color: var(--text-dim); }
-.cenario-info {
-  display: flex; align-items: center; justify-content: space-between; gap: var(--s3);
-  font-size: var(--fs-small); color: var(--text-dim); margin-bottom: var(--s2);
-}
-
-/* ---------- Próximos meses ----------
-   Um mês por bloco, separado por fio. Fechado mostra os três números que
-   respondem "quanto já devo"; aberto lista o que compõe. */
-.mes-plano { border-bottom: 1px solid var(--border-soft); }
-.mes-plano:first-of-type { border-top: 1px solid var(--border-soft); }
-.mes-plano > summary {
-  list-style: none; cursor: pointer; padding: var(--s3) 0; display: grid; gap: var(--s2);
-  -webkit-tap-highlight-color: transparent;
-}
-.mes-plano > summary::-webkit-details-marker { display: none; }
-.mes-plano .cab { display: flex; align-items: baseline; justify-content: space-between; gap: var(--s3); }
-.mes-plano .cab .n { font-size: var(--fs-title); font-weight: var(--w-bold); text-transform: capitalize; }
-.mes-plano .cab .n::after { content: " ▾"; font-size: var(--fs-caption); color: var(--text-faint); }
-.mes-plano[open] .cab .n::after { content: " ▴"; }
-.mes-plano .cab .p { font-size: var(--fs-small); color: var(--text-dim); text-align: right; }
-.mes-plano .cab .p b { color: var(--text); font-weight: var(--w-medium); }
-.mes-plano .tres { display: grid; grid-template-columns: repeat(3, 1fr); gap: var(--s2); }
-.mes-plano .tres div { min-width: 0; }
-.mes-plano .tres .r { font-size: var(--fs-caption); color: var(--text-faint); }
-.mes-plano .tres .v { font-size: var(--fs-body); font-weight: var(--w-bold); }
-.mes-plano .tres .v.zero { color: var(--text-faint); font-weight: var(--w-medium); }
-.mes-plano .origens { font-size: var(--fs-caption); color: var(--text-faint); }
-.mes-plano .corpo { padding-bottom: var(--s4); }
-
-/* ---------- Cronograma ---------- */
-.cronograma { list-style: none; margin: 0; padding: 0; }
-.cronograma li {
-  display: grid; grid-template-columns: 52px 1fr auto; align-items: center; gap: var(--s3);
-  min-height: 52px; padding: var(--s2) 0; border-bottom: 1px solid var(--border-soft);
-}
-.cronograma li:last-child { border-bottom: 0; }
-.cronograma .n { font-size: var(--fs-small); font-weight: var(--w-medium); color: var(--text-dim); }
-.cronograma .d { font-size: var(--fs-body); }
-.cronograma .d small { display: block; font-size: var(--fs-caption); color: var(--text-faint); }
-.cronograma .fim { display: grid; justify-items: end; gap: 2px; }
-.cronograma .fim b { font-weight: var(--w-medium); }
-.cronograma li.passada .d, .cronograma li.passada .fim b { color: var(--text-faint); }
-.cronograma button.d { background: none; border: 0; padding: 0; text-align: left; cursor: pointer; font: inherit; color: inherit; }
-
-/* Ações de um item numa folha: uma por linha, alvo inteiro, a principal em
-   dourado. Melhor que seis botões lado a lado num celular. */
+/* Ações de um item numa folha: uma por linha, a principal em dourado. */
 .acoes { display: grid; gap: var(--s2); margin-top: var(--s4); }
 .acoes .btn { justify-content: flex-start; text-align: left; }
 .acoes .btn small { display: block; font-size: var(--fs-caption); font-weight: var(--w-regular); color: inherit; opacity: 0.75; }
@@ -1187,17 +1256,12 @@ textarea { min-height: 76px; resize: vertical; }
   width: 100%; text-align: left; cursor: pointer; font: inherit; color: inherit;
 }
 .sugestao + .sugestao { margin-top: var(--s2); }
-.sugestao.on { border-color: var(--gold-line); }
 .sugestao .t { font-weight: var(--w-medium); display: flex; justify-content: space-between; gap: var(--s3); }
 .sugestao .s { font-size: var(--fs-caption); color: var(--text-faint); }
 .sugestao .m { font-size: var(--fs-caption); color: var(--text-dim); }
 
-/* Contador de status da conferência, em frase. */
-.contagem { display: flex; flex-wrap: wrap; gap: var(--s1) var(--s3); font-size: var(--fs-small); color: var(--text-dim); margin-top: var(--s2); }
-.contagem b { color: var(--text); font-weight: var(--w-medium); }
-
-/* Interruptor de conta no planejamento. */
-.conta-toggle { display: flex; align-items: center; gap: var(--s3); width: 100%; }
+/* Interruptor de conta no saldo considerado. */
+.conta-toggle { display: flex; align-items: center; gap: var(--s3); flex: 1; min-width: 0; cursor: pointer; }
 .conta-toggle input { width: 22px; height: 22px; min-height: 0; accent-color: var(--gold); flex: none; }
 
 /* ================================================================ Desktop ==
@@ -1233,10 +1297,15 @@ textarea { min-height: 76px; resize: vertical; }
 
   .tabbar { display: none; }
   .appbar { padding-top: var(--s3); padding-bottom: var(--s3); }
-  .main { padding: var(--s6) var(--s7) var(--s8); max-width: 880px; margin: 0; }
+  .main, .main.sem-fab { padding: var(--s6) var(--s7) var(--s8); max-width: 880px; margin: 0; }
   .fab { right: var(--s7); bottom: var(--s7); }
 
   .hero .big { font-size: 40px; }
+
+  /* Planejamento: resumo | simulações e próximos meses. Duas colunas de
+     leitura, não um painel: cada uma continua sendo uma lista. */
+  .plano-home { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: var(--s8); align-items: start; }
+  .plano-home .plano-col > .sec-title:first-child { margin-top: 0; }
 
   /* No desktop o modal volta a ser diálogo centralizado. */
   .overlay { justify-content: center; align-items: center; padding: var(--s5); }

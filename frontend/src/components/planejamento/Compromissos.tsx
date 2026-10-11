@@ -4,7 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 import Modal from "../Modal";
 import CompromissoForm from "./CompromissoForm";
 import ReservaForm from "./ReservaForm";
-import { Selo } from "./comum";
+import { Cabecalho, Linha } from "./comum";
 import {
   useCategories,
   useCommitment,
@@ -20,8 +20,8 @@ import { useAuth } from "../../lib/auth";
 import { ApiError, transactionsApi } from "../../lib/api";
 import { toYm } from "../../lib/period";
 import { formatDate, formatDiaMes, formatMoney, formatYm, parseMoney, todayIso } from "../../lib/format";
-import { fundoDaCor } from "../../lib/paleta";
 import {
+  CERTEZA_LABEL,
   OCORRENCIA_LABEL,
   type Commitment,
   type CommitmentDetail,
@@ -33,10 +33,11 @@ const PERIODO_LABEL: Record<number, string> = {
   1: "mensal", 2: "bimestral", 3: "trimestral", 6: "semestral", 12: "anual",
 };
 
-/** Os compromissos fora do cartão e as reservas.
+/** Compromissos fora do cartão e o dinheiro reservado.
  *
- *  O compromisso aberto mora na URL (?id=), como a fatura aberta em Faturas:
- *  o "Próximos meses" linka direto pra ele, e o F5 não perde o lugar. */
+ *  Lista curta: nome, o próximo passo e o valor. Banco, entrada, valor total e
+ *  o cronograma inteiro moram no detalhe de cada um (?id=), que é pra onde a
+ *  visão de próximos meses linka. */
 export default function Compromissos() {
   const [params, setParams] = useSearchParams();
   const abertoId = Number(params.get("id")) || null;
@@ -64,52 +65,68 @@ export default function Compromissos() {
     return <Detalhe id={abertoId} podeEscrever={podeEscrever} onVoltar={() => abrir(null)} />;
   }
 
-  if (isLoading) return <div className="skel" style={{ height: 260, borderRadius: "var(--r)" }} />;
-  if (error) return <div className="error-box">{(error as ApiError).message}</div>;
-
-  const ativos = (compromissos ?? []).filter((c) => c.status === "ativo");
+  const lista = compromissos ?? [];
+  const ativos = lista.filter((c) => c.status === "ativo");
   const aPagar = ativos.filter((c) => c.direction === "saida");
   const aReceber = ativos.filter((c) => c.direction === "entrada");
-  const encerrados = (compromissos ?? []).filter((c) => c.status !== "ativo");
-  const reservasAtivas = (reservas ?? []).filter((r) => r.status === "ativa");
-  const reservasPassadas = (reservas ?? []).filter((r) => r.status !== "ativa");
+  const encerrados = lista.filter((c) => c.status !== "ativo");
+  const ativas = (reservas ?? []).filter((r) => r.status === "ativa");
+  const passadas = (reservas ?? []).filter((r) => r.status !== "ativa");
+  const porId = new Map(lista.map((c) => [c.id, c]));
 
   return (
     <>
+      <Cabecalho titulo="Compromissos e reservas" voltar="Planejamento" voltarPara="/planejamento" />
       {podeEscrever && (
-        <div className="row2">
-          <button className="btn btn-primary" onClick={() => setCriando(true)}>+ Compromisso</button>
-          <button className="btn" onClick={() => setReservando(true)}>+ Reserva</button>
+        <div className="acoes-linha">
+          <button className="btn btn-sm" onClick={() => setCriando(true)}>+ Compromisso</button>
+          <button className="btn btn-sm" onClick={() => setReservando(true)}>+ Reserva</button>
         </div>
       )}
 
-      <Grupo titulo="A pagar" vazio="Nenhum compromisso fora do cartão. Financiamento, parcelado direto e contas recorrentes entram aqui; o cartão já está nas faturas.">
-        {aPagar.map((c) => <LinhaCompromisso key={c.id} c={c} onClick={() => abrir(c.id)} />)}
-      </Grupo>
+      {isLoading && <div className="skel" style={{ height: 200 }} />}
+      {error && <div className="error-box">{(error as ApiError).message}</div>}
 
-      {aReceber.length > 0 && (
-        <Grupo titulo="A receber">
-          {aReceber.map((c) => <LinhaCompromisso key={c.id} c={c} onClick={() => abrir(c.id)} />)}
-        </Grupo>
+      <div className="sec-title"><h2>A pagar</h2></div>
+      {aPagar.length === 0 ? (
+        <p className="hint">Nenhum. Financiamento, parcelado direto e conta recorrente entram aqui; o cartão já está nas faturas.</p>
+      ) : (
+        <ul className="lista-compacta">
+          {aPagar.map((c) => <LinhaCompromisso key={c.id} c={c} onClick={() => abrir(c.id)} />)}
+        </ul>
       )}
 
-      <Grupo titulo="Reservas" vazio="Nenhum dinheiro separado.">
-        {reservasAtivas.map((r) => (
-          <LinhaReserva key={r.id} r={r} onClick={podeEscrever ? () => setReservaAberta(r) : undefined} />
-        ))}
-      </Grupo>
+      {aReceber.length > 0 && (
+        <>
+          <div className="sec-title"><h2>A receber</h2></div>
+          <ul className="lista-compacta">
+            {aReceber.map((c) => <LinhaCompromisso key={c.id} c={c} onClick={() => abrir(c.id)} />)}
+          </ul>
+        </>
+      )}
 
-      {(encerrados.length > 0 || reservasPassadas.length > 0) && (
-        <details style={{ marginTop: "var(--s5)" }}>
-          <summary className="grupo-rotulo" style={{ cursor: "pointer" }}>
-            Encerrados, quitados e reservas cumpridas ({encerrados.length + reservasPassadas.length})
-          </summary>
-          <div className="list">
+      <div className="sec-title"><h2>Reservado</h2></div>
+      {ativas.length === 0 ? (
+        <p className="hint">Nenhum dinheiro separado.</p>
+      ) : (
+        <ul className="lista-compacta">
+          {ativas.map((r) => (
+            <LinhaReserva key={r.id} r={r} reservas={ativas} compromisso={r.commitment_id ? porId.get(r.commitment_id) : undefined}
+              onClick={podeEscrever ? () => setReservaAberta(r) : undefined} />
+          ))}
+        </ul>
+      )}
+
+      {(encerrados.length > 0 || passadas.length > 0) && (
+        <details className="detalhe">
+          <summary>Encerrados e reservas cumpridas ({encerrados.length + passadas.length})</summary>
+          <ul className="lista-compacta">
             {encerrados.map((c) => <LinhaCompromisso key={c.id} c={c} onClick={() => abrir(c.id)} />)}
-            {reservasPassadas.map((r) => (
-              <LinhaReserva key={`r${r.id}`} r={r} onClick={podeEscrever ? () => setReservaAberta(r) : undefined} />
+            {passadas.map((r) => (
+              <Linha key={`r${r.id}`} rotulo={r.description} legenda={r.status} valor={formatMoney(r.amount)}
+                onClick={podeEscrever ? () => setReservaAberta(r) : undefined} />
             ))}
-          </div>
+          </ul>
         </details>
       )}
 
@@ -120,75 +137,51 @@ export default function Compromissos() {
   );
 }
 
-function Grupo({ titulo, vazio, children }: { titulo: string; vazio?: string; children: React.ReactNode[] }) {
-  return (
-    <>
-      <div className="sec-title"><h2>{titulo}</h2></div>
-      {children.length === 0 ? (
-        vazio ? <div className="hint">{vazio}</div> : null
-      ) : (
-        <div className="list">{children}</div>
-      )}
-    </>
-  );
-}
-
-function resumoDoCompromisso(c: Commitment): string {
-  const partes: string[] = [];
-  if (c.kind === "parcelado") {
-    partes.push(c.total_count === 1 ? "conta única" : `${c.paid_count}/${c.total_count} pagas`);
-  } else {
-    partes.push(PERIODO_LABEL[c.interval_months] ?? `a cada ${c.interval_months} meses`);
-  }
-  if (c.status !== "ativo") partes.push(c.status);
-  else if (c.next) partes.push(`${c.direction === "entrada" ? "próxima" : "próximo"} ${formatDiaMes(c.next.due_date)}`);
-  if (c.institution) partes.push(c.institution);
-  return partes.join(" · ");
-}
-
 function LinhaCompromisso({ c, onClick }: { c: Commitment; onClick: () => void }) {
+  const partes: string[] = [];
+  if (c.overdue_count > 0) partes.push(`${c.overdue_count} vencida${c.overdue_count > 1 ? "s" : ""}`);
+  else if (c.status !== "ativo") partes.push(c.status);
+  else if (c.next) partes.push(`${c.next.label ? `${c.next.label} · ` : ""}${formatDiaMes(c.next.due_date)}`);
+  if (c.kind === "recorrente") partes.push(PERIODO_LABEL[c.interval_months] ?? `a cada ${c.interval_months} meses`);
+  if (!c.confirmed) partes.push(CERTEZA_LABEL.estimado);
   return (
-    <button className="row plano-row" onClick={onClick}>
-      <div className="avatar" style={{ background: fundoDaCor(c.color, 22) }}>{c.icon}</div>
-      <div className="mid">
-        <div className="t">{c.description}</div>
-        <div className="s">
-          <Selo certeza={c.confirmed ? "confirmado" : "estimado"} situacao={c.overdue_count > 0 ? "vencido" : undefined}
-            entrada={c.direction === "entrada"} />
-          <span>{resumoDoCompromisso(c)}</span>
-        </div>
-      </div>
-      <div className={`amt tnum ${c.direction === "entrada" ? "pos" : ""}`}>
-        {formatMoney(c.amount)}
-        {c.overdue_count > 0 && <span className="sub">{c.overdue_count} vencida{c.overdue_count > 1 ? "s" : ""}</span>}
-      </div>
-    </button>
+    <Linha
+      rotulo={c.description}
+      legenda={partes.join(" · ")}
+      tom={c.overdue_count > 0 ? "neg" : undefined}
+      valor={`${c.direction === "entrada" ? "+" : ""}${formatMoney(c.amount)}`}
+      onClick={onClick}
+    />
   );
 }
 
-function LinhaReserva({ r, onClick }: { r: Provision; onClick?: () => void }) {
-  const corpo = (
-    <>
-      <div className="avatar avatar-fatura" aria-hidden>📌</div>
-      <div className="mid">
-        <div className="t">{r.description}</div>
-        <div className="s">
-          <span className={`selo ${r.status === "ativa" ? "confirmado" : "estimado"}`}>
-            {r.status === "ativa" ? "reservada" : r.status}
-          </span>
-          {r.occurrence_due && <span>pra {formatDiaMes(r.occurrence_due)}</span>}
-          {!r.occurrence_due && r.target_date && <span>até {formatDiaMes(r.target_date)}</span>}
-          <span>desde {formatDiaMes(r.created_on)}</span>
-        </div>
-      </div>
-      <div className="amt tnum">{formatMoney(r.amount)}</div>
-    </>
-  );
-  return onClick ? (
-    <button className="row plano-row" onClick={onClick}>{corpo}</button>
-  ) : (
-    <div className="row plano-row">{corpo}</div>
-  );
+/** "R$ 618 de R$ 618 reservado · ✓ coberto" — ou quanto ainda falta. */
+function LinhaReserva({
+  r,
+  reservas,
+  compromisso,
+  onClick,
+}: {
+  r: Provision;
+  reservas: Provision[];
+  compromisso?: Commitment;
+  onClick?: () => void;
+}) {
+  let legenda: React.ReactNode = r.target_date ? `objetivo até ${formatDiaMes(r.target_date)}` : "objetivo";
+  if (compromisso && r.commitment_no != null) {
+    const total = reservas
+      .filter((x) => x.commitment_id === r.commitment_id && x.commitment_no === r.commitment_no)
+      .reduce((s, x) => s + x.amount, 0);
+    const falta = Math.max(compromisso.amount - total, 0);
+    legenda = (
+      <>
+        {formatMoney(total)} de {formatMoney(compromisso.amount)}
+        {r.occurrence_due && <> · vence {formatDiaMes(r.occurrence_due)}</>} ·{" "}
+        {falta < 0.005 ? <span className="ok">✓ coberto</span> : `faltam ${formatMoney(falta)}`}
+      </>
+    );
+  }
+  return <Linha rotulo={r.description} legenda={legenda} valor={formatMoney(r.amount)} onClick={onClick} />;
 }
 
 // ---------- O compromisso por dentro ----------
@@ -204,59 +197,43 @@ function Detalhe({ id, podeEscrever, onVoltar }: { id: number; podeEscrever: boo
     if (error && (error as ApiError).status === 404) onVoltar();
   }, [error, onVoltar]);
 
-  if (isLoading) return <div className="skel" style={{ height: 320, borderRadius: "var(--r)" }} />;
+  if (isLoading) return <div className="skel" style={{ height: 320 }} />;
   if (error) return <div className="error-box">{(error as ApiError).message}</div>;
   if (!c) return null;
 
   const hoje = todayIso();
-  // Parcelado longo: abre nas próximas 12, com o resto a um toque.
+  // Abre no que interessa agora: a próxima em aberto, com duas antes de contexto.
   const inicio = Math.max(0, c.schedule.findIndex((o) => o.due_date >= hoje || o.status === "vencida") - 2);
-  const visiveis = todas ? c.schedule : c.schedule.slice(inicio, inicio + 12);
+  const visiveis = todas ? c.schedule : c.schedule.slice(inicio, inicio + 6);
   const entrada = c.direction === "entrada";
+  const multiplas = c.kind === "parcelado" && c.total_count != null && c.total_count > 1;
 
   return (
     <>
-      <button className="btn btn-ghost btn-sm" onClick={onVoltar} style={{ marginBottom: "var(--s3)" }}>
-        ‹ Compromissos
-      </button>
+      <div className="cabecalho-sec">
+        <button type="button" className="voltar" onClick={onVoltar}>‹ Compromissos</button>
+        <h1>{c.description}</h1>
+      </div>
 
-      <section className="hero">
+      <section className="hero plano-hero">
+        <div className="big tnum">{multiplas ? `${c.total_count} × ` : ""}{formatMoney(c.amount)}</div>
         <div className="rot">
-          {c.description}
-          {c.institution && ` · ${c.institution}`}
-        </div>
-        <div className="big tnum">
-          {c.kind === "parcelado" && c.total_count && c.total_count > 1 ? `${c.total_count} × ` : ""}
-          {formatMoney(c.amount)}
-        </div>
-        <div className="delta">
-          <Selo certeza={c.confirmed ? "confirmado" : "estimado"} />
-          <span>
-            {c.kind === "parcelado"
-              ? `1ª em ${formatDate(c.first_due)}`
-              : `${PERIODO_LABEL[c.interval_months] ?? ""} desde ${formatDate(c.first_due)}`}
-            {c.end_date && ` · até ${formatDate(c.end_date)}`}
-            {c.cancelled_on && ` · cancelado em ${formatDate(c.cancelled_on)}`}
-          </span>
+          {c.institution ? `${c.institution} · ` : ""}
+          {c.kind === "parcelado" ? `1ª em ${formatDate(c.first_due)}` : `${PERIODO_LABEL[c.interval_months] ?? ""} desde ${formatDate(c.first_due)}`}
+          {!c.confirmed && " · estimado"}
+          {c.cancelled_on && ` · cancelado em ${formatDate(c.cancelled_on)}`}
         </div>
       </section>
 
       <div className="metricas">
-        {c.kind === "parcelado" ? (
-          <>
-            <div className="metrica">
-              <div className="rot">{entrada ? "Recebidas" : "Pagas"}</div>
-              <div className="val tnum">{c.paid_count}/{c.total_count}</div>
-            </div>
-            <div className="metrica">
-              <div className="rot">Restam</div>
-              <div className="val tnum">{c.remaining_count}</div>
-            </div>
-          </>
-        ) : (
+        <div className="metrica">
+          <div className="rot">{entrada ? "Recebidas" : "Pagas"}</div>
+          <div className="val tnum">{multiplas ? `${c.paid_count}/${c.total_count}` : c.paid_count}</div>
+        </div>
+        {multiplas && (
           <div className="metrica">
-            <div className="rot">{entrada ? "Recebidas" : "Pagas"}</div>
-            <div className="val tnum">{c.paid_count}</div>
+            <div className="rot">Restam</div>
+            <div className="val tnum">{c.remaining_count}</div>
           </div>
         )}
         <div className="metrica">
@@ -264,69 +241,47 @@ function Detalhe({ id, podeEscrever, onVoltar }: { id: number; podeEscrever: boo
           <div className={`val tnum${c.next ? "" : " fraco"}`}>{c.next ? formatDiaMes(c.next.due_date) : "—"}</div>
         </div>
       </div>
+      {c.overdue_count > 0 && (
+        <p className="nota neg">{c.overdue_count} vencida{c.overdue_count > 1 ? "s" : ""} sem baixa · {formatMoney(c.overdue_amount)}</p>
+      )}
 
-      <ul className="conta-plano">
-        {c.remaining_nominal != null && c.remaining_nominal > 0 && (
-          <li>
-            <span className="op" aria-hidden />
-            <span className="rot">
-              Soma das parcelas que faltam
-              <small>Nominal: não é o saldo devedor do banco, que desconta juros na quitação.</small>
-            </span>
-            <b className="v tnum">{formatMoney(c.remaining_nominal)}</b>
-          </li>
-        )}
-        {c.overdue_count > 0 && (
-          <li>
-            <span className="op" aria-hidden />
-            <span className="rot" style={{ color: "var(--neg)" }}>Vencidas sem baixa ({c.overdue_count})</span>
-            <b className="v tnum">{formatMoney(c.overdue_amount)}</b>
-          </li>
-        )}
-        {c.down_payment != null && (
-          <li>
-            <span className="op" aria-hidden />
-            <span className="rot">Entrada<small>informação — já é um lançamento à parte</small></span>
-            <b className="v tnum">{formatMoney(c.down_payment)}</b>
-          </li>
-        )}
-        {c.total_amount != null && (
-          <li>
-            <span className="op" aria-hidden />
-            <span className="rot">Valor total / financiado<small>informação — não entra em conta</small></span>
-            <b className="v tnum">{formatMoney(c.total_amount)}</b>
-          </li>
-        )}
-      </ul>
-      {c.note && <div className="hint" style={{ marginTop: "var(--s2)" }}>{c.note}</div>}
+      <details className="detalhe">
+        <summary>Detalhes do contrato</summary>
+        <ul className="lista-compacta">
+          {c.remaining_nominal != null && c.remaining_nominal > 0 && (
+            <Linha rotulo="Soma das parcelas que faltam" legenda="nominal — não é o saldo devedor do banco"
+              valor={formatMoney(c.remaining_nominal)} />
+          )}
+          {c.down_payment != null && <Linha rotulo="Entrada" legenda="já é um lançamento à parte" valor={formatMoney(c.down_payment)} />}
+          {c.total_amount != null && <Linha rotulo="Valor total / financiado" legenda="só informação" valor={formatMoney(c.total_amount)} />}
+          <Linha rotulo="Categoria" valor={c.category_name} />
+          {c.payment_hint && <Linha rotulo="Como paga" valor={c.payment_hint} />}
+        </ul>
+        {c.note && <p className="nota">{c.note}</p>}
+      </details>
 
       <div className="sec-title">
         <h2>Cronograma</h2>
         {podeEscrever && <button className="link" onClick={() => setEditando(true)}>Editar</button>}
       </div>
-      <ul className="cronograma">
+      <ul className="lista-compacta">
         {visiveis.map((o) => (
-          <li key={o.number} className={o.status === "paga" || o.status === "dispensada" || o.status === "cancelada" ? "passada" : ""}>
-            <span className="n">{o.label ?? formatYm(o.due_date.slice(0, 7))}</span>
-            <button className="d" onClick={() => setOcorrencia(o)}>
-              {formatDate(o.due_date)}
-              <small>
-                {o.status === "paga" && o.paid_date
-                  ? `${entrada ? "recebida" : "paga"} em ${formatDiaMes(o.paid_date)}`
-                  : o.status === "dispensada"
-                    ? `dispensada${o.skip_note ? ` · ${o.skip_note}` : ""}`
-                    : o.provisioned > 0
-                      ? `${formatMoney(o.provisioned)} reservado`
-                      : OCORRENCIA_LABEL[o.status]}
-              </small>
-            </button>
-            <span className="fim">
-              <b className="tnum">{formatMoney(o.paid_amount ?? o.amount)}</b>
-              <span className={`selo ${o.status === "paga" ? "pago" : o.status === "vencida" ? "vencido" : "estimado"}`}>
-                {o.status === "pendente" ? (entrada ? "a receber" : "a pagar") : OCORRENCIA_LABEL[o.status]}
-              </span>
-            </span>
-          </li>
+          <Linha
+            key={o.number}
+            rotulo={<>{o.label ? `${o.label} · ` : ""}{formatDate(o.due_date)}</>}
+            legenda={
+              o.status === "paga" && o.paid_date
+                ? `${entrada ? "recebida" : "paga"} em ${formatDiaMes(o.paid_date)}`
+                : o.status === "dispensada"
+                  ? `dispensada${o.skip_note ? ` · ${o.skip_note}` : ""}`
+                  : o.provisioned > 0
+                    ? `${formatMoney(o.provisioned)} reservado`
+                    : o.status === "pendente" ? undefined : OCORRENCIA_LABEL[o.status]
+            }
+            tom={o.status === "vencida" ? "neg" : undefined}
+            valor={formatMoney(o.paid_amount ?? o.amount)}
+            onClick={() => setOcorrencia(o)}
+          />
         ))}
       </ul>
       {!todas && c.schedule.length > visiveis.length && (
@@ -391,19 +346,14 @@ function OcorrenciaSheet({
   return (
     <Modal title={titulo} onClose={onClose}>
       <div className="m-body">
-        <div className="resumo-compra">
-          <div className="linha"><span>Vencimento</span><b>{formatDate(o.due_date)}</b></div>
-          <div className="linha"><span>Valor previsto</span><b className="tnum">{formatMoney(o.amount)}</b></div>
-          <div className="linha"><span>Situação</span><b>{OCORRENCIA_LABEL[o.status]}</b></div>
-          {o.paid_amount != null && (
-            <div className="linha">
-              <span>{entrada ? "Recebido" : "Pago"}</span>
-              <b className="tnum">{formatMoney(o.paid_amount)} em {formatDate(o.paid_date!)}</b>
-            </div>
-          )}
-          {o.provisioned > 0 && aberta && (
-            <div className="linha"><span>Reservado</span><b className="tnum">{formatMoney(o.provisioned)}</b></div>
-          )}
+        <div className="folha-total">
+          <b className="tnum">{formatMoney(o.paid_amount ?? o.amount)}</b>
+          <span>
+            {o.status === "paga" && o.paid_date
+              ? `${entrada ? "recebida" : "paga"} em ${formatDate(o.paid_date)}`
+              : `${OCORRENCIA_LABEL[o.status]} · vence ${formatDate(o.due_date)}`}
+            {o.provisioned > 0 && aberta && ` · ${formatMoney(o.provisioned)} reservado`}
+          </span>
         </div>
 
         {!podeEscrever && <p className="hint">Modo demonstração: dá pra ver, não alterar.</p>}

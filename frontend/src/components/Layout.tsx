@@ -92,7 +92,7 @@ export default function Layout() {
           </button>
         </header>
 
-        <main className="main">
+        <main className={`main${mostrarFab ? "" : " sem-fab"}`}>
           {sessao?.somenteLeitura && (
             <div className="aviso-demo">
               <b>Modo demonstração.</b> Você pode navegar por tudo, mas não

@@ -1,12 +1,12 @@
 import { useMemo, useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link } from "react-router-dom";
 import Modal from "../components/Modal";
 import ConfirmDialog from "../components/ConfirmDialog";
 import CategoryPicker from "../components/CategoryPicker";
 import Segmentado from "../components/Segmentado";
 import CompromissoForm from "../components/planejamento/CompromissoForm";
 import ReservaForm from "../components/planejamento/ReservaForm";
-import { nomeDoMes } from "../components/planejamento/comum";
+import { Cabecalho, Linha, nomeDoMes } from "../components/planejamento/comum";
 import { OPCOES_FINALIDADE } from "../lib/finalidade";
 import {
   useAddReconciliation,
@@ -34,83 +34,74 @@ import {
 
 /** Organizar o mês: revisar e aplicar, item a item.
  *
- *  Cada item é algo que talvez precise virar dado — "a entrada da moto já está
- *  lançada?", "o auxílio caiu?". Nada daqui entra em saldo, gasto ou
- *  planejamento enquanto você não decide. Não existe "importar tudo": o app
- *  mostra o que encontrou e o que parece corresponder, e cada criação é um
- *  toque seu. */
+ *  A lista é uma linha por item — o que é, uma pista curta e o valor. A
+ *  pergunta, as correspondências e as ações ficam na folha do item. Nada
+ *  daqui entra em saldo, gasto ou planejamento até o dono decidir. */
 
-const ICONE: Record<ReconciliationKind, string> = {
-  entrada: "↓", saida: "↑", obrigacao: "📄", reserva: "📌", saldo: "🏦", outro: "?",
-};
+type Filtro = "pendentes" | "resolvidos" | "ignorados" | "todos";
 
 export default function Organizar() {
-  const navigate = useNavigate();
   const { period, label } = usePeriod();
   const { sessao } = useAuth();
   const podeEscrever = !sessao?.somenteLeitura;
   const { data, isLoading, error } = useReconciliation(period);
+  const [filtro, setFiltro] = useState<Filtro>("pendentes");
   const [aberto, setAberto] = useState<number | null>(null);
   const [adicionando, setAdicionando] = useState(false);
 
   const grupos = useMemo(() => {
     const itens = data?.items ?? [];
     return {
-      pendentes: itens.filter((i) => i.status === "pendente" || i.link_missing),
-      confirmar: itens.filter((i) => i.status === "confirmar" && !i.link_missing),
+      pendentes: itens.filter((i) => i.status === "pendente" || i.status === "confirmar" || i.link_missing),
       resolvidos: itens.filter((i) => i.status === "resolvido" && !i.link_missing),
       ignorados: itens.filter((i) => i.status === "ignorado"),
+      todos: itens,
     };
   }, [data]);
 
   const item = data?.items.find((i) => i.id === aberto) ?? null;
-  const nome = nomeDoMes(period.year, period.month);
+  const lista = grupos[filtro];
 
   return (
     <>
-      <button className="btn btn-ghost btn-sm" onClick={() => navigate("/planejamento")} style={{ marginBottom: "var(--s3)" }}>
-        ‹ Planejamento
-      </button>
+      <Cabecalho titulo={`Organizar ${nomeDoMes(period.year, period.month)}`} voltar="Planejamento" voltarPara="/planejamento" />
 
-      <section className="hero">
-        <div className="rot">Organizar {nome}</div>
-        <div className="big tnum">{grupos.pendentes.length + grupos.confirmar.length}</div>
-        <div className="delta">
-          {grupos.pendentes.length + grupos.confirmar.length === 1 ? "item espera" : "itens esperam"} uma decisão sua
-        </div>
-        {data && (
-          <div className="contagem">
-            <span><b>{grupos.pendentes.length}</b> {grupos.pendentes.length === 1 ? "pendente" : "pendentes"}</span>
-            <span><b>{grupos.confirmar.length}</b> a confirmar</span>
-            <span><b>{grupos.resolvidos.length}</b> {grupos.resolvidos.length === 1 ? "resolvido" : "resolvidos"}</span>
-            <span><b>{grupos.ignorados.length}</b> {grupos.ignorados.length === 1 ? "ignorado" : "ignorados"}</span>
-          </div>
-        )}
-      </section>
+      {data && data.items.length > 0 && (
+        <Segmentado
+          rotulo="Filtro"
+          largo
+          valor={filtro}
+          aoEscolher={setFiltro}
+          opcoes={[
+            { valor: "pendentes", rotulo: `Pendentes ${grupos.pendentes.length}` },
+            { valor: "resolvidos", rotulo: `Resolvidos ${grupos.resolvidos.length}` },
+            { valor: "ignorados", rotulo: `Ignorados ${grupos.ignorados.length}` },
+            { valor: "todos", rotulo: "Todos" },
+          ]}
+        />
+      )}
+      <p className="nota">Nada desta lista entra no saldo ou no gasto até você decidir. "Parece" é sugestão, não vínculo.</p>
 
-      <div className="hint" style={{ marginTop: "var(--s3)" }}>
-        Nada desta lista entra no saldo, no gasto ou no planejamento até você decidir. "Parece"
-        é sugestão, não vínculo.
-      </div>
-
-      {isLoading && <div className="skel" style={{ height: 260, marginTop: "var(--s4)" }} />}
+      {isLoading && <div className="skel" style={{ height: 260 }} />}
       {error && <div className="error-box">{(error as ApiError).message}</div>}
 
       {data && data.items.length === 0 && (
         <div className="empty">
           <div className="big">🧾</div>
           <div className="tit">Nada pra organizar em {label}</div>
-          <div>Adicione o que você precisa conferir: um gasto que não lançou, um valor que não sabe se caiu.</div>
+          <div>Adicione o que precisa conferir: um gasto que não lançou, um valor que não sabe se caiu.</div>
         </div>
       )}
+      {data && data.items.length > 0 && lista.length === 0 && <p className="hint">Nenhum item aqui.</p>}
 
-      <Grupo titulo="Esperando você" itens={grupos.pendentes} onAbrir={setAberto} />
-      <Grupo titulo="Precisa confirmar" itens={grupos.confirmar} onAbrir={setAberto} />
-      <Grupo titulo="Resolvidos" itens={grupos.resolvidos} onAbrir={setAberto} fechado />
-      <Grupo titulo="Ignorados" itens={grupos.ignorados} onAbrir={setAberto} fechado />
+      {lista.length > 0 && (
+        <ul className="lista-compacta">
+          {lista.map((i) => <LinhaItem key={i.id} item={i} onClick={() => setAberto(i.id)} />)}
+        </ul>
+      )}
 
       {podeEscrever && (
-        <button className="btn btn-block" style={{ marginTop: "var(--s5)" }} onClick={() => setAdicionando(true)}>
+        <button className="btn btn-ghost btn-sm btn-block" style={{ marginTop: "var(--s3)" }} onClick={() => setAdicionando(true)}>
           + Adicionar item
         </button>
       )}
@@ -121,56 +112,33 @@ export default function Organizar() {
   );
 }
 
-function Grupo({
-  titulo,
-  itens,
-  onAbrir,
-  fechado = false,
-}: {
-  titulo: string;
-  itens: ReconciliationItem[];
-  onAbrir: (id: number) => void;
-  fechado?: boolean;
-}) {
-  if (itens.length === 0) return null;
-  const lista = (
-    <div className="list">
-      {itens.map((i) => <Linha key={i.id} item={i} onClick={() => onAbrir(i.id)} />)}
-    </div>
-  );
-  if (fechado) {
-    return (
-      <details style={{ marginTop: "var(--s5)" }}>
-        <summary className="grupo-rotulo" style={{ cursor: "pointer" }}>{titulo} ({itens.length})</summary>
-        {lista}
-      </details>
-    );
+/** Uma pista só, a mais útil: o vínculo, a sugestão, ou o tipo. */
+function LinhaItem({ item, onClick }: { item: ReconciliationItem; onClick: () => void }) {
+  const parece = item.candidates.find((c) => !c.used);
+  let legenda: string;
+  let tom: "neg" | undefined;
+  if (item.link_missing) {
+    legenda = "o vínculo foi apagado";
+    tom = "neg";
+  } else if (item.linked) {
+    legenda = `→ ${item.linked.description}`;
+  } else if (item.status === "ignorado") {
+    legenda = "ignorado";
+  } else if (item.status === "confirmar") {
+    legenda = "precisa confirmar";
+  } else if (parece) {
+    legenda = `parece: ${parece.description}`;
+  } else {
+    legenda = CONFERENCIA_TIPO_LABEL[item.kind];
   }
   return (
-    <>
-      <div className="sec-title"><h2>{titulo}</h2><span className="extra">{itens.length}</span></div>
-      {lista}
-    </>
-  );
-}
-
-function Linha({ item, onClick }: { item: ReconciliationItem; onClick: () => void }) {
-  const parece = item.candidates[0];
-  return (
-    <button className="row plano-row" onClick={onClick}>
-      <div className="avatar avatar-fatura" aria-hidden>{ICONE[item.kind]}</div>
-      <div className="mid">
-        <div className="t">{item.description}</div>
-        <div className="s">
-          <span>{CONFERENCIA_TIPO_LABEL[item.kind]}</span>
-          {item.link_missing && <span style={{ color: "var(--neg)" }}>o vínculo foi apagado</span>}
-          {item.linked && <span>→ {item.linked.description}</span>}
-          {!item.linked && parece && !parece.used && <span>parece: {parece.description}</span>}
-          {!item.linked && !parece && item.question && <span>{item.question}</span>}
-        </div>
-      </div>
-      <div className="amt tnum">{item.amount != null ? formatMoney(item.amount) : "—"}</div>
-    </button>
+    <Linha
+      rotulo={item.description}
+      legenda={legenda}
+      tom={tom}
+      valor={item.amount != null ? formatMoney(item.amount) : "—"}
+      onClick={onClick}
+    />
   );
 }
 
@@ -254,14 +222,17 @@ function ItemSheet({ item, podeEscrever, onClose }: { item: ReconciliationItem; 
   return (
     <Modal title={item.description} onClose={onClose}>
       <div className="m-body">
-        <div className="resumo-compra">
-          <div className="linha"><span>{CONFERENCIA_TIPO_LABEL[item.kind]}</span><b className="tnum">{item.amount != null ? formatMoney(item.amount) : "sem valor"}</b></div>
-          {item.date && <div className="linha"><span>Data</span><b>{formatDate(item.date)}</b></div>}
-          {item.suggestion && <div className="linha"><span>{item.suggestion}</span></div>}
-          {item.question && <div className="linha"><b style={{ textAlign: "left" }}>{item.question}</b></div>}
-          {item.category_hint && <div className="linha"><span>Categoria sugerida: {item.category_hint}</span></div>}
-          {item.note && <div className="linha"><span>Nota: {item.note}</span></div>}
+        <div className="folha-total">
+          <b className="tnum">{item.amount != null ? formatMoney(item.amount) : "sem valor"}</b>
+          <span>
+            {CONFERENCIA_TIPO_LABEL[item.kind]}
+            {item.date && <> · {formatDate(item.date)}</>}
+            {item.category_hint && <> · categoria sugerida: {item.category_hint}</>}
+          </span>
         </div>
+        {item.question && <p className="pergunta">{item.question}</p>}
+        {item.suggestion && <p className="nota" style={{ marginTop: 0 }}>{item.suggestion}</p>}
+        {item.note && <p className="nota">Nota: {item.note}</p>}
 
         {item.linked && (
           <div className="aviso-box">
@@ -283,7 +254,7 @@ function ItemSheet({ item, podeEscrever, onClose }: { item: ReconciliationItem; 
 
         {aberto && item.candidates.length > 0 && (
           <>
-            <div className="grupo-rotulo">Parece com</div>
+            <div className="rotulo-secao">Parece com</div>
             {item.candidates.map((c) => (
               <button key={`${c.kind}${c.id}`} className="sugestao" disabled={!podeEscrever || vincular.isPending || atualizar.isPending}
                 onClick={() => escolherCandidato(c)}>
@@ -325,12 +296,13 @@ function ItemSheet({ item, podeEscrever, onClose }: { item: ReconciliationItem; 
                 <span>Criar reserva<small>Separa o dinheiro sem gastar.</small></span>
               </button>
             )}
-            <button className="btn btn-ghost" onClick={() => setAcao("confirmar")}>
-              <span>Precisa confirmar<small>Deixa anotado o que falta saber.</small></span>
-            </button>
-            <button className="btn btn-ghost" onClick={() => setAcao("ignorar")}>
-              <span>Ignorar<small>Não é dado (cancelado, saldo, simulação).</small></span>
-            </button>
+          </div>
+        )}
+        {podeEscrever && aberto && acao === null && (
+          <div className="acoes-linha">
+            <button className="btn btn-ghost btn-sm" onClick={() => setAcao("confirmar")}>Precisa confirmar</button>
+            <button className="btn btn-ghost btn-sm" onClick={() => setAcao("ignorar")}>Ignorar</button>
+            <button className="btn btn-ghost btn-sm" onClick={() => setApagando(true)}>Tirar da lista</button>
           </div>
         )}
 
@@ -362,8 +334,8 @@ function ItemSheet({ item, podeEscrever, onClose }: { item: ReconciliationItem; 
           <p className="hint">Reabrir solta o vínculo, mas não apaga o que foi criado.</p>
         )}
 
-        {podeEscrever && (
-          <button className="btn btn-ghost btn-sm btn-block" style={{ marginTop: "var(--s3)" }} onClick={() => setApagando(true)}>
+        {podeEscrever && !aberto && (
+          <button className="btn btn-ghost btn-sm btn-block" style={{ marginTop: "var(--s2)" }} onClick={() => setApagando(true)}>
             Tirar da lista
           </button>
         )}

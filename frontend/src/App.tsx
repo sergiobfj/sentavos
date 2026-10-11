@@ -7,6 +7,9 @@ import Assets from "./pages/Assets";
 import Settings from "./pages/Settings";
 import Revisao from "./pages/Revisao";
 import Planejamento from "./pages/Planejamento";
+import PlanejamentoProximos from "./pages/PlanejamentoProximos";
+import PlanejamentoSimulacoes from "./pages/PlanejamentoSimulacoes";
+import Compromissos from "./components/planejamento/Compromissos";
 import Organizar from "./pages/Organizar";
 import Login from "./pages/Login";
 import { useAuth } from "./lib/auth";
@@ -58,6 +61,9 @@ export default function App() {
         {/* Também fora da barra: planejar é semanal, não diário. A porta é a
             linha "Disponível" do Início e a lateral do desktop. */}
         <Route path="/planejamento" element={<Planejamento />} />
+        <Route path="/planejamento/proximos" element={<PlanejamentoProximos />} />
+        <Route path="/planejamento/simulacoes" element={<PlanejamentoSimulacoes />} />
+        <Route path="/planejamento/compromissos" element={<Compromissos />} />
         <Route path="/organizar" element={<Organizar />} />
         {/* Rotas antigas: Transações virou sub-aba de Orçamento e Categorias
             entrou em Configurações. Redirecionar evita quebrar link salvo. */}
