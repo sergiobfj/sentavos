@@ -92,6 +92,8 @@ export interface ContaPlanejamento {
   value: number;
   as_of: string | null;
   observed_on: string | null;
+  // Último saldo é de mês anterior: aparece, mas não entra no saldo de partida.
+  stale?: boolean;
 }
 
 export interface MovimentoDepois {
@@ -107,6 +109,7 @@ export interface AvisoSaldo {
   sem_dia: boolean;
   sem_contas: boolean;
   contas_sem_saldo: string[];
+  contas_desatualizadas?: string[];
   desde: string | null;
   entradas: number;
   saidas: number;

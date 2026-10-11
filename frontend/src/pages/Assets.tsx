@@ -29,7 +29,7 @@ import {
 const RENDEM: AssetClass[] = ["fixed_income", "equity", "crypto"];
 
 export default function Assets() {
-  const { ym } = usePeriod();
+  const { ym, label } = usePeriod();
   const { data, isLoading, error } = useAssetSummary();
   const [creating, setCreating] = useState(false);
   const [editing, setEditing] = useState<AssetSummaryItem | null>(null);
@@ -73,9 +73,16 @@ export default function Assets() {
   // o patrimônio "subiu R$ 6.864" em setembro porque duas aplicações ganharam
   // o primeiro saldo, não porque renderam. É a mesma armadilha que tira daqui
   // a linha de evolução.
-  const novos = data.items.filter((i) => i.previous === 0 && i.value !== 0 && i.as_of === ym);
+  const novos = data.items.filter((i) => !i.stale && i.previous === 0 && i.value !== 0 && i.as_of === ym);
   const cadastrados = novos.reduce((s, i) => s + (i.liability ? -i.value : i.value), 0);
-  const variacaoReal = data.net_worth - data.previous_net_worth - cadastrados;
+  // A variação soma ativo por ativo, só os atualizados e que já existiam. Saldo
+  // desatualizado não tem variação conhecida — e o patrimônio do mês anterior
+  // o contava, então "patrimônio − anterior" mostraria a ausência dele como
+  // queda.
+  const variacaoReal = data.items
+    .filter((i) => !i.stale && !novos.includes(i))
+    .reduce((s, i) => s + (i.liability ? -(i.value - i.previous) : i.value - i.previous), 0);
+  const foraDoTotal = data.stale_count ?? 0;
   const temDividas = data.liabilities > 0;
 
   // A composição é só do que é POSITIVO. Dívida numa rosca viraria uma fatia
@@ -90,16 +97,26 @@ export default function Assets() {
       <section className="hero">
         <div className="rot">Patrimônio líquido</div>
         <div className="big tnum">{formatMoney(data.net_worth)}</div>
-        {Math.abs(variacaoReal) >= 0.01 && (
+        {/* Com ativo desatualizado a variação do mês não é apurável: o mês
+            anterior o contava e este não sabe quanto ele vale. Fica só a nota
+            de quem está fora — nada de "caiu R$ X" pela metade. */}
+        {foraDoTotal === 0 && Math.abs(variacaoReal) >= 0.01 && (
           <div className={`delta ${variacaoReal > 0 ? "pos" : "neg"}`}>
             <span className="seta" aria-hidden>{variacaoReal > 0 ? "↑" : "↓"}</span>
             {formatMoney(Math.abs(variacaoReal))} no mês
           </div>
         )}
-        {cadastrados > 0 && (
+        {foraDoTotal === 0 && cadastrados > 0 && (
           <div className="nota">
             Sem contar {formatMoney(cadastrados)} de ativos com o primeiro saldo
             lançado neste mês — cadastro não é crescimento.
+          </div>
+        )}
+        {foraDoTotal > 0 && (
+          <div className="nota">
+            Fora do total: {foraDoTotal} {foraDoTotal === 1 ? "ativo" : "ativos"} sem saldo de {label}
+            {" "}({formatMoney((data.stale_assets ?? 0) - (data.stale_liabilities ?? 0))} no último saldo
+            conhecido). Atualize abaixo pra {foraDoTotal === 1 ? "ele entrar" : "entrarem"}.
           </div>
         )}
       </section>
@@ -212,7 +229,8 @@ function ClassSection({
   ym: string;
   onEdit: (item: AssetSummaryItem) => void;
 }) {
-  const total = items.reduce((acc, i) => acc + i.value, 0);
+  // Saldo desatualizado aparece na lista, mas não soma no total da classe.
+  const total = items.filter((i) => !i.stale).reduce((acc, i) => acc + i.value, 0);
   const ehDivida = classe === "debt";
 
   return (
@@ -292,6 +310,16 @@ function AssetRow({
               palavra na tela. */}
           {item.as_of == null ? (
             "sem saldo"
+          ) : item.stale ? (
+            // Do mês corrente em diante, saldo de mês anterior não é o de hoje:
+            // não soma no patrimônio até ser atualizado. Em laranja, com a
+            // data — "não atualizado" inteiro não cabe nos ~11 caracteres que
+            // sobram aqui em 360px; a nota do topo diz que ele está fora.
+            <span className="aviso-txt">de {formatYm(item.as_of)}</span>
+          ) : item.reconciliation_note && item.as_of === ym ? (
+            // Saldo lançado por conferência: a variação dele não é rendimento
+            // nem cadastro, e o motivo está no título da linha.
+            "conferência"
           ) : item.change !== 0 ? (
             <>
               {item.as_of !== ym && <>de {formatYm(item.as_of)} · </>}

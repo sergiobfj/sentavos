@@ -18,7 +18,7 @@ import {
 import { currentPeriod, usePeriod, type Period } from "../lib/period";
 import { useAuth } from "../lib/auth";
 import { ApiError } from "../lib/api";
-import { formatMoney, formatYm } from "../lib/format";
+import { formatMoney } from "../lib/format";
 import type { PlanoMes, PlanoResposta, Scenario } from "../lib/tiposPlanejamento";
 
 /* Planejamento — a tela responde, primeiro, "quanto eu posso usar?".
@@ -129,15 +129,17 @@ function Inicio({ period }: { period: Period }) {
 /** Até três linhas: de onde a conta parte, o que já tem destino e o que
  *  venceu. "Comprometido" e "livre" não se repetem aqui: já estão no herói. */
 function EsteMes({ resposta, mes, onFolha }: { resposta: PlanoResposta; mes: PlanoMes; onFolha: (f: Folha) => void }) {
-  const contas = resposta.accounts.filter((c) => c.included);
+  // Só conta com saldo deste mês entra; a de saldo antigo fica fora e é dita.
+  const contas = resposta.accounts.filter((c) => c.included && !c.stale);
   const aviso = resposta.balance_warning;
-  const antigo = contas.map((c) => c.as_of).filter(Boolean).sort()[0] ?? null;
-  const desatualizado = mes.is_current && (aviso.desatualizado || aviso.sem_contas || aviso.contas_sem_saldo.length > 0);
+  const fora = aviso.contas_desatualizadas ?? [];
+  const desatualizado = mes.is_current && (fora.length > 0 || aviso.sem_contas || aviso.contas_sem_saldo.length > 0);
   const legendaSaldo = aviso.sem_contas
     ? "nenhuma conta escolhida"
-    : `${contas.length} ${contas.length === 1 ? "conta" : "contas"}${
-        desatualizado && antigo ? ` · saldo de ${formatYm(antigo)}, atualizar` : ""
-      }`;
+    : [
+        contas.length ? `${contas.length} ${contas.length === 1 ? "conta" : "contas"}` : "sem saldo deste mês",
+        fora.length ? `${fora.length} sem saldo de ${nomeDoMes(mes.year, mes.month)}, fora` : "",
+      ].filter(Boolean).join(" · ");
 
   return (
     <>

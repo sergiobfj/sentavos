@@ -158,8 +158,13 @@ export default function Dashboard() {
           quanto há na conta, é quanto SOBROU do fluxo deste mês — entradas
           menos o que saiu da conta (à vista, investido e faturas pagas). */}
       <section className="hero" aria-labelledby="saldo-rotulo">
-        <div className="big tnum">{formatMoney(saldo)}</div>
-        <div className="rot" id="saldo-rotulo">Saldo do mês</div>
+        {/* Com movimento sem valor conciliado (o resgate que pagou a moto), o
+            número não é o resultado do mês: fica apagado e dito como tal, pra
+            −R$ 8 mil não parecer R$ 8 mil perdidos. */}
+        <div className={`big tnum${semConciliar.length ? " fraco" : ""}`}>{formatMoney(saldo)}</div>
+        <div className="rot" id="saldo-rotulo">
+          Saldo do mês{semConciliar.length > 0 && " · não conciliado"}
+        </div>
         <div className="indicadores">
           <span><i style={{ background: "var(--pos)" }} aria-hidden /><b className="tnum">{formatMoney(caixa?.entrou ?? 0)}</b> entrou</span>
           <span><i style={{ background: "var(--neg)" }} aria-hidden /><b className="tnum">{formatMoney(caixa?.gasto_total ?? 0)}</b> gastou</span>
@@ -173,11 +178,13 @@ export default function Dashboard() {
             não as compras no cartão.
           </div>
         )}
-        {semConciliar.map((i) => (
-          <div className="nota" key={i.asset_id}>
-            Não inclui um movimento sem valor conciliado — {i.name}: {i.reconciliation_note}
+        {semConciliar.length > 0 && (
+          <div className="nota">
+            Falta conciliar{" "}
+            {semConciliar.map((i) => `${i.name}: ${i.reconciliation_note}`).join(" ")} Até lá, este
+            número não é o resultado de {nomeDoMes}.
           </div>
-        ))}
+        )}
       </section>
 
       {/* A porta do planejamento: "quanto posso gastar?" é a pergunta que

@@ -40,7 +40,7 @@ export function CalculoSheet({
   onContas?: () => void;
   onClose: () => void;
 }) {
-  const incluidas = contas.filter((c) => c.included).length;
+  const incluidas = contas.filter((c) => c.included && !c.stale).length;
   return (
     <Modal title={`Cálculo de ${nomeDoMes(mes.year, mes.month)}`} onClose={onClose}>
       <div className="m-body">
@@ -240,7 +240,7 @@ export function ContasSheet({
   const atualizar = useUpdateAsset();
   const saldo = useSetAssetSnapshot();
   const ym = `${period.year}-${String(period.month).padStart(2, "0")}`;
-  const total = contas.filter((c) => c.included).reduce((s, c) => s + c.value, 0);
+  const total = contas.filter((c) => c.included && !c.stale).reduce((s, c) => s + c.value, 0);
   const erro = (atualizar.error || saldo.error) as ApiError | null;
 
   return (
@@ -268,7 +268,9 @@ export function ContasSheet({
                         ? "sem saldo"
                         : c.as_of === ym
                           ? c.observed_on ? `lido em ${formatDiaMes(c.observed_on)}` : "deste mês"
-                          : `de ${formatYm(c.as_of)}`}
+                          : c.stale && c.included
+                            ? `de ${formatYm(c.as_of)} · fora até atualizar`
+                            : `de ${formatYm(c.as_of)}`}
                     </span>
                   </span>
                 </label>

@@ -427,6 +427,9 @@ export interface AssetSummaryItem {
   // Só quando o saldo DESTE mês foi lançado por conferência: houve movimento
   // de valor desconhecido, então o rendimento do mês não é apurável.
   reconciliation_note?: string | null;
+  // Do mês corrente em diante, saldo herdado de mês anterior é só o último
+  // conhecido: `value` diz qual era, mas ele não soma em total nenhum.
+  stale?: boolean;
   as_of: string | null;
 }
 
@@ -444,6 +447,10 @@ export interface AssetSummary {
   liabilities: number;
   net_worth: number;
   previous_net_worth: number;
+  // O que ficou fora dos totais por estar desatualizado.
+  stale_count?: number;
+  stale_assets?: number;
+  stale_liabilities?: number;
 }
 
 export const ASSET_CLASS_LABEL: Record<AssetClass, string> = {

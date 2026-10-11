@@ -54,7 +54,8 @@ export default function Investments() {
     () =>
       (assets.data?.items ?? [])
         .filter((i) => INVESTMENT_CLASSES.includes(i.asset_class))
-        .sort((a, b) => b.value - a.value),
+        // Os atualizados primeiro, por valor; os desatualizados no fim.
+        .sort((a, b) => Number(!!a.stale) - Number(!!b.stale) || b.value - a.value),
     [assets.data]
   );
 
@@ -70,8 +71,12 @@ export default function Investments() {
   if (assets.isLoading || budget.isLoading || transactions.isLoading) return <Esqueleto />;
   if (erro) return <div className="error-box">{erro.message}</div>;
 
-  const total = itens.reduce((acc, i) => acc + i.value, 0);
-  const anterior = itens.reduce((acc, i) => acc + i.previous, 0);
+  // Saldo desatualizado (último conhecido é de mês anterior) aparece na lista,
+  // mas não soma: o Nubank de setembro não pode inflar o "investido" de hoje.
+  const atuais = itens.filter((i) => !i.stale);
+  const desatualizados = itens.filter((i) => i.stale);
+  const total = atuais.reduce((acc, i) => acc + i.value, 0);
+  const anterior = atuais.reduce((acc, i) => acc + i.previous, 0);
   const variacao = total - anterior;
   const aporte = budget.data?.totals.investment.paid ?? 0;
 
@@ -82,12 +87,12 @@ export default function Investments() {
 
   // Quanto as aplicações DEVERIAM render no mês, somando as que têm taxa. Null
   // quando nenhuma tem — aí não há o que comparar e a linha não aparece.
-  const comTaxa = itens.filter((i) => i.expected_yield != null);
+  const comTaxa = atuais.filter((i) => i.expected_yield != null);
   const esperadoTotal = comTaxa.length
     ? comTaxa.reduce((s, i) => s + (i.expected_yield ?? 0), 0)
     : null;
   const rendimento = variacao - aporte;
-  const comValor = itens.filter((i) => i.value > 0);
+  const comValor = atuais.filter((i) => i.value > 0);
 
   // Aporte e resgate separados: o resgate é dinheiro que SAIU do investimento,
   // não prejuízo nem gasto. Somados num número só, um resgate de R$ 1.000
@@ -98,8 +103,14 @@ export default function Investments() {
   // Saldo lançado por conferência: no mês houve um movimento cujo valor não
   // está registrado (a caixinha usada numa compra, sem o extrato). A conta
   // variação − aportes daria um "prejuízo" que não aconteceu. Traço + motivo.
+  // Aplicação sem saldo do mês também deixa o rendimento sem conta possível.
   const conferidos = itens.filter((i) => i.reconciliation_note);
-  const naoApurado = conferidos.length > 0;
+  const naoApurado = conferidos.length > 0 || desatualizados.length > 0;
+  // O desatualizado já é dito embaixo do total; aqui só entra como motivo
+  // quando não há outro, pra não repetir a mesma frase duas vezes na tela.
+  const motivos = conferidos.length
+    ? conferidos.map((i) => `${i.name} — ${i.reconciliation_note}`)
+    : [`${desatualizados.map((i) => i.name).join(", ")} sem saldo de ${label}.`];
 
   if (itens.length === 0) {
     return (
@@ -128,10 +139,23 @@ export default function Investments() {
       <section className="hero">
         <div className="rot">Total investido</div>
         <div className="big tnum">{formatMoney(total)}</div>
-        {temBase && Math.abs(variacao) >= 0.01 && (
+        {/* Com aplicação desatualizada, a variação do total não é apurável. */}
+        {temBase && desatualizados.length === 0 && Math.abs(variacao) >= 0.01 && (
           <div className={`delta ${variacao > 0 ? "pos" : "neg"}`}>
             <span className="seta" aria-hidden>{variacao > 0 ? "↑" : "↓"}</span>
             {formatMoney(Math.abs(variacao))} no mês
+          </div>
+        )}
+        {desatualizados.length > 0 && (
+          <div className="nota">
+            Não entra no total:{" "}
+            {desatualizados.map((i, n) => (
+              <span key={i.asset_id}>
+                {n > 0 && ", "}
+                {i.name} ({formatMoney(i.value)} em {i.as_of ? formatYm(i.as_of) : "—"})
+              </span>
+            ))}
+            {" "}— sem saldo de {label}.
           </div>
         )}
       </section>
@@ -178,9 +202,7 @@ export default function Investments() {
       </div>
       {naoApurado && (
         <p className="nota">
-          Rendimento de {label} não apurado: {conferidos.map((i) => (
-            <span key={i.asset_id}>{i.name} — {i.reconciliation_note} </span>
-          ))}
+          Rendimento de {label} não apurado: {motivos.join(" ")}
         </p>
       )}
 
@@ -225,7 +247,7 @@ export default function Investments() {
         {itens.map((item) => (
           // Ativo se edita em Patrimônio: duas telas editando o mesmo ativo é
           // como as duas começam a discordar.
-          <Link className="row" key={item.asset_id} to="/patrimonio">
+          <Link className={`row${item.stale ? " desatualizado" : ""}`} key={item.asset_id} to="/patrimonio">
             <div
               className="avatar"
               style={{ background: fundoDaCor(corDoAtivo(itens, item.asset_id), 26) }}
@@ -238,7 +260,9 @@ export default function Investments() {
               <div className="s">
                 {/* Saldo lançado por conferência: é o que a linha precisa dizer
                     neste mês, e a legenda só tem lugar pra uma coisa. */}
-                {item.reconciliation_note ? (
+                {item.stale ? (
+                  <span className="aviso-txt">não atualizado · {item.as_of ? formatYm(item.as_of) : ""}</span>
+                ) : item.reconciliation_note ? (
                   "ajuste de conferência"
                 ) : (
                   <>
@@ -253,7 +277,7 @@ export default function Investments() {
             </div>
             <div className="amt tnum">
               {formatMoney(item.value)}
-              {total > 0 && <span className="sub">{Math.round((item.value / total) * 100)}%</span>}
+              {total > 0 && !item.stale && <span className="sub">{Math.round((item.value / total) * 100)}%</span>}
             </div>
             <MarcaEditavel />
           </Link>

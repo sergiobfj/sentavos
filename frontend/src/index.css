@@ -366,6 +366,12 @@ a.card { text-decoration: none; color: inherit; display: block; }
 /* O número herói fica off-white mesmo negativo: o sinal de menos já diz. Pintá-
    lo de vermelho transformava todo mês apertado em alarme. */
 .hero .big.pos, .hero .big.neg { color: var(--text); }
+/* Número que ainda não é resultado (saldo do mês com resgate não conciliado):
+   continua legível, mas sem o peso de um número fechado. */
+.hero .big.fraco { color: var(--text-faint); }
+/* "não atualizado": saldo de mês anterior que ficou fora do total. */
+.aviso-txt { color: var(--neg); }
+.list .row.desatualizado .amt { color: var(--text-faint); }
 .hero .delta {
   margin-top: var(--s2);
   display: flex; align-items: center; flex-wrap: wrap; gap: var(--s2);
