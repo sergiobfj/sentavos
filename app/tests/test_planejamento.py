@@ -54,17 +54,10 @@ def test_receita_recebida_nao_entra_de_novo(m):
 
     # A recorrência do salário (estimada) tem uma ocorrência em outubro.
     c = m.compromisso(salario, 940.0, D(2026, 10, 5), descricao="Salário", confirmed=False)
-    antes = m.mes()["months"][0]
-    # Sem baixa, ela ainda conta — e conta como vencida: dia 5 já passou.
-    assert antes["income"] == 940.0
-    assert item(antes, f"compromisso:{c['id']}:1")["status"] == "vencido"
 
-    r = m.c.post(
-        f"/commitments/{c['id']}/ocorrencias/1/vincular",
-        json={"transaction_id": recebido["id"]},
-    )
-    assert r.status_code == 200, r.text
-
+    # Sem baixa à mão: o lançamento da mesma categoria a um dia do vencimento
+    # É o salário do dia 5 (944,34 no lugar de ~940). Antes, ele continuava
+    # "vencido" e contava de novo até alguém vincular.
     depois = m.mes()["months"][0]
     assert depois["income"] == 0.0
     assert depois["projected"] == 1500.0
@@ -72,6 +65,15 @@ def test_receita_recebida_nao_entra_de_novo(m):
     assert linha["status"] == "pago" and linha["remaining"] == 0.0
     # O lançamento realizado em si nunca vira item do planejamento.
     assert not [i for i in depois["items"] if i["key"] == f"lancamento:{recebido['id']}"]
+
+    # Vincular à mão o MESMO lançamento continua possível: o vínculo fica explícito.
+    r = m.c.post(
+        f"/commitments/{c['id']}/ocorrencias/1/vincular",
+        json={"transaction_id": recebido["id"]},
+    )
+    assert r.status_code == 200, r.text
+    o = next(o for o in r.json()["schedule"] if o["number"] == 1)
+    assert (o["status"], o["matched"], o["transaction_id"]) == ("paga", False, recebido["id"])
 
 
 def test_despesa_paga_nao_entra_de_novo(m):

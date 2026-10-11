@@ -121,6 +121,15 @@ def somar_meses(m: Mes, n: int) -> Mes:
 # regra de produto: só impede um laço de rodar para sempre por dado esquisito.
 _TETO_DE_LACO = 5000
 
+# Quão longe do vencimento um lançamento de entrada ainda "é" a ocorrência: o
+# salário do dia 5 que caiu dia 6, o adiantamento do dia 15 que caiu dia 23
+# (setembro/2026). Menos de meio mês, pra duas ocorrências mensais seguidas
+# nunca disputarem o mesmo lançamento.
+JANELA_DE_ENTRADA = dt.timedelta(days=12)
+
+# Nota das dispensas criadas por "Pausar". É o que "Retomar" desfaz.
+PAUSA = "Pausa"
+
 
 def vencimento(c: Commitment, numero: int) -> dt.date:
     """O vencimento da ocorrência `numero` (1-based).
@@ -184,6 +193,14 @@ class EstadoCompromissos:
     pagos: dict[tuple[int, int], Transaction] = field(default_factory=dict)
     dispensas: dict[tuple[int, int], CommitmentSkip] = field(default_factory=dict)
     reservas: list[Provision] = field(default_factory=list)
+    # Entrada recorrente sem baixa, reconhecida num lançamento (ver
+    # `casar_entradas`): recebida (pago) ou já prevista (só previsto).
+    recebidos: dict[tuple[int, int], Transaction] = field(default_factory=dict)
+    previstos: dict[tuple[int, int], Transaction] = field(default_factory=dict)
+
+    def baixa(self, cid: int, numero: int) -> Transaction | None:
+        """O lançamento que pagou/recebeu a ocorrência: vinculado ou reconhecido."""
+        return self.pagos.get((cid, numero)) or self.recebidos.get((cid, numero))
 
     def reservado(self, cid: int, numero: int) -> float:
         """Quanto das reservas não liberadas aponta pra esta ocorrência."""
@@ -208,11 +225,102 @@ def carregar_estado(
         q_pagos = q_pagos.where(Transaction.commitment_id.in_(filtro_ids))
         q_disp = q_disp.where(CommitmentSkip.commitment_id.in_(filtro_ids))
 
-    return EstadoCompromissos(
+    estado = EstadoCompromissos(
         pagos={(t.commitment_id, t.commitment_no): t for t in session.exec(q_pagos).all()},
         dispensas={(d.commitment_id, d.number): d for d in session.exec(q_disp).all()},
         reservas=list(session.exec(consulta(Provision, dono)).all()),
     )
+    casar_entradas(session, dono, estado)
+    return estado
+
+
+def casar_entradas(session: Session, dono: User, estado: EstadoCompromissos) -> None:
+    """Reconhece a entrada recorrente num lançamento que já existe. Só lê.
+
+    O salário previsto (~940 no dia 5) e o salário recebido (944,34 em 06/10)
+    são o MESMO dinheiro. Sem isto, quem lança o salário pelo "+" vê a
+    ocorrência continuar "a receber" (e depois "vencida", contando de novo no
+    mês corrente) — previsão e realizado somados.
+
+    Regra: ocorrência em aberto de compromisso de ENTRADA × lançamento sem
+    vínculo, da mesma categoria, a até `JANELA_DE_ENTRADA` do vencimento.
+      1. lançamento pago → a ocorrência está recebida, pelo valor que caiu
+         (diferença aceita: o recebido substitui o previsto);
+      2. lançamento só previsto → a ocorrência está "prevista": conta uma vez,
+         pelo lançamento.
+    Cada lançamento cobre uma ocorrência só, a de vencimento mais perto.
+
+    Só entrada: categoria de saída é larga (Casa, Saúde) e casaria a internet
+    com qualquer compra da casa; saída recorrente tem baixa pelo "Paguei". A
+    baixa explícita, a dispensa e o cancelamento vêm antes e não são tocados.
+
+    Sempre sobre TODAS as entradas recorrentes da conta, com as baixas e
+    dispensas delas — nunca só as do pedido. Senão o mesmo lançamento seria o
+    salário do dia 5 na lista e o do dia 10 na tela de detalhe.
+    """
+    compromissos = session.exec(consulta(Commitment, dono)).all()
+    if not compromissos:
+        return
+    tipos = {c.id: c.type for c in session.exec(consulta(Category, dono)).all()}
+    entradas = [
+        c for c in compromissos
+        if CategoryType(tipos.get(c.category_id, CategoryType.EXPENSE)) == CategoryType.INCOME
+    ]
+    if not entradas:
+        return
+    ids_entrada = [c.id for c in entradas]
+    baixas = {
+        (t.commitment_id, t.commitment_no)
+        for t in session.exec(
+            consulta(Transaction, dono).where(Transaction.commitment_id.in_(ids_entrada))
+        ).all()
+    }
+    dispensas = {
+        (d.commitment_id, d.number)
+        for d in session.exec(
+            consulta(CommitmentSkip, dono).where(CommitmentSkip.commitment_id.in_(ids_entrada))
+        ).all()
+    }
+
+    agora = hoje()
+    ano, mes = avancar_meses(agora.year, agora.month, 13)
+    horizonte = limites_do_mes(ano, mes)[1]
+    abertas: list[tuple[Commitment, int, dt.date]] = []
+    for c in entradas:
+        for numero, venc in ocorrencias_ate(c, horizonte):
+            if (c.id, numero) in baixas or (c.id, numero) in dispensas:
+                continue
+            if c.cancelled_on is not None and venc >= c.cancelled_on:
+                continue
+            abertas.append((c, numero, venc))
+    if not abertas:
+        return
+
+    lancamentos = session.exec(
+        consulta(Transaction, dono).where(
+            Transaction.category_id.in_({c.category_id for c in entradas}),
+            Transaction.commitment_id.is_(None),
+            Transaction.purchase_id.is_(None),
+            Transaction.date >= min(v for _, _, v in abertas) - JANELA_DE_ENTRADA,
+            Transaction.date <= max(v for _, _, v in abertas) + JANELA_DE_ENTRADA,
+        )
+    ).all()
+    pagos = [t for t in lancamentos if t.amount_paid is not None]
+    so_previstos = [t for t in lancamentos if t.amount_paid is None and t.amount_planned is not None]
+
+    for grupo, destino in ((pagos, estado.recebidos), (so_previstos, estado.previstos)):
+        pares = sorted(
+            (abs((t.date - venc).days), venc, t.id, c.id, numero, t)
+            for c, numero, venc in abertas
+            for t in grupo
+            if t.category_id == c.category_id and abs(t.date - venc) <= JANELA_DE_ENTRADA
+        )
+        usados: set[int] = set()
+        for _dist, _venc, tid, cid, numero, t in pares:
+            if tid in usados or (cid, numero) in estado.recebidos or (cid, numero) in estado.previstos:
+                continue
+            destino[(cid, numero)] = t
+            usados.add(tid)
 
 
 def status_da_ocorrencia(
@@ -230,6 +338,10 @@ def status_da_ocorrencia(
         return OccurrenceStatus.DISPENSADA
     if c.cancelled_on is not None and venc >= c.cancelled_on:
         return OccurrenceStatus.CANCELADA
+    if (c.id, numero) in estado.recebidos:
+        return OccurrenceStatus.PAGA
+    if (c.id, numero) in estado.previstos:
+        return OccurrenceStatus.PREVISTA
     if venc < agora:
         return OccurrenceStatus.VENCIDA
     return OccurrenceStatus.PENDENTE
@@ -256,7 +368,8 @@ def ler_compromisso(
     lista: list[OccurrenceRead] = []
     for numero, venc in todas_as_ocorrencias(c, horizonte):
         st = status_da_ocorrencia(c, numero, venc, estado, agora)
-        tx = estado.pagos.get((c.id, numero))
+        tx = estado.baixa(c.id, numero) if st == OccurrenceStatus.PAGA else None
+        previsto = estado.previstos.get((c.id, numero)) if st == OccurrenceStatus.PREVISTA else None
         dispensa = estado.dispensas.get((c.id, numero))
         lista.append(
             OccurrenceRead(
@@ -265,11 +378,12 @@ def ler_compromisso(
                 amount=round(c.amount, 2),
                 status=st,
                 label=rotulo(c, numero),
-                transaction_id=tx.id if tx else None,
+                transaction_id=tx.id if tx else (previsto.id if previsto else None),
                 paid_amount=tx.amount_paid if tx else None,
-                paid_date=tx.date if tx else None,
+                paid_date=tx.date if tx else (previsto.date if previsto else None),
                 provisioned=round(estado.reservado(c.id, numero), 2) if st in EM_ABERTO else 0.0,
                 skip_note=dispensa.note if dispensa else None,
+                matched=(c.id, numero) in estado.recebidos or previsto is not None,
             )
         )
 
@@ -297,7 +411,7 @@ def ler_compromisso(
         color=categoria.color if categoria else "#666",
         icon=categoria.icon if categoria else "•",
         status=status,
-        paid_count=sum(1 for (cid, _n) in estado.pagos if cid == c.id),
+        paid_count=sum(1 for o in lista if o.status == OccurrenceStatus.PAGA),
         skipped_count=sum(1 for o in lista if o.status == OccurrenceStatus.DISPENSADA),
         overdue_count=len(vencidas),
         overdue_amount=round(sum(o.amount for o in vencidas), 2),
@@ -305,6 +419,11 @@ def ler_compromisso(
         remaining_count=len(abertas) if finito else None,
         remaining_nominal=round(sum(o.amount for o in abertas), 2) if finito else None,
         next=abertas[0] if abertas else None,
+        paused_until=max(
+            (o.due_date for o in lista
+             if o.status == OccurrenceStatus.DISPENSADA and o.skip_note == PAUSA and o.due_date >= agora),
+            default=None,
+        ),
     )
     if detalhado:
         return CommitmentDetail(**base, schedule=lista)
@@ -673,12 +792,13 @@ def planejar(
         direcao = "entrada" if CategoryType(cat.type) == CategoryType.INCOME else "saida"
         for numero, venc in ocorrencias_ate(c, ultimo_dia):
             st = status_da_ocorrencia(c, numero, venc, estado, agora)
-            if st in (OccurrenceStatus.DISPENSADA, OccurrenceStatus.CANCELADA):
+            # "Prevista": o lançamento previsto já entra abaixo, como avulso.
+            if st in (OccurrenceStatus.DISPENSADA, OccurrenceStatus.CANCELADA, OccurrenceStatus.PREVISTA):
                 continue
             if st == OccurrenceStatus.PAGA:
                 if indice(mes_de(venc)) < indice(m0):
                     continue
-                tx = estado.pagos[(c.id, numero)]
+                tx = estado.baixa(c.id, numero)
                 situacao, restante = "pago", 0.0
                 transacao = tx.id
             else:
@@ -783,7 +903,7 @@ def planejar(
             alvo_rotulo = c.description + (f" {rotulo(c, numero)}" if rotulo(c, numero) else "")
             if st == OccurrenceStatus.PAGA:
                 # Cumprida: o dinheiro separado saiu na baixa, no mês dela.
-                fim_pago = mes_de(estado.pagos[(c.id, numero)].date)
+                fim_pago = mes_de(estado.baixa(c.id, numero).date)
                 fim = fim_pago if fim is None or indice(fim_pago) < indice(fim) else fim
             elif st in EM_ABERTO:
                 alvo = chave_alvo

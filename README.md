@@ -191,6 +191,24 @@ A conta do mês, feita no servidor (`app/planejamento.py`):
 - **Valor total/financiado e entrada** de um contrato são só informação. A soma
   das parcelas que faltam é **nominal**, não saldo devedor.
 
+### Entrada recorrente (salário)
+
+Salário futuro é **compromisso de entrada** (categoria de receita), não
+lançamento antecipado: os meses seguintes mostram as ocorrências previstas e
+nenhum lançamento nasce delas. O recebido substitui o previsto sem baixa à mão:
+
+| Existe, sem vínculo, na mesma categoria, a até 12 dias do vencimento… | A ocorrência fica |
+| --- | --- |
+| um lançamento **pago** | **recebida**, pelo valor que caiu (diferença aceita) |
+| um lançamento **só previsto** | **já prevista** — conta uma vez, pelo lançamento |
+| nada | a receber (vencida depois do dia) |
+
+Cada lançamento cobre uma ocorrência só (a de vencimento mais perto), e o
+reconhecimento é só leitura: nada é gravado, a baixa explícita vem antes, e só
+vale pra entrada — categoria de saída é larga demais pra casar por nome.
+**Pausar até um mês** dispensa as ocorrências em aberto até lá (nota "Pausa");
+**Retomar** desfaz as futuras. Encerrar é data de fim ou cancelar, no Editar.
+
 ### Organizar o mês
 
 A conferência (`reconciliation_items`) é uma lista de perguntas, não de

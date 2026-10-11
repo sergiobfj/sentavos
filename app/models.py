@@ -947,6 +947,9 @@ class OccurrenceStatus(str, Enum):
     PAGA = "paga"
     DISPENSADA = "dispensada"
     CANCELADA = "cancelada"
+    # Entrada recorrente que já está num lançamento só PREVISTO (o "720 em
+    # 15/10" lançado à mão): não conta de novo — quem conta é o lançamento.
+    PREVISTA = "prevista"
 
 
 class OccurrenceRead(SQLModel):
@@ -962,6 +965,9 @@ class OccurrenceRead(SQLModel):
     # Quanto das reservas está apontado pra esta ocorrência.
     provisioned: float = 0
     skip_note: str | None = None
+    # O lançamento foi reconhecido (entrada da mesma categoria perto do
+    # vencimento), não vinculado à mão. Ver `planejamento.casar_entradas`.
+    matched: bool = False
 
 
 class CommitmentRead(CommitmentBase):
@@ -984,6 +990,8 @@ class CommitmentRead(CommitmentBase):
     # desconta juros na quitação antecipada, e o app não sabe quanto.
     remaining_nominal: float | None = None
     next: OccurrenceRead | None = None
+    # Última ocorrência futura dispensada por pausa ("pausada até dez/2026").
+    paused_until: dt.date | None = None
 
 
 class CommitmentDetail(CommitmentRead):
@@ -1005,6 +1013,13 @@ class VincularLancamento(SQLModel):
 
 class DispensarOcorrencia(SQLModel):
     note: str | None = None
+
+
+class PausarRecorrencia(SQLModel):
+    """Pausa até o fim do mês de `ate`: as ocorrências em aberto de hoje até lá
+    viram dispensas com a nota "Pausa". Retomar desfaz só as futuras."""
+
+    ate: dt.date
 
 
 # ---------- Reserva ----------

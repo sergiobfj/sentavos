@@ -28,7 +28,7 @@ from sqlmodel import Session, SQLModel
 
 from app import planejamento
 from app.auth import exigir_escrita, require_user
-from app.cartao import avancar_meses
+from app.cartao import avancar_meses, limites_do_mes
 from app.database import get_session
 from app.escopo import buscar, consulta, exigir
 from app.models import (
@@ -39,6 +39,7 @@ from app.models import (
     CommitmentSkip,
     CommitmentUpdate,
     DispensarOcorrencia,
+    PausarRecorrencia,
     Finalidade,
     OccurrenceStatus,
     PagarOcorrencia,
@@ -363,10 +364,19 @@ def _exigir_em_aberto(session: Session, dono: User, c: Commitment, numero: int) 
     st = planejamento.status_da_ocorrencia(c, numero, venc, estado, planejamento.hoje())
     rot = planejamento.rotulo(c, numero) or venc.strftime("%d/%m/%Y")
     if st == OccurrenceStatus.PAGA:
-        tx = estado.pagos[(c.id, numero)]
+        tx = estado.baixa(c.id, numero)
         raise HTTPException(
             status_code=409,
             detail=f"{c.description} {rot} já foi paga em {tx.date.strftime('%d/%m/%Y')}.",
+        )
+    if st == OccurrenceStatus.PREVISTA:
+        tx = estado.previstos[(c.id, numero)]
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"{c.description} {rot} já está prevista no lançamento \"{tx.description}\" de "
+                f"{tx.date.strftime('%d/%m/%Y')}. Quando receber, lance o valor recebido nele."
+            ),
         )
     if st == OccurrenceStatus.DISPENSADA:
         raise HTTPException(
@@ -446,7 +456,12 @@ def vincular_ocorrencia(
     exigir_escrita(dono)
     c = exigir(session, Commitment, commitment_id, dono, "Compromisso")
     lancamento = exigir(session, Transaction, pedido.transaction_id, dono, "Lançamento")
-    _exigir_em_aberto(session, dono, c, numero)
+    # A entrada já reconhecida neste mesmo lançamento pode ganhar o vínculo
+    # explícito (deixa de depender da data e da categoria). Outro lançamento
+    # por cima dela, não: seria o mesmo salário duas vezes.
+    reconhecido = planejamento.carregar_estado(session, dono, [c.id]).recebidos.get((c.id, numero))
+    if reconhecido is None or reconhecido.id != lancamento.id:
+        _exigir_em_aberto(session, dono, c, numero)
 
     if lancamento.commitment_id is not None:
         raise HTTPException(status_code=409, detail="Esse lançamento já é a baixa de outro compromisso.")
@@ -520,7 +535,7 @@ def dispensar_ocorrencia(
     c = exigir(session, Commitment, commitment_id, dono, "Compromisso")
     _ocorrencia(c, numero)
     estado = planejamento.carregar_estado(session, dono, [c.id])
-    if (c.id, numero) in estado.pagos:
+    if estado.baixa(c.id, numero) is not None:
         raise HTTPException(status_code=409, detail="Esta ocorrência já foi paga; não há o que dispensar.")
     if (c.id, numero) not in estado.dispensas:
         session.add(
@@ -552,6 +567,64 @@ def desfazer_dispensa(
     return _ler(session, dono, c, detalhado=True)
 
 
+@router_planejamento.post("/commitments/{commitment_id}/pausar")
+def pausar_recorrencia(
+    commitment_id: int,
+    dados: PausarRecorrencia,
+    session: Session = Depends(get_session),
+    dono: User = Depends(require_user),
+):
+    """Pausa uma recorrência até o fim do mês de `ate`.
+
+    Não é modelo novo: cada ocorrência em aberto de hoje até lá vira uma
+    dispensa com a nota "Pausa" — o mesmo "não vai acontecer" de sempre. O que
+    já foi recebido, previsto ou pago fica como está.
+    """
+    exigir_escrita(dono)
+    c = exigir(session, Commitment, commitment_id, dono, "Compromisso")
+    if c.installments is not None:
+        raise HTTPException(
+            status_code=400,
+            detail="Só recorrência se pausa. Parcela que não vai ser paga se dispensa uma a uma.",
+        )
+    agora = planejamento.hoje()
+    fim = limites_do_mes(dados.ate.year, dados.ate.month)[1] - dt.timedelta(days=1)
+    if fim < agora:
+        raise HTTPException(status_code=400, detail="A pausa termina num mês que já passou.")
+    estado = planejamento.carregar_estado(session, dono, [c.id])
+    for numero, venc in planejamento.ocorrencias_ate(c, fim):
+        if venc < agora:
+            continue
+        if planejamento.status_da_ocorrencia(c, numero, venc, estado, agora) == OccurrenceStatus.PENDENTE:
+            session.add(CommitmentSkip(
+                user_id=dono.id, commitment_id=c.id, number=numero, note=planejamento.PAUSA,
+            ))
+    session.commit()
+    return _ler(session, dono, c, detalhado=True)
+
+
+@router_planejamento.post("/commitments/{commitment_id}/retomar")
+def retomar_recorrencia(
+    commitment_id: int,
+    session: Session = Depends(get_session),
+    dono: User = Depends(require_user),
+):
+    """Desfaz as dispensas de pausa de hoje em diante. As passadas ficam: o mês
+    em que a recorrência estava pausada continua não tendo acontecido."""
+    exigir_escrita(dono)
+    c = exigir(session, Commitment, commitment_id, dono, "Compromisso")
+    agora = planejamento.hoje()
+    for d in session.exec(
+        consulta(CommitmentSkip, dono).where(
+            CommitmentSkip.commitment_id == c.id, CommitmentSkip.note == planejamento.PAUSA
+        )
+    ).all():
+        if planejamento.vencimento(c, d.number) >= agora:
+            session.delete(d)
+    session.commit()
+    return _ler(session, dono, c, detalhado=True)
+
+
 # ---------------------------------------------------------------------------
 # Reservas
 # ---------------------------------------------------------------------------
@@ -576,7 +649,7 @@ def _ler_reservas(session: Session, dono: User, reservas: list[Provision]) -> li
         )
         if p.released_on is not None and p.released_on <= agora:
             status = "liberada"
-        elif c is not None and (c.id, p.commitment_no) in estado.pagos:
+        elif c is not None and estado.baixa(c.id, p.commitment_no) is not None:
             status = "cumprida"
         else:
             status = "ativa"
