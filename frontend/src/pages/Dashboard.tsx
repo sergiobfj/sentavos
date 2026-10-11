@@ -5,6 +5,7 @@ import { LinhaLancamento } from "../components/TransactionList";
 import Segmentado from "../components/Segmentado";
 import { Evolucao, Rosca, type Fatia, type PontoEvolucao } from "../components/Graficos";
 import {
+  useAssetSummary,
   useBudgetSummary,
   useCards,
   useCategories,
@@ -19,7 +20,7 @@ import { ApiError } from "../lib/api";
 import { formatDiaMes, formatMoney } from "../lib/format";
 import { FRASE_FILTRO, OPCOES_FILTRO, useFiltroFinalidade } from "../lib/finalidade";
 import { COR_OUTRAS } from "../lib/paleta";
-import type { CardInvoices, Category, Invoice, Transaction } from "../lib/types";
+import { INVESTMENT_CLASSES, type CardInvoices, type Category, type Invoice, type Transaction } from "../lib/types";
 
 /* O Início é relatório, não painel. A ordem responde as perguntas na ordem em
    que elas são feitas ao abrir o app:
@@ -50,6 +51,7 @@ export default function Dashboard() {
   const { data: transactions, isLoading, error } = useTransactions();
   const { data: categories } = useCategories(true);
   const { data: resumo } = useBudgetSummary();
+  const { data: ativos } = useAssetSummary();
   const { data: faturas } = useInvoicesSummary();
   const { data: cards } = useCards();
   const distribuicao = useCategoryReport(filtro);
@@ -126,6 +128,12 @@ export default function Dashboard() {
   const vazio = (transactions ?? []).length === 0 && pagamentos.length === 0;
   const saldo = caixa?.carteira ?? 0;
   const cartaoMexeNoSaldo = (caixa?.no_cartao ?? 0) > 0 || (caixa?.faturas_pagas ?? 0) > 0;
+  // Investimento com saldo lançado por conferência neste mês: houve um resgate
+  // (ou movimento) sem valor conciliado, e o saldo do mês não o enxerga. Sem a
+  // frase, gasto pago com dinheiro da caixinha parece rombo na conta.
+  const semConciliar = (ativos?.items ?? []).filter(
+    (i) => i.reconciliation_note && INVESTMENT_CLASSES.includes(i.asset_class)
+  );
 
   // Cartão ainda sem finalidade: as compras dele ficam fora de Pessoal/Família/
   // Empresa até alguém dizer pra que ele serve. A tela avisa uma vez, baixo.
@@ -165,6 +173,11 @@ export default function Dashboard() {
             não as compras no cartão.
           </div>
         )}
+        {semConciliar.map((i) => (
+          <div className="nota" key={i.asset_id}>
+            Não inclui um movimento sem valor conciliado — {i.name}: {i.reconciliation_note}
+          </div>
+        ))}
       </section>
 
       {/* A porta do planejamento: "quanto posso gastar?" é a pergunta que

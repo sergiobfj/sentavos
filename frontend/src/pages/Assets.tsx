@@ -275,7 +275,9 @@ function AssetRow({
 
       <div className="mid">
         <div className="t">{item.name}</div>
-        <div className="s">
+        {/* A nota de conferência (saldo lançado sem o extrato) fica no título:
+            não cabe na legenda, e a variação continua verdadeira. */}
+        <div className="s" title={item.reconciliation_note ?? undefined}>
           {/* O estado do saldo vira texto curto em vez de coluna própria. Num
               celular, "de mai/2026" ao lado do nome diz o mesmo que uma coluna
               "Referência" e não custa um quinto da largura da tela. */}

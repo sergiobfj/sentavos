@@ -27,7 +27,7 @@ const SECTIONS: { type: CategoryType; title: string; hint: string }[] = [
 
 type Tab = "metas" | "lancamentos" | "faturas";
 
-// Faturas entra aqui e não na barra de baixo: as quatro abas do polegar são as
+// Faturas entra aqui e não na barra de baixo: as cinco abas do polegar são as
 // de todo dia, e fatura se olha uma ou duas vezes por mês. Ela mora ao lado dos
 // lançamentos porque é a mesma pergunta — o que aconteceu com meu dinheiro.
 const ABAS: { id: Tab; rotulo: string }[] = [
@@ -43,6 +43,11 @@ export default function Budget() {
   const tab: Tab =
     aba === "lancamentos" ? "lancamentos" : aba === "faturas" ? "faturas" : "metas";
   const { data: categories } = useCategories();
+  // A lista e a edição precisam também das arquivadas: um lançamento antigo
+  // (ou o "Gasto via Pix" em Outros) continua existindo depois que a
+  // categoria sai do formulário, e sem ela a linha ficava sem nome nem ícone.
+  // O formulário filtra as ativas na hora de oferecer a escolha.
+  const { data: todas } = useCategories(true);
   const [creating, setCreating] = useState(false);
 
   // O + do shell chega aqui mudando a URL para ?novo=1.
@@ -112,7 +117,7 @@ export default function Budget() {
       </div>
 
       {tab === "metas" && <Metas />}
-      {tab === "lancamentos" && <Lancamentos categories={categories} onEdit={setEditing} />}
+      {tab === "lancamentos" && <Lancamentos categories={todas ?? categories} onEdit={setEditing} />}
       {tab === "faturas" && <Invoices />}
 
       {creating && categories && (
@@ -120,7 +125,7 @@ export default function Budget() {
       )}
       {editing && categories && (
         <TransactionForm
-          categories={categories}
+          categories={todas ?? categories}
           transaction={editing}
           onClose={() => setEditing(null)}
         />

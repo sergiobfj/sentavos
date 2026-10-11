@@ -67,7 +67,7 @@ export default function Investments() {
       .sort((a, b) => b.date.localeCompare(a.date));
   }, [transactions.data, categories.data]);
 
-  if (assets.isLoading || budget.isLoading) return <Esqueleto />;
+  if (assets.isLoading || budget.isLoading || transactions.isLoading) return <Esqueleto />;
   if (erro) return <div className="error-box">{erro.message}</div>;
 
   const total = itens.reduce((acc, i) => acc + i.value, 0);
@@ -88,6 +88,18 @@ export default function Investments() {
     : null;
   const rendimento = variacao - aporte;
   const comValor = itens.filter((i) => i.value > 0);
+
+  // Aporte e resgate separados: o resgate é dinheiro que SAIU do investimento,
+  // não prejuízo nem gasto. Somados num número só, um resgate de R$ 1.000
+  // pareceria um mês sem aporte.
+  const aportado = aportes.reduce((s, t) => s + Math.max(t.amount_paid ?? 0, 0), 0);
+  const resgatado = aportes.reduce((s, t) => s + Math.max(-(t.amount_paid ?? 0), 0), 0);
+
+  // Saldo lançado por conferência: no mês houve um movimento cujo valor não
+  // está registrado (a caixinha usada numa compra, sem o extrato). A conta
+  // variação − aportes daria um "prejuízo" que não aconteceu. Traço + motivo.
+  const conferidos = itens.filter((i) => i.reconciliation_note);
+  const naoApurado = conferidos.length > 0;
 
   if (itens.length === 0) {
     return (
@@ -128,12 +140,27 @@ export default function Investments() {
           já é o herói, e a variação virou a linha dele. */}
       <div className="metricas">
         <div className="metrica">
-          <div className="rot">Aportado no mês</div>
-          <div className="val tnum">{formatMoney(aporte)}</div>
+          <div className="rot">Aportado</div>
+          <div className="val tnum">{formatMoney(aportado)}</div>
+          {/* O resgate é linha do aporte, não terceira coluna: três valores
+              em dinheiro não cabem lado a lado em 360px. Mês sem resgate não
+              ganha um zero. */}
+          {resgatado > 0 ? (
+            <div className="s">
+              resgatado <span className="tnum">{formatMoney(resgatado)}</span>
+            </div>
+          ) : (
+            naoApurado && <div className="s">resgate não conciliado</div>
+          )}
         </div>
         <div className="metrica">
           <div className="rot">Rendeu</div>
-          {temBase ? (
+          {naoApurado ? (
+            <>
+              <div className="val fraco">—</div>
+              <div className="s">não apurado</div>
+            </>
+          ) : temBase ? (
             <div className="val tnum">
               {rendimento > 0 ? "+" : ""}{formatMoney(rendimento)}
             </div>
@@ -142,13 +169,20 @@ export default function Investments() {
             // lucro. Melhor um traço honesto do que um número bonito e falso.
             <div className="val fraco">—</div>
           )}
-          {esperadoTotal !== null && (
+          {esperadoTotal !== null && !naoApurado && (
             <div className="s">
               esperado <span className="tnum">{formatMoney(esperadoTotal)}</span>
             </div>
           )}
         </div>
       </div>
+      {naoApurado && (
+        <p className="nota">
+          Rendimento de {label} não apurado: {conferidos.map((i) => (
+            <span key={i.asset_id}>{i.name} — {i.reconciliation_note} </span>
+          ))}
+        </p>
+      )}
 
       {/* Sem o CDI não dá pra projetar nada, e a pessoa ficaria olhando um
           traço sem saber por quê. O aviso aponta pro lugar de resolver. */}
@@ -202,11 +236,19 @@ export default function Investments() {
             <div className="mid">
               <div className="t">{item.name}</div>
               <div className="s">
-                {ASSET_CLASS_LABEL[item.asset_class]}
-                {item.cdi_percent != null && <> · {item.cdi_percent}% do CDI</>}
-                {/* Saldo herdado de mês anterior: sem avisar, o número parece
-                    atual e a pessoa confia num dado que não atualizou. */}
-                {item.as_of && item.as_of !== ym && <> · de {formatYm(item.as_of)}</>}
+                {/* Saldo lançado por conferência: é o que a linha precisa dizer
+                    neste mês, e a legenda só tem lugar pra uma coisa. */}
+                {item.reconciliation_note ? (
+                  "ajuste de conferência"
+                ) : (
+                  <>
+                    {ASSET_CLASS_LABEL[item.asset_class]}
+                    {item.cdi_percent != null && <> · {item.cdi_percent}% do CDI</>}
+                    {/* Saldo herdado de mês anterior: sem avisar, o número parece
+                        atual e a pessoa confia num dado que não atualizou. */}
+                    {item.as_of && item.as_of !== ym && <> · de {formatYm(item.as_of)}</>}
+                  </>
+                )}
               </div>
             </div>
             <div className="amt tnum">
@@ -221,7 +263,7 @@ export default function Investments() {
       {aportes.length > 0 && (
         <>
           <div className="sec-title">
-            <h2>Aportes de {label}</h2>
+            <h2>{resgatado > 0 ? "Aportes e resgates" : "Aportes"} de {label}</h2>
             <Link to="/orcamento?aba=lancamentos">Ver todos</Link>
           </div>
           <div className="list">

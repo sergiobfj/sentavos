@@ -12,15 +12,27 @@ existe um e-mail e uma senha configurados no servidor, e mais ninguém entra.
 
 | Aba | O que responde |
 | --- | --- |
-| **Visão geral** | Como foi o mês: saldo do mês, pra onde o gasto foi (por finalidade), como ele evoluiu e as faturas. |
-| **Orçamento** | Orçado × previsto × pago por categoria, os lançamentos do mês e as faturas dos cartões. |
-| **Investimento** | Quanto tenho aplicado e como está dividido. Visão cruzada de Patrimônio — não guarda dado próprio. |
+| **Início** | Como foi o mês: saldo do mês, pra onde o gasto foi (por finalidade), como ele evoluiu e as faturas. |
+| **Lançamentos** | Orçado × previsto × pago por categoria, os lançamentos do mês e as faturas dos cartões. |
+| **Planejar** | Quanto ainda posso usar no mês, os próximos meses, compromissos e a conferência do mês. |
+| **Investir** | Quanto tenho aplicado, quanto aportei e resgatei, e quanto rendeu. Visão cruzada de Patrimônio — não guarda dado próprio. |
 | **Patrimônio** | Quanto cada coisa vale hoje, incluindo dívida (que entra subtraindo). |
-| **Configurações** | Cartões, CDI e categorias. |
+
+Configurações (cartões, CDI e categorias) fica no ⚙️ do topo, fora da barra.
 
 Transação é **fluxo** (o que se moveu no mês); ativo é **estoque** (quanto vale
 num ponto do tempo). Por isso patrimônio não sai da soma das transações — precisa
 de saldo lançado à mão, mês a mês.
+
+## Rendimento não apurado
+
+Rendimento do mês = variação do saldo − aportes + resgates. Quando falta uma
+das parcelas — a caixinha foi usada numa compra e o valor do resgate não está
+no extrato —, o saldo do mês é lançado **por conferência**
+(`asset_snapshots.reconciliation_note`): o ativo mostra o valor real de hoje, e
+Investir mostra o rendimento como "não apurado", com o motivo, em vez de um
+prejuízo que não aconteceu. Resgate é movimento de investimento (negativo),
+nunca gasto nem rendimento negativo.
 
 ## Gasto não é saída de caixa
 
@@ -117,10 +129,10 @@ categoria.
 
 ## Planejamento
 
-Fica fora da barra de abas (planejar é semanal, não diário): a porta é a linha
-**"Disponível em outubro"** no Início e o item *Planejamento* na lateral do
-desktop. Três sub-abas — **Simular mês**, **Próximos** e **Compromissos** — e a
-conferência do mês em `/organizar`.
+Aba própria, **Planejar** (`/planejamento`), e também a linha **"Disponível em
+outubro"** no Início. A tela principal responde "quanto posso usar?"; simulações,
+próximos meses e compromissos são telas próprias, e a conferência do mês fica em
+`/organizar` (com a aba Planejar acesa).
 
 Quatro coisas que nunca se misturam:
 
@@ -384,6 +396,7 @@ altera uma que já existe.
 | `0004_cartao` | cartões, compras, faturas, pagamentos e a forma de pagamento |
 | `0005_finalidade` | `finalidade` nulável em cartões, compras e lançamentos — nada preenchido |
 | `0006_planejamento` | compromissos, dispensas, reservas, cenários e conferência; baixa no lançamento; conta e dia do saldo — nada preenchido |
+| `0007_conciliacao_saldo` | nota de conferência no saldo do ativo: o rendimento do mês vira "não apurado" — nada preenchido |
 
 Toda migração é **idempotente por coluna**: ela checa antes de adicionar. Num
 banco vazio a `0001` monta as tabelas com `create_all`, que usa o modelo de hoje

@@ -403,6 +403,8 @@ export interface AssetSnapshotSet {
   // O dia em que o saldo foi lido. Sem ele, o servidor usa hoje quando o mês
   // é o corrente.
   observed_on?: string | null;
+  // Saldo lançado por conferência (o motivo). Só muda quando vem no pedido.
+  reconciliation_note?: string | null;
 }
 
 export interface AssetSummaryItem {
@@ -422,6 +424,9 @@ export interface AssetSummaryItem {
   value: number;
   previous: number;
   change: number;
+  // Só quando o saldo DESTE mês foi lançado por conferência: houve movimento
+  // de valor desconhecido, então o rendimento do mês não é apurável.
+  reconciliation_note?: string | null;
   as_of: string | null;
 }
 

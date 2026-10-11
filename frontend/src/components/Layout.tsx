@@ -5,15 +5,18 @@ import { usePeriod } from "../lib/period";
 import { useAuth } from "../lib/auth";
 import logo from "../assets/logo.png";
 
-// Quatro abas, não cinco. Configurações sai da barra e vira o ⚙️ do topo: é a
-// tela que se abre uma vez por mês, e ocupar um quarto da faixa do polegar com
-// ela tiraria espaço das quatro que se usam todo dia.
-// A ordem segue o uso: Início todo dia, Lançamentos quase todo dia, Investir de
-// vez em quando, Patrimônio uma vez por mês. Patrimônio foi pro fim porque é o
-// que se abre menos, não porque importa menos.
+// Cinco abas. Planejar entrou como destino principal: "quanto ainda posso
+// usar este mês" é pergunta de todo dia, e escondida atrás de um link do
+// Início ela não era achada. Configurações continua fora da barra, no ⚙️ do
+// topo — é a tela que se abre uma vez por mês.
+// A ordem segue o uso: Início todo dia, Lançamentos quase todo dia, Planejar
+// junto do que se lança, Investir de vez em quando, Patrimônio uma vez por mês.
+// `curto` é o rótulo da pílula do celular; a barra lateral usa o nome inteiro.
 const ABAS = [
   { to: "/", label: "Início", end: true, icon: IconCasa },
   { to: "/orcamento", label: "Lançamentos", icon: IconLista },
+  // Organizar (a conferência do mês) é parte do planejamento: a aba fica acesa.
+  { to: "/planejamento", label: "Planejamento", curto: "Planejar", icon: IconCalendario, tambem: "/organizar" },
   { to: "/investimentos", label: "Investir", icon: IconGrafico },
   { to: "/patrimonio", label: "Patrimônio", icon: IconCarteira },
 ];
@@ -36,6 +39,8 @@ export default function Layout() {
   // cobria justamente o rodapé de total/pago/restante — visto na tela, não
   // deduzido.
   const emFaturas = new URLSearchParams(search).get("aba") === "faturas";
+  const ativa = (isActive: boolean, tambem?: string) =>
+    isActive || (tambem != null && pathname.startsWith(tambem)) ? "active" : "";
   const mostrarFab =
     !sessao?.somenteLeitura &&
     !emFaturas &&
@@ -50,14 +55,11 @@ export default function Layout() {
           <span className="name"><b>s</b>entavos</span>
         </div>
         <nav className="nav">
-          {ABAS.map(({ to, label, end, icon: Icon }) => (
-            <NavLink key={to} to={to} end={end}>
+          {ABAS.map(({ to, label, end, tambem, icon: Icon }) => (
+            <NavLink key={to} to={to} end={end} className={({ isActive }) => ativa(isActive, tambem)}>
               <Icon /> {label}
             </NavLink>
           ))}
-          {/* Planejamento não está na pílula do celular (quatro abas do
-              polegar), mas aqui sobra espaço: no mouse não há zona do polegar. */}
-          <NavLink to="/planejamento"><IconCalendario /> Planejamento</NavLink>
           <NavLink to="/configuracoes"><IconEngrenagem /> Configurações</NavLink>
         </nav>
         <div className="foot">
@@ -116,10 +118,10 @@ export default function Layout() {
       )}
 
       <nav className="tabbar" aria-label="Navegação principal">
-        {ABAS.map(({ to, label, end, icon: Icon }) => (
-          <NavLink key={to} to={to} end={end}>
+        {ABAS.map(({ to, label, curto, end, tambem, icon: Icon }) => (
+          <NavLink key={to} to={to} end={end} aria-label={label} className={({ isActive }) => ativa(isActive, tambem)}>
             <Icon />
-            <span>{label}</span>
+            <span>{curto ?? label}</span>
           </NavLink>
         ))}
       </nav>

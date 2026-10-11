@@ -258,35 +258,44 @@ h1, h2, h3 { margin: 0; letter-spacing: -0.01em; line-height: 1.25; font-weight:
    Continua flutuante e em pílula — solta da borda ela escapa da faixa do gesto
    de "voltar" do sistema. O vidro saiu: blur + saturate + luz na quina era
    efeito, não informação, e custava pintura a cada rolagem. Agora é uma
-   superfície opaca com borda. São 4 abas: Configurações mora no ⚙️ do topo. */
+   superfície opaca com borda. São 5 abas: Configurações mora no ⚙️ do topo.
+   Com cinco, cada aba tem ~60px a 360px de tela: a pílula encosta mais nas
+   bordas, o vão e o recuo diminuem e o rótulo perde um fio de tamanho —
+   "Lançamentos" e "Patrimônio" cabem inteiros, sem reticências. */
 .tabbar {
   position: fixed;
   z-index: 40;
-  left: max(var(--s4), env(safe-area-inset-left));
-  right: max(var(--s4), env(safe-area-inset-right));
+  left: max(var(--s3), env(safe-area-inset-left));
+  right: max(var(--s3), env(safe-area-inset-right));
   bottom: calc(var(--s3) + env(safe-area-inset-bottom));
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: var(--s1);
-  padding: var(--s2);
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 2px;
+  padding: var(--s1);
   border-radius: var(--r-pill);
   background: var(--surface-2);
   border: 1px solid var(--border);
   box-shadow: var(--shadow-float);
 }
 .tabbar a {
-  min-height: 48px;
+  min-height: 52px; min-width: 0;
   display: flex; flex-direction: column; align-items: center; justify-content: center;
   gap: 2px;
   border-radius: var(--r-pill);
   color: var(--text-faint);
-  font-size: var(--fs-caption); font-weight: var(--w-medium);
+  font-size: 10.5px; font-weight: var(--w-medium); letter-spacing: -0.01em;
+  white-space: nowrap;
   -webkit-tap-highlight-color: transparent;
   transition: color 0.2s, background 0.2s;
 }
 .tabbar a svg { width: 21px; height: 21px; }
 .tabbar a.active { color: var(--gold-hi); background: var(--gold-ghost); }
 .tabbar a:active { transform: scale(0.96); }
+/* Telas de 320px (iPhone SE antigo): ~56px por aba não cabem "Lançamentos"
+   em 10.5px. Um fio menor ali, em vez de reticências em todo celular. */
+@media (max-width: 340px) {
+  .tabbar a { font-size: 9.5px; letter-spacing: -0.02em; }
+}
 
 /* ---------- Botão flutuante ----------
    Dourado sólido: é A ação primária do app. Sem degradê e sem o brilho
