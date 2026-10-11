@@ -935,6 +935,11 @@ def get_asset_summary(
                 previous=previous,
                 change=value - previous,
                 as_of=f"{snap.year}-{snap.month:02d}" if snap else None,
+                reconciliation_note=(
+                    snap.reconciliation_note
+                    if snap and month_index(snap.year, snap.month) == target
+                    else None
+                ),
             )
         )
 
@@ -988,12 +993,21 @@ def set_asset_snapshot(
     if observado is None and (snapshot.year, snapshot.month) == (hoje.year, hoje.month):
         observado = hoje
 
+    # A nota de conferência só muda quando vem no pedido. Digitar o saldo de
+    # novo pela tela (que não manda nota) não apaga o motivo de o rendimento
+    # daquele mês não ser apurável.
+    nota = None
+    if "reconciliation_note" in snapshot.model_fields_set:
+        nota = " ".join((snapshot.reconciliation_note or "").split())[:300] or None
+
     if db_snapshot:
         db_snapshot.value = snapshot.value
         db_snapshot.observed_on = observado
+        if "reconciliation_note" in snapshot.model_fields_set:
+            db_snapshot.reconciliation_note = nota
     else:
         db_snapshot = AssetSnapshot.model_validate(
-            snapshot, update={"user_id": dono.id, "observed_on": observado}
+            snapshot, update={"user_id": dono.id, "observed_on": observado, "reconciliation_note": nota}
         )
 
     session.add(db_snapshot)

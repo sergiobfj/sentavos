@@ -86,6 +86,46 @@ def test_summary_calcula_variacao_no_mes(client):
     assert item["change"] == 250
 
 
+
+def test_saldo_de_conferencia_marca_so_o_proprio_mes(client):
+    # A caixinha foi usada numa compra e o valor do resgate não está no
+    # extrato: o saldo de hoje é conhecido, o rendimento do mês não.
+    ativo = criar_ativo(client, name="Caixinha", asset_class="fixed_income")
+    lancar_saldo(client, ativo["id"], 1458.15, month=9)
+    r = client.put(
+        "/assets/snapshots",
+        json={"asset_id": ativo["id"], "year": 2026, "month": 10, "value": 0,
+              "reconciliation_note": "  Caixinha usada na compra;\n resgate não conciliado "},
+    )
+    assert r.status_code == 200
+    assert r.json()["reconciliation_note"] == "Caixinha usada na compra; resgate não conciliado"
+
+    outubro = resumo(client, month=10).json()
+    item = outubro["items"][0]
+    assert item["reconciliation_note"] == "Caixinha usada na compra; resgate não conciliado"
+    # A nota não mexe em número nenhum: saldo, variação e patrimônio são os de sempre.
+    assert (item["value"], item["previous"], item["change"]) == (0, 1458.15, -1458.15)
+    assert outubro["net_worth"] == 0
+
+    # Novembro herda o saldo, não a dúvida de outubro.
+    assert resumo(client, month=11).json()["items"][0]["reconciliation_note"] is None
+    assert resumo(client, month=9).json()["items"][0]["reconciliation_note"] is None
+
+
+def test_lancar_o_saldo_de_novo_sem_nota_nao_apaga_a_nota(client):
+    ativo = criar_ativo(client, name="Caixinha", asset_class="fixed_income")
+    put = lambda **extra: client.put(
+        "/assets/snapshots",
+        json={"asset_id": ativo["id"], "year": 2026, "month": 7, "value": 10, **extra},
+    )
+    put(reconciliation_note="resgate não conciliado")
+
+    # A tela de saldo não manda nota: corrigir o valor mantém o motivo.
+    assert put().json()["reconciliation_note"] == "resgate não conciliado"
+    # Mandar nula, de propósito, tira.
+    assert put(reconciliation_note=None).json()["reconciliation_note"] is None
+    assert resumo(client).json()["items"][0]["reconciliation_note"] is None
+
 def test_variacao_em_janeiro_olha_dezembro_anterior(client):
     ativo = criar_ativo(client)
     lancar_saldo(client, ativo["id"], 800, year=2025, month=12)

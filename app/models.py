@@ -733,6 +733,15 @@ class AssetSnapshotBase(SQLModel):
     # um lançamento de 10/10 já está ou não dentro de um saldo "de outubro".
     # Nulo nos saldos antigos e nos de meses passados, onde vale "fim do mês".
     observed_on: dt.date | None = None
+    # Saldo lançado por CONFERÊNCIA: o dono sabe o valor de hoje, mas no mês
+    # houve movimento cujo valor exato não está registrado (o resgate da
+    # caixinha usado na moto, sem o extrato). O texto diz o que aconteceu.
+    #
+    # Com ele, o rendimento do mês desse ativo é "não apurado": a conta
+    # variação − aportes + resgates daria um número falso, porque falta uma
+    # das parcelas. Melhor um traço com o motivo do que um prejuízo inventado.
+    # Não muda nenhum valor — saldo, patrimônio e caixa continuam iguais.
+    reconciliation_note: str | None = None
 
 class AssetSnapshot(AssetSnapshotBase, table=True):
     __tablename__ = "asset_snapshots"
@@ -768,6 +777,9 @@ class AssetSummaryItem(SQLModel):
     # "YYYY-MM" de onde o valor saiu, ou None se o ativo nunca teve saldo.
     # Deixa a tela avisar que o número é herdado em vez de fingir que é atual.
     as_of: str | None = None
+    # Só quando o saldo DESTE mês foi lançado por conferência: o rendimento do
+    # mês desse ativo não é apurável (ver AssetSnapshotBase).
+    reconciliation_note: str | None = None
 
 class AssetClassTotal(SQLModel):
     value: float = 0
