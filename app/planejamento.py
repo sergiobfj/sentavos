@@ -91,6 +91,24 @@ def mes_de(d: dt.date) -> Mes:
     return (d.year, d.month)
 
 
+def saldo_desatualizado(saldo: Mes, alvo: Mes, agora: dt.date) -> bool:
+    """O saldo herdado de um mês anterior ao corrente NÃO é o saldo de hoje.
+
+    Três coisas diferentes que o app tratava como uma só:
+      - o saldo do período (lançado no próprio mês): vale;
+      - o último saldo conhecido de um mês PASSADO, visto num mês passado: é o
+        retrato histórico, e continua valendo — setembro lê o que sempre leu;
+      - o último saldo conhecido de um mês passado, visto do mês corrente em
+        diante: é desatualizado. Aparece, com a data, mas não entra em total
+        nenhum nem no saldo de partida do planejamento.
+
+    O caso que motivou: o Nubank de setembro (R$ 5.262) continuava somando no
+    patrimônio de outubro depois que o dinheiro guardado pagou a moto.
+    """
+    corrente = mes_de(agora)
+    return indice(alvo) >= indice(corrente) and indice(saldo) < indice(corrente)
+
+
 def somar_meses(m: Mes, n: int) -> Mes:
     return avancar_meses(m[0], m[1], n)
 
@@ -307,6 +325,9 @@ class ContaPlanejamento(SQLModel):
     # "2026-09" do saldo usado; nulo se a conta nunca teve saldo.
     as_of: str | None = None
     observed_on: dt.date | None = None
+    # Último saldo é de mês anterior ao corrente: aparece, mas não entra no
+    # saldo de partida (ver `saldo_desatualizado`).
+    stale: bool = False
 
 
 class MovimentoDepois(SQLModel):
@@ -323,8 +344,10 @@ class AvisoSaldo(SQLModel):
     antes de confiar na projeção.
     """
 
-    # O saldo mais antigo entre as contas marcadas é de um mês anterior.
+    # Alguma conta marcada só tem saldo de mês anterior — ela fica FORA do
+    # saldo de partida até ser atualizada (`contas_desatualizadas`).
     desatualizado: bool = False
+    contas_desatualizadas: list[str] = []
     # Há saldo deste mês, mas sem o dia — não dá pra saber o que está dentro.
     sem_dia: bool = False
     sem_contas: bool = False
@@ -347,12 +370,13 @@ def conta_entra(asset: Asset) -> bool:
 
 
 def contas_de_partida(
-    session: Session, dono: User, m0: Mes
+    session: Session, dono: User, m0: Mes, agora: dt.date
 ) -> list[ContaPlanejamento]:
     """Cada ativo que pode ser dinheiro do mês, com o último saldo até `m0`.
 
     Dívida fica de fora sempre: financiamento não é dinheiro disponível, e as
-    parcelas dele já entram como saída.
+    parcelas dele já entram como saída. Saldo de mês anterior vem marcado
+    `stale` e não soma — o planejamento parte do que se sabe hoje.
     """
     ativos = session.exec(consulta(Asset, dono).order_by(Asset.asset_class, Asset.name)).all()
     saldos = session.exec(consulta(AssetSnapshot, dono)).all()
@@ -379,6 +403,7 @@ def contas_de_partida(
                 value=round(s.value, 2) if s else 0.0,
                 as_of=f"{s.year}-{s.month:02d}" if s else None,
                 observed_on=s.observed_on if s else None,
+                stale=bool(s) and saldo_desatualizado((s.year, s.month), m0, agora),
             )
         )
     return contas
@@ -394,13 +419,15 @@ def aviso_do_saldo(
         return aviso
 
     aviso.contas_sem_saldo = [c.name for c in marcadas if c.as_of is None]
+    aviso.contas_desatualizadas = [c.name for c in marcadas if c.stale]
+    aviso.desatualizado = bool(aviso.contas_desatualizadas)
 
-    # A data até onde cada saldo "sabe" das coisas. Saldo de mês passado vale
-    # até o fim daquele mês; saldo deste mês com dia vale até o dia; saldo
-    # deste mês sem dia não diz nada.
+    # A data até onde cada saldo "sabe" das coisas. Saldo deste mês com dia
+    # vale até o dia; sem dia não diz nada. Saldo desatualizado não entra no
+    # saldo de partida, então também não define o que "falta" nele.
     referencias: list[dt.date] = []
     for c in marcadas:
-        if c.as_of is None:
+        if c.as_of is None or c.stale:
             continue
         ano, mes = (int(x) for x in c.as_of.split("-"))
         if (ano, mes) == m0:
@@ -791,14 +818,14 @@ def planejar(
     _aplicar_hipoteses(hipoteses or [], itens, reservas, m0, ate)
 
     # ---------- A conta, mês a mês ----------
-    contas = contas_de_partida(session, dono, m0)
+    contas = contas_de_partida(session, dono, m0, agora)
     resposta = PlanoResposta(
         today=agora,
         accounts=contas,
         balance_warning=aviso_do_saldo(session, dono, contas, m0, agora),
     )
 
-    saldo = round(sum(c.value for c in contas if c.included), 2)
+    saldo = round(sum(c.value for c in contas if c.included and not c.stale), 2)
     meses = []
     m = m0
     while indice(m) <= indice(ate):

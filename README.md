@@ -24,6 +24,24 @@ Transação é **fluxo** (o que se moveu no mês); ativo é **estoque** (quanto 
 num ponto do tempo). Por isso patrimônio não sai da soma das transações — precisa
 de saldo lançado à mão, mês a mês.
 
+## Saldo atual × último saldo conhecido
+
+Saldo de ativo é um retrato mensal (`asset_snapshots`). Três coisas diferentes:
+
+| | O que é | Soma? |
+| --- | --- | --- |
+| **Saldo do período** | lançado no próprio mês | sim |
+| **Último saldo conhecido, num mês passado** | mês sem lançamento herda o anterior — é o retrato histórico | sim (setembro lê o que sempre leu) |
+| **Último saldo conhecido, do mês corrente em diante** | um saldo de setembro visto em outubro | **não**: aparece como "de set/2026", fora do patrimônio, do investido e do saldo de partida do planejamento |
+
+A regra mora em `planejamento.saldo_desatualizado` e vale pro resumo de
+patrimônio e pro planejamento. Consequência: a cada mês novo, os saldos
+precisam ser lançados de novo pra voltarem a contar.
+
+Quando se sabe o total mas não a divisão por banco, o total vira um ativo
+"Saldo agregado" (classe Conta) com o saldo do mês e a nota de conferência —
+nada de repartir por diferença.
+
 ## Rendimento não apurado
 
 Rendimento do mês = variação do saldo − aportes + resgates. Quando falta uma

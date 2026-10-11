@@ -311,10 +311,22 @@ def test_planejamento_nao_mostra_nem_soma_dado_alheio(cliente_de, duas_contas, m
         assert "Bruno" not in texto, f"{rota} devolveu dado do Bruno: {texto[:200]}"
     assert len(cliente.get("/commitments").json()) == 1
 
+    # Saldo de setembro não vale como saldo de hoje: as duas lançam o de
+    # outubro, pra que um vazamento apareça como 2000 no saldo de partida.
+    for nome in ("ana", "bruno"):
+        dono, ids = duas_contas[nome]
+        r = cliente_de(dono).put(
+            "/assets/snapshots",
+            json={"asset_id": ids["ativo"], "year": 2026, "month": 10, "value": 1000.0},
+        )
+        assert r.status_code == 200, r.text
+    # O override de usuário é global: volta a ser a Ana.
+    cliente = cliente_de(ana)
+
     corpo = cliente.get("/planning/horizon?months=3").json()
     assert "Bruno" not in str(corpo)
     outubro, novembro, dezembro = corpo["months"]
-    # Saldo de partida: só o ativo dela (1000, de setembro, classe Conta).
+    # Saldo de partida: só o ativo dela (1000, de outubro, classe Conta).
     assert outubro["opening"] == 1000.0
     # Outubro: a fatura dela (200 em aberto). A 1ª parcela já foi paga e a
     # 2ª (novembro) está dispensada; a 3ª é dezembro, coberta pela reserva.

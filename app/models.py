@@ -780,6 +780,10 @@ class AssetSummaryItem(SQLModel):
     # Só quando o saldo DESTE mês foi lançado por conferência: o rendimento do
     # mês desse ativo não é apurável (ver AssetSnapshotBase).
     reconciliation_note: str | None = None
+    # Do mês corrente em diante, um saldo herdado de mês anterior é só o
+    # último conhecido: `value` mostra qual era, mas ele NÃO soma em total
+    # nenhum (classe, ativos, patrimônio). Ver `planejamento.saldo_desatualizado`.
+    stale: bool = False
 
 class AssetClassTotal(SQLModel):
     value: float = 0
@@ -795,6 +799,11 @@ class AssetSummary(SQLModel):
     liabilities: float = 0
     net_worth: float = 0
     previous_net_worth: float = 0
+    # O que ficou FORA dos totais por estar desatualizado (último saldo
+    # conhecido de cada um), pra tela dizer quanto e quantos.
+    stale_count: int = 0
+    stale_assets: float = 0
+    stale_liabilities: float = 0
 
 
 # ===========================================================================

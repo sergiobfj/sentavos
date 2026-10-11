@@ -10,6 +10,7 @@ from sqlmodel import Session, SQLModel, and_, func, or_, select
 from app.auth import ConfiguracaoIncompleta, autenticar, exigir_escrita, require_user
 from app.cartao import limites_do_mes as month_bounds
 from app.escopo import buscar, consulta, exigir
+from app import planejamento
 from app.faturas import enriquecer, resumo_de_caixa
 from app.rendimento import rendimento_do_mes
 from app.rotas_cartao import router_cartao
@@ -862,12 +863,17 @@ def get_asset_summary(
 ):
     """Saldo de cada ativo no mês, com variação e patrimônio líquido.
 
-    Saldo é estoque, não movimento: quem não atualizou o mês continua valendo
-    o último saldo lançado. Sem isso o patrimônio despencaria a zero em todo
-    mês que ficou sem preencher, o que seria mentira e não ausência de dado.
+    Saldo é estoque, não movimento. Num mês PASSADO sem lançamento vale o
+    último saldo lançado — é o retrato histórico, e zerá-lo seria mentira.
+
+    Do mês corrente em diante, não: saldo de mês anterior é só o último
+    conhecido. Ele aparece (com `stale` e a data), mas fica fora dos totais —
+    o patrimônio de hoje soma só o que foi atualizado no mês. Antes, o Nubank
+    de setembro continuava somando em outubro como se o dinheiro estivesse lá.
     """
     target = month_index(year, month)
     prev_target = month_index(*previous_month(year, month))
+    agora = planejamento.hoje()
 
     snapshots = session.exec(
         consulta(AssetSnapshot, dono).where(
@@ -900,6 +906,11 @@ def get_asset_summary(
     by_class = {classe.value: AssetClassTotal() for classe in AssetClass}
     total_assets = total_liabilities = 0.0
     prev_assets = prev_liabilities = 0.0
+    stale_count = 0
+    stale_assets = stale_liabilities = 0.0
+
+    def vencido(s: AssetSnapshot | None, alvo: tuple[int, int]) -> bool:
+        return s is not None and planejamento.saldo_desatualizado((s.year, s.month), alvo, agora)
 
     for asset in assets:
         snap = latest.get(asset.id)
@@ -907,6 +918,10 @@ def get_asset_summary(
         value = snap.value if snap else 0.0
         previous = prev_snap.value if prev_snap else 0.0
         liability = is_liability(asset.asset_class)
+        stale = vencido(snap, (year, month))
+        # O mês anterior segue a mesma regra: olhando novembro, um saldo de
+        # setembro também não vale em outubro.
+        prev_conta = not vencido(prev_snap, previous_month(year, month))
 
         # O rendimento esperado parte do saldo do mês ANTERIOR: é sobre ele que
         # os juros do mês incidiram. Usar o saldo atual contaria juros sobre o
@@ -940,19 +955,29 @@ def get_asset_summary(
                     if snap and month_index(snap.year, snap.month) == target
                     else None
                 ),
+                stale=stale,
             )
         )
 
         total = by_class[AssetClass(asset.asset_class).value]
-        total.value += value
-        total.previous += previous
-
-        if liability:
-            total_liabilities += value
-            prev_liabilities += previous
+        if stale:
+            stale_count += 1
+            if liability:
+                stale_liabilities += value
+            else:
+                stale_assets += value
         else:
-            total_assets += value
-            prev_assets += previous
+            total.value += value
+            if liability:
+                total_liabilities += value
+            else:
+                total_assets += value
+        if prev_conta:
+            total.previous += previous
+            if liability:
+                prev_liabilities += previous
+            else:
+                prev_assets += previous
 
     return AssetSummary(
         year=year,
@@ -963,6 +988,9 @@ def get_asset_summary(
         liabilities=total_liabilities,
         net_worth=total_assets - total_liabilities,
         previous_net_worth=prev_assets - prev_liabilities,
+        stale_count=stale_count,
+        stale_assets=stale_assets,
+        stale_liabilities=stale_liabilities,
     )
 
 

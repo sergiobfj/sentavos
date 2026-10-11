@@ -108,6 +108,14 @@ def periodos() -> list[tuple[int, int]]:
     return [((fim - i) // 12, ((fim - i) % 12) + 1) for i in range(MESES - 1, -1, -1)]
 
 
+def meses_ate_hoje() -> list[tuple[int, int]]:
+    """Os meses depois de FIM até o corrente (vazio se FIM já é o corrente)."""
+    hoje = dt.date.today()
+    fim = FIM.year * 12 + (FIM.month - 1)
+    agora = hoje.year * 12 + (hoje.month - 1)
+    return [(i // 12, i % 12 + 1) for i in range(fim + 1, agora + 1)]
+
+
 def valor(base: float, variacao: float) -> float:
     if variacao == 0:
         return base
@@ -320,6 +328,17 @@ def semear(dono: User, s: Session) -> dict:
             s.add(AssetSnapshot(
                 user_id=dono.id, asset_id=ativo.id,
                 year=ano, month=mes, value=round(max(bruto, 0.0), 2),
+            ))
+            contagem["saldos"] += 1
+
+        # O histórico vai até FIM; o saldo segue na mesma reta até o mês
+        # corrente. Do mês corrente em diante, saldo de mês anterior não soma
+        # no patrimônio — sem isto o demo abriria com quase tudo "não
+        # atualizado". Sem `rnd` aqui: o resto do demo continua idêntico.
+        for k, (ano, mes) in enumerate(meses_ate_hoje(), start=len(periodos())):
+            s.add(AssetSnapshot(
+                user_id=dono.id, asset_id=ativo.id,
+                year=ano, month=mes, value=round(max(inicial + passo * k, 0.0), 2),
             ))
             contagem["saldos"] += 1
 

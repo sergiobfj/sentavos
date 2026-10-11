@@ -262,11 +262,43 @@ def test_aviso_lista_o_que_aconteceu_depois_do_saldo_sem_aplicar(m):
     assert aviso["movimentos"][0]["description"] == "Entrada da moto"
 
 
-def test_saldo_de_mes_passado_e_marcado_como_desatualizado(m):
+def test_saldo_de_mes_passado_fica_fora_do_saldo_de_partida(m):
+    """Saldo de setembro não é o de hoje: aparece marcado, mas não soma."""
     m.conta("Banco", 500.0, ano=2026, mes=9)
-    aviso = m.mes()["balance_warning"]
+
+    corpo = m.mes()
+
+    assert corpo["months"][0]["opening"] == 0.0
+    banco = corpo["accounts"][0]
+    assert banco["stale"] is True
+    assert (banco["value"], banco["as_of"]) == (500.0, "2026-09")
+    aviso = corpo["balance_warning"]
     assert aviso["desatualizado"] is True
-    assert aviso["desde"] == "2026-09-30"
+    assert aviso["contas_desatualizadas"] == ["Banco"]
+    # O que ficou fora não define o "desde" dos movimentos.
+    assert aviso["desde"] is None
+
+
+def test_saldo_agregado_observado_e_o_ponto_de_partida(m):
+    """O caso de outubro/2026: R$ 684,39 conhecidos em 11/10, sem divisão por
+    banco, e as contas com saldo de setembro ficando de fora."""
+    m.conta("Conta", 176.56, ano=2026, mes=9)
+    m.conta("Nubank", 5262.23, ano=2026, mes=9, classe="fixed_income", planejamento=True)
+    m.conta("Saldo agregado", 684.39, dia=HOJE)
+    adiantamento = m.categoria("Adiantamento", "income")
+    meta = m.categoria("Meta", "income")
+    m.lancar(adiantamento, D(2026, 10, 15), previsto=720.0, descricao="Adiantamento")
+    m.lancar(meta, D(2026, 10, 20), previsto=700.0, descricao="Meta")
+
+    corpo = m.mes()
+
+    mes = corpo["months"][0]
+    assert mes["opening"] == 684.39
+    assert mes["income"] == 1420.0
+    assert mes["projected"] == 2104.39
+    assert mes["available"] == 2104.39
+    assert sorted(corpo["balance_warning"]["contas_desatualizadas"]) == ["Conta", "Nubank"]
+    assert corpo["balance_warning"]["desde"] == HOJE.isoformat()
 
 
 def test_so_as_contas_marcadas_entram(m):

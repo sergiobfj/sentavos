@@ -1,3 +1,8 @@
+import datetime as dt
+
+import pytest
+
+
 def criar_ativo(client, name="Nubank", asset_class="checking"):
     return client.post(
         "/assets", json={"name": name, "asset_class": asset_class}
@@ -230,3 +235,70 @@ def test_rotas_inexistentes_dao_404(client):
     assert client.patch("/assets/999", json={"name": "x"}).status_code == 404
     assert client.delete("/assets/999").status_code == 404
     assert client.delete("/assets/snapshots/999").status_code == 404
+
+
+# ---------- Saldo de hoje × último saldo conhecido ----------
+# "Hoje" fixo em 11/10/2026: a regra depende do mês corrente.
+
+HOJE = dt.date(2026, 10, 11)
+
+
+def por_nome(corpo, nome):
+    return next(i for i in corpo["items"] if i["name"] == nome)
+
+
+def test_saldo_de_setembro_nao_soma_no_patrimonio_de_outubro(client, monkeypatch):
+    """O Nubank de setembro aparece, com a data, mas não finge ser de hoje."""
+    monkeypatch.setattr("app.planejamento.hoje", lambda: HOJE)
+    nubank = criar_ativo(client, name="Nubank", asset_class="fixed_income")
+    caixinha = criar_ativo(client, name="Caixinha", asset_class="fixed_income")
+    agregado = criar_ativo(client, name="Saldo agregado", asset_class="checking")
+    lancar_saldo(client, nubank["id"], 5262.23, month=9)
+    lancar_saldo(client, caixinha["id"], 1458.15, month=9)
+    lancar_saldo(client, caixinha["id"], 0, month=10)
+    lancar_saldo(client, agregado["id"], 684.39, month=10)
+
+    outubro = resumo(client, month=10).json()
+    nb = por_nome(outubro, "Nubank")
+    assert nb["stale"] is True
+    assert (nb["value"], nb["as_of"]) == (5262.23, "2026-09")
+    assert por_nome(outubro, "Caixinha")["stale"] is False
+    # Só o que foi atualizado em outubro soma.
+    assert outubro["assets"] == 684.39
+    assert outubro["net_worth"] == 684.39
+    assert outubro["by_class"]["fixed_income"]["value"] == 0
+    assert (outubro["stale_count"], outubro["stale_assets"]) == (1, 5262.23)
+    # O mês anterior é passado: o retrato de setembro, inteiro.
+    assert outubro["previous_net_worth"] == pytest.approx(6720.38)
+
+
+def test_mes_passado_continua_lendo_o_ultimo_saldo_conhecido(client, monkeypatch):
+    """Setembro (e antes) não muda: lá o saldo herdado é o retrato histórico."""
+    monkeypatch.setattr("app.planejamento.hoje", lambda: HOJE)
+    ativo = criar_ativo(client, name="Nubank", asset_class="fixed_income")
+    lancar_saldo(client, ativo["id"], 5262.23, month=7)
+
+    setembro = resumo(client, month=9).json()
+
+    item = setembro["items"][0]
+    assert item["stale"] is False
+    assert (item["value"], item["as_of"]) == (5262.23, "2026-07")
+    assert setembro["net_worth"] == 5262.23
+    assert setembro["stale_count"] == 0
+
+
+def test_saldo_do_mes_corrente_vale_nos_meses_seguintes(client, monkeypatch):
+    """Novembro projeta o saldo de outubro (o de hoje); o de setembro, não."""
+    monkeypatch.setattr("app.planejamento.hoje", lambda: HOJE)
+    agregado = criar_ativo(client, name="Saldo agregado", asset_class="checking")
+    conta = criar_ativo(client, name="Conta", asset_class="checking")
+    lancar_saldo(client, agregado["id"], 684.39, month=10)
+    lancar_saldo(client, conta["id"], 176.56, month=9)
+
+    novembro = resumo(client, month=11).json()
+
+    assert por_nome(novembro, "Saldo agregado")["stale"] is False
+    assert por_nome(novembro, "Conta")["stale"] is True
+    assert novembro["net_worth"] == 684.39
+    # Outubro, visto de novembro, também deixa a Conta de setembro de fora.
+    assert novembro["previous_net_worth"] == 684.39
