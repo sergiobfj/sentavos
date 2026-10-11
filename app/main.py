@@ -14,6 +14,8 @@ from app.faturas import enriquecer, resumo_de_caixa
 from app.rendimento import rendimento_do_mes
 from app.rotas_cartao import router_cartao
 from app.rotas_relatorios import router_relatorios
+from app.rotas_planejamento import router_planejamento
+from app.rotas_conferencia import router_conferencia
 from app.database import create_db_and_tables, get_session
 from app.security import RateLimitMiddleware, SecurityHeadersMiddleware
 from app.models import (
@@ -38,6 +40,7 @@ from app.models import (
     CategoryRead,
     CategoryType,
     CategoryUpdate,
+    Commitment,
     Finalidade,
     PaymentMethod,
     Purchase,
@@ -286,6 +289,19 @@ def update_transaction(
 
     categoria_antes = buscar(session, Category, transaction.category_id, dono)
 
+    # A baixa de um compromisso de saída não pode virar receita: a parcela
+    # "paga" com um lançamento de entrada contaria o dinheiro ao contrário.
+    if transaction.commitment_id is not None and update_data.get("category_id") is not None:
+        nova = buscar(session, Category, update_data["category_id"], dono)
+        if nova and categoria_antes and nova.type != categoria_antes.type:
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    "Este lançamento é a baixa de um compromisso. Ele pode mudar de "
+                    "categoria, mas não de tipo — desvincule antes."
+                ),
+            )
+
     for key, value in update_data.items():
         setattr(transaction, key, value)
 
@@ -391,8 +407,8 @@ def _cor(bruta: str | None) -> str:
     return cor.lower()
 
 
-def _uso_da_categoria(session: Session, dono: User) -> dict[int, tuple[int, int, int]]:
-    """{category_id: (lançamentos, compras, metas)} em três consultas agregadas."""
+def _uso_da_categoria(session: Session, dono: User) -> dict[int, tuple[int, int, int, int]]:
+    """{category_id: (lançamentos, compras, metas, compromissos)}, uma consulta agregada cada."""
 
     def contar(modelo) -> dict[int, int]:
         return {
@@ -405,9 +421,10 @@ def _uso_da_categoria(session: Session, dono: User) -> dict[int, tuple[int, int,
         }
 
     lanc, compras, metas = contar(Transaction), contar(Purchase), contar(Budget)
+    compromissos = contar(Commitment)
     return {
-        cid: (lanc.get(cid, 0), compras.get(cid, 0), metas.get(cid, 0))
-        for cid in set(lanc) | set(compras) | set(metas)
+        cid: (lanc.get(cid, 0), compras.get(cid, 0), metas.get(cid, 0), compromissos.get(cid, 0))
+        for cid in set(lanc) | set(compras) | set(metas) | set(compromissos)
     }
 
 
@@ -457,9 +474,10 @@ def list_categories(
     return [
         CategoryRead(
             **c.model_dump(),
-            transactions=uso.get(c.id, (0, 0, 0))[0],
-            purchases=uso.get(c.id, (0, 0, 0))[1],
-            budgets=uso.get(c.id, (0, 0, 0))[2],
+            transactions=uso.get(c.id, (0, 0, 0, 0))[0],
+            purchases=uso.get(c.id, (0, 0, 0, 0))[1],
+            budgets=uso.get(c.id, (0, 0, 0, 0))[2],
+            commitments=uso.get(c.id, (0, 0, 0, 0))[3],
         )
         for c in categorias
     ]
@@ -493,12 +511,15 @@ def update_category(
         raise HTTPException(status_code=400, detail="O tipo não pode ficar vazio.")
     muda_tipo = novo_tipo is not None and CategoryType(novo_tipo) != CategoryType(category.type)
     if muda_tipo:
-        lanc, compras, metas = _uso_da_categoria(session, dono).get(category.id, (0, 0, 0))
-        if lanc or compras or metas:
+        lanc, compras, metas, compromissos = _uso_da_categoria(session, dono).get(
+            category.id, (0, 0, 0, 0)
+        )
+        if lanc or compras or metas or compromissos:
             partes = [
                 f"{n} {rotulo}"
                 for n, rotulo in (
-                    (lanc, "lançamento(s)"), (compras, "compra(s) no cartão"), (metas, "meta(s)")
+                    (lanc, "lançamento(s)"), (compras, "compra(s) no cartão"), (metas, "meta(s)"),
+                    (compromissos, "compromisso(s)"),
                 )
                 if n
             ]
@@ -600,7 +621,27 @@ def delete_category(
             compra.category_id = mover_para
             session.add(compra)
 
+        # O compromisso também aponta pra categoria, e as baixas dele são
+        # lançamentos movidos acima. Sem isto a FK de `commitments` barraria o
+        # DELETE lá embaixo — no Postgres, um 500.
+        for compromisso in session.exec(
+            consulta(Commitment, dono).where(Commitment.category_id == category_id)
+        ).all():
+            compromisso.category_id = mover_para
+            session.add(compromisso)
+
         session.flush()
+
+    elif compromissos_da_categoria(session, dono, category_id):
+        # Sem lançamento mas com compromisso: apagar deixaria o financiamento
+        # sem categoria.
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "A categoria é usada por compromisso(s) do planejamento. "
+                "Mova pra outra categoria antes de apagá-la."
+            ),
+        )
 
     elif lancamentos:
         # Lançamento é histórico: apagar a categoria junto seria destruir dado
@@ -629,6 +670,14 @@ def delete_category(
             "moved": lancamentos,
         }
     return {"message": "Categoria excluída.", "moved": 0}
+
+
+def compromissos_da_categoria(session: Session, dono: User, category_id: int) -> int:
+    return session.exec(
+        select(func.count())
+        .select_from(Commitment)
+        .where(Commitment.user_id == dono.id, Commitment.category_id == category_id)
+    ).one()
 
 
 # Declarado antes de /budgets/{budget_id} pra "summary" não ser lido como id.
@@ -931,10 +980,21 @@ def set_asset_snapshot(
         )
     ).first()
 
+    # O dia da leitura: o informado, ou hoje quando o saldo é do mês corrente.
+    # Saldo de mês passado fica sem dia — vale "fim daquele mês". Patrimônio
+    # não olha pra isto; o planejamento olha, pra saber o que já está dentro.
+    hoje = dt.date.today()
+    observado = snapshot.observed_on
+    if observado is None and (snapshot.year, snapshot.month) == (hoje.year, hoje.month):
+        observado = hoje
+
     if db_snapshot:
         db_snapshot.value = snapshot.value
+        db_snapshot.observed_on = observado
     else:
-        db_snapshot = AssetSnapshot.model_validate(snapshot, update={"user_id": dono.id})
+        db_snapshot = AssetSnapshot.model_validate(
+            snapshot, update={"user_id": dono.id, "observed_on": observado}
+        )
 
     session.add(db_snapshot)
     session.commit()
@@ -1088,3 +1148,8 @@ app.include_router(router_cartao)
 # Relatórios (app/rotas_relatorios.py): séries e distribuição já agregadas no
 # servidor, no mesmo arranjo — router próprio que também exige token.
 app.include_router(router_relatorios)
+
+# Planejamento (app/rotas_planejamento.py) e conferência do mês
+# (app/rotas_conferencia.py): mesmo arranjo, router próprio que exige token.
+app.include_router(router_planejamento)
+app.include_router(router_conferencia)

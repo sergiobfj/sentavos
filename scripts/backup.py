@@ -47,6 +47,14 @@ TABELAS = [
     "purchases",
     "invoices",
     "invoice_payments",
+    # Planejamento (0006). Os vínculos da conferência não têm FK, então a
+    # ordem só importa pros outros: compromisso antes da dispensa e da reserva.
+    "commitments",
+    "commitment_skips",
+    "provisions",
+    "scenarios",
+    "scenario_items",
+    "reconciliation_items",
 ]
 
 

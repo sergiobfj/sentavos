@@ -37,6 +37,7 @@ from app.models import (
     Card,
     Category,
     CategoryType,
+    Commitment,
     Invoice,
     InvoicePayment,
     InvoiceRead,
@@ -174,8 +175,26 @@ def enriquecer(
     independentemente do tamanho dela.
     """
     ids_de_compra = {t.purchase_id for t in lancamentos if t.purchase_id}
+    ids_de_compromisso = {t.commitment_id for t in lancamentos if t.commitment_id}
+    compromissos = {
+        c.id: c
+        for c in session.exec(
+            consulta(Commitment, dono).where(Commitment.id.in_(ids_de_compromisso))
+        ).all()
+    } if ids_de_compromisso else {}
+
+    def com_compromisso(linha: TransactionRead, t: Transaction) -> TransactionRead:
+        c = compromissos.get(t.commitment_id) if t.commitment_id else None
+        if c is not None:
+            linha.commitment_description = c.description
+            linha.commitment_installments = c.installments
+        return linha
+
     if not ids_de_compra:
-        return [TransactionRead.model_validate(t, from_attributes=True) for t in lancamentos]
+        return [
+            com_compromisso(TransactionRead.model_validate(t, from_attributes=True), t)
+            for t in lancamentos
+        ]
 
     compras = {
         c.id: c
@@ -204,7 +223,7 @@ def enriquecer(
             cartao = cartoes.get(compra.card_id)
             linha.card_name = cartao.name if cartao else None
             linha.card_finalidade = cartao.finalidade if cartao else None
-        saida.append(linha)
+        saida.append(com_compromisso(linha, t))
     return saida
 
 

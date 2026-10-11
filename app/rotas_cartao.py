@@ -958,6 +958,17 @@ def reconciliar(
             ),
         )
 
+    if lancamento.commitment_id is not None:
+        # Reconciliar apaga o lançamento, e com ele sumiria a baixa do
+        # compromisso: a parcela voltaria a "a pagar" com o dinheiro já fora.
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "Esse lançamento é a baixa de um compromisso do planejamento. "
+                "Desvincule-o antes de usá-lo como pagamento de fatura."
+            ),
+        )
+
     if lancamento.amount_paid is None or lancamento.amount_paid <= 0:
         raise HTTPException(
             status_code=400,
@@ -1021,6 +1032,9 @@ def _classificar(
     """Classifica um lançamento. Devolve o motivo quando não dá, ou None."""
     if lancamento.purchase_id is not None:
         return "já é parcela de uma compra no cartão"
+    if lancamento.commitment_id is not None and pedido.metodo == PaymentMethod.CREDIT:
+        # Virar compra apaga o lançamento, e a baixa do compromisso iria junto.
+        return "é a baixa de um compromisso — desvincule antes de passar pro cartão"
 
     if pedido.metodo == PaymentMethod.CASH:
         lancamento.payment_method = PaymentMethod.CASH

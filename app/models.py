@@ -1,4 +1,7 @@
 import datetime as dt
+from typing import Any
+
+import sqlalchemy as sa
 from sqlmodel import SQLModel, Field, UniqueConstraint
 from enum import Enum
 
@@ -110,6 +113,7 @@ class CategoryRead(CategoryBase):
     transactions: int = 0
     purchases: int = 0
     budgets: int = 0
+    commitments: int = 0
 
 class PaymentMethod(str, Enum):
     """Como o dinheiro sai (ou não sai) da conta neste lançamento.
@@ -161,6 +165,18 @@ class TransactionBase(SQLModel):
 
 class Transaction(TransactionBase, table=True):
     __tablename__ = "transactions"
+    __table_args__ = (
+        # Uma ocorrência de compromisso tem no máximo UM lançamento que a paga.
+        # É a trava contra a baixa duplicada: dois toques em "Pagar" na mesma
+        # parcela da Hunter seriam R$ 618,08 saindo duas vezes. Nulos não
+        # colidem entre si (Postgres e SQLite), então o lançamento comum passa.
+        sa.Index(
+            "uq_transactions_commitment_occurrence",
+            "commitment_id",
+            "commitment_no",
+            unique=True,
+        ),
+    )
     user_id: int = dono()
     id: int | None = Field(default=None, primary_key=True)
 
@@ -174,6 +190,16 @@ class Transaction(TransactionBase, table=True):
     purchase_id: int | None = Field(default=None, foreign_key="purchases.id", index=True)
     installment_no: int | None = None
     invoice_id: int | None = Field(default=None, foreign_key="invoices.id", index=True)
+
+    # ---------- Só para a baixa de um compromisso ----------
+    # O lançamento que REALIZA a ocorrência `commitment_no` de um compromisso
+    # (a parcela 3/48 do financiamento, a academia de novembro). O vínculo mora
+    # aqui, e não numa tabela de pagamentos, por um motivo de integridade:
+    # apagar o lançamento desfaz a baixa sozinho, sem deixar um "pago" órfão
+    # apontando pra dinheiro que não saiu. Como `purchase_id`, não vem em
+    # TransactionCreate — a baixa tem rota própria.
+    commitment_id: int | None = Field(default=None, foreign_key="commitments.id", index=True)
+    commitment_no: int | None = None
 
 
 class TransactionCreate(TransactionBase):
@@ -209,6 +235,12 @@ class TransactionRead(TransactionBase):
     card_id: int | None = None
     card_name: str | None = None
     card_finalidade: Finalidade | None = None
+    # Vêm do compromisso — nulos em lançamento que não é baixa de nenhum. A
+    # lista mostra "Hunter 1/48" sem uma chamada por linha.
+    commitment_id: int | None = None
+    commitment_no: int | None = None
+    commitment_description: str | None = None
+    commitment_installments: int | None = None
 
 
 # ---------- Cartão de crédito ----------
@@ -667,6 +699,13 @@ class AssetBase(SQLModel):
     # impossível distinguir "não sei a taxa" de "a taxa é zero".
     cdi_percent: float | None = None
 
+    # Se o saldo deste ativo é dinheiro com que o planejamento conta ("quanto
+    # tenho agora"). Não dá pra deduzir pela classe: o Mercado Pago e o Nubank
+    # do dono são renda fixa (rendem 115% do CDI) e são justamente onde o
+    # dinheiro do mês mora. Nulo = a escolha padrão, que é só a classe Conta —
+    # o mesmo que a tela mostra marcado antes de alguém mexer.
+    include_in_planning: bool | None = None
+
 class Asset(AssetBase, table=True):
     __tablename__ = "assets"
     user_id: int = dono()
@@ -680,6 +719,7 @@ class AssetUpdate(SQLModel):
     asset_class: AssetClass | None = None
     note: str | None = None
     cdi_percent: float | None = None
+    include_in_planning: bool | None = None
 
 
 # O saldo de um ativo num mês. Preenchido à mão — sem cotação automática no v1.
@@ -688,6 +728,11 @@ class AssetSnapshotBase(SQLModel):
     year: int = Field(ge=1900, le=2999)
     month: int = Field(ge=1, le=12)
     value: float
+    # O dia em que o saldo foi lido no banco. O saldo continua sendo do MÊS
+    # (Patrimônio não muda); o dia serve ao planejamento, que precisa saber se
+    # um lançamento de 10/10 já está ou não dentro de um saldo "de outubro".
+    # Nulo nos saldos antigos e nos de meses passados, onde vale "fim do mês".
+    observed_on: dt.date | None = None
 
 class AssetSnapshot(AssetSnapshotBase, table=True):
     __tablename__ = "asset_snapshots"
@@ -738,3 +783,450 @@ class AssetSummary(SQLModel):
     liabilities: float = 0
     net_worth: float = 0
     previous_net_worth: float = 0
+
+
+# ===========================================================================
+# Planejamento
+# ===========================================================================
+#
+# Quatro coisas diferentes, que este bloco existe para não misturar:
+#
+#   realizado   o dinheiro que entrou ou saiu — continua sendo `Transaction`
+#               (com `amount_paid`), parcela de cartão e `InvoicePayment`.
+#   compromisso o que vai ser pago (ou recebido): `Commitment`. Não é
+#               lançamento; vira um quando recebe baixa.
+#   reserva     dinheiro que existe e já tem destino: `Provision`. Não sai do
+#               patrimônio — só deixa de estar livre.
+#   simulação   o que aconteceria SE: `Scenario`. Nunca toca no resto.
+#
+# O cartão não ganha nada aqui: as parcelas futuras já estão nas faturas, e o
+# planejamento as lê de lá. Um compromisso por parcela de cartão seria o mesmo
+# dinheiro em dois lugares.
+
+
+# Teto de ocorrências de um compromisso parcelado. Não é regra de banco nenhum:
+# 480 meses cobrem um financiamento imobiliário de 40 anos, e o teto impede que
+# um dedo errado gere um cronograma de dez mil linhas na tela.
+MAX_OCORRENCIAS = 480
+
+
+class CommitmentBase(SQLModel):
+    """O que define um compromisso. O cronograma sai daqui, calculado."""
+
+    description: str
+    # A categoria decide a DIREÇÃO: despesa é algo a pagar (financiamento,
+    # academia), receita é algo a receber (o salário que cai todo dia 5).
+    # Investimento não entra — guardar dinheiro é reserva, não compromisso.
+    category_id: int = Field(foreign_key="categories.id")
+    # O valor de CADA ocorrência. O total é consequência, não entrada: no
+    # financiamento, 48 × 618,08 não é o principal (há juros, tarifa, seguro),
+    # então "valor total" só existe como informação separada, abaixo.
+    amount: float
+    # A primeira ocorrência. As seguintes andam `interval_months` por vez, no
+    # mesmo dia — achatado no fim do mês curto, como o cartão.
+    first_due: dt.date
+    # Quantas ocorrências. Nulo = recorrente, sem número fechado (academia):
+    # ela vai até `end_date`, ou até alguém encerrar.
+    installments: int | None = Field(default=None, ge=1, le=MAX_OCORRENCIAS)
+    interval_months: int = Field(default=1, ge=1, le=12)
+    end_date: dt.date | None = None
+    # Confirmado (contrato assinado, valor certo) ou estimado (proteção ainda
+    # não contratada, conta que varia). A tela não soma os dois como se
+    # tivessem o mesmo grau de certeza sem dizer isso.
+    confirmed: bool = True
+    # Só em despesa, como no lançamento. Copiada pra cada baixa.
+    finalidade: Finalidade | None = None
+
+    # ---------- Só informação ----------
+    # Nenhum destes entra em conta nenhuma. "Valor financiado R$ 13.990" e
+    # "entrada R$ 7.000" ajudam a reconhecer o contrato; somá-los a qualquer
+    # coisa duplicaria o que já está nas parcelas e no lançamento da entrada.
+    institution: str | None = None
+    total_amount: float | None = None
+    down_payment: float | None = None
+    # "Pix", "boleto", "débito automático". Texto e não enum: a pergunta é só
+    # "como você costuma pagar isso", e a baixa sempre vira saída à vista.
+    payment_hint: str | None = None
+    note: str | None = None
+
+
+class Commitment(CommitmentBase, table=True):
+    """Compromisso fora do cartão: financiamento, parcelado direto, recorrência.
+
+    Uma tabela só pros três porque são a mesma coisa vista de perto — uma
+    sequência de vencimentos com um valor. O que muda é se a sequência tem fim
+    (`installments`) ou não.
+
+    O cronograma NÃO é gravado. As 48 parcelas da Hunter saem de (primeira
+    data, quantidade, intervalo) toda vez que alguém pede, pelo mesmo motivo da
+    fatura não guardar total: duas fontes pro mesmo número começam iguais e
+    terminam diferentes. O que se grava é só o que é decisão de alguém: a baixa
+    (no lançamento), a dispensa (`CommitmentSkip`) e o cancelamento.
+    """
+
+    __tablename__ = "commitments"
+    user_id: int = dono()
+    id: int | None = Field(default=None, primary_key=True)
+    # A partir desta data, o que não foi pago está cancelado. O que venceu
+    # ANTES continua devido: cancelar o contrato em dezembro não apaga a
+    # mensalidade de novembro que ficou em aberto.
+    cancelled_on: dt.date | None = None
+    created_at: dt.datetime = Field(
+        default_factory=lambda: dt.datetime.now(dt.timezone.utc)
+    )
+
+
+class CommitmentCreate(CommitmentBase):
+    pass
+
+
+class CommitmentUpdate(SQLModel):
+    description: str | None = None
+    category_id: int | None = None
+    amount: float | None = None
+    first_due: dt.date | None = None
+    installments: int | None = Field(default=None, ge=1, le=MAX_OCORRENCIAS)
+    interval_months: int | None = Field(default=None, ge=1, le=12)
+    end_date: dt.date | None = None
+    confirmed: bool | None = None
+    finalidade: Finalidade | None = None
+    institution: str | None = None
+    total_amount: float | None = None
+    down_payment: float | None = None
+    payment_hint: str | None = None
+    note: str | None = None
+    cancelled_on: dt.date | None = None
+
+
+class CommitmentSkip(SQLModel, table=True):
+    """Uma ocorrência que não vai ser paga — e não porque foi esquecida.
+
+    A academia que não cobrou dezembro, a parcela renegociada. Sem isto, o mês
+    que passou sem baixa viraria "vencido" pra sempre, e a única saída seria
+    inventar um lançamento de R$ 0. Dispensar é dizer, explicitamente, que
+    aquela não conta.
+    """
+
+    __tablename__ = "commitment_skips"
+    __table_args__ = (
+        UniqueConstraint("commitment_id", "number", name="uq_commitment_skip"),
+    )
+    user_id: int = dono()
+    id: int | None = Field(default=None, primary_key=True)
+    commitment_id: int = Field(foreign_key="commitments.id", index=True)
+    number: int = Field(ge=1)
+    note: str | None = None
+
+
+class OccurrenceStatus(str, Enum):
+    """Calculado, nunca gravado. A passagem do tempo não paga nada."""
+
+    PENDENTE = "pendente"
+    VENCIDA = "vencida"
+    PAGA = "paga"
+    DISPENSADA = "dispensada"
+    CANCELADA = "cancelada"
+
+
+class OccurrenceRead(SQLModel):
+    number: int
+    due_date: dt.date
+    amount: float
+    status: OccurrenceStatus
+    # "3/48" em parcelado; nulo em recorrência, que se lê pelo mês.
+    label: str | None = None
+    transaction_id: int | None = None
+    paid_amount: float | None = None
+    paid_date: dt.date | None = None
+    # Quanto das reservas está apontado pra esta ocorrência.
+    provisioned: float = 0
+    skip_note: str | None = None
+
+
+class CommitmentRead(CommitmentBase):
+    id: int
+    cancelled_on: dt.date | None = None
+    kind: str  # "parcelado" | "recorrente"
+    direction: str  # "saida" | "entrada"
+    category_name: str
+    color: str
+    icon: str
+    status: str  # "ativo" | "quitado" | "encerrado" | "cancelado"
+    paid_count: int = 0
+    skipped_count: int = 0
+    overdue_count: int = 0
+    overdue_amount: float = 0
+    # Nulos em recorrência sem fim: não existe "faltam" pra o que não acaba.
+    total_count: int | None = None
+    remaining_count: int | None = None
+    # Soma NOMINAL das ocorrências que faltam. Não é saldo devedor: o banco
+    # desconta juros na quitação antecipada, e o app não sabe quanto.
+    remaining_nominal: float | None = None
+    next: OccurrenceRead | None = None
+
+
+class CommitmentDetail(CommitmentRead):
+    schedule: list[OccurrenceRead] = []
+
+
+class PagarOcorrencia(SQLModel):
+    """A baixa: vira um lançamento realizado, já vinculado."""
+
+    date: dt.date | None = None
+    # Sem valor, o previsto. Pode ser diferente — juros de atraso, desconto.
+    amount: float | None = None
+    note: str | None = None
+
+
+class VincularLancamento(SQLModel):
+    transaction_id: int
+
+
+class DispensarOcorrencia(SQLModel):
+    note: str | None = None
+
+
+# ---------- Reserva ----------
+
+
+class ProvisionBase(SQLModel):
+    description: str
+    amount: float
+    # Desde quando o dinheiro está separado. Antes disso ele era livre.
+    created_on: dt.date
+    # Opcional: a ocorrência pra qual o dinheiro foi separado ("a parcela de
+    # novembro da Hunter"). Quando ela é paga, a reserva se cumpre sozinha.
+    commitment_id: int | None = Field(default=None, foreign_key="commitments.id", index=True)
+    commitment_no: int | None = None
+    # Pra objetivo sem compromisso ("documentação em dezembro"): só
+    # informação, a reserva continua até ser liberada.
+    target_date: dt.date | None = None
+    note: str | None = None
+
+
+class Provision(ProvisionBase, table=True):
+    """Dinheiro que existe e já tem destino.
+
+    Não é despesa e não sai do patrimônio: o R$ 618,08 separado em outubro pra
+    parcela de novembro continua na conta até novembro. O que ele muda é o
+    "disponível pra decidir". Por isso reserva nunca vira lançamento — quem tira
+    dinheiro da conta é a baixa do compromisso, uma vez só.
+
+    Ativa, cumprida e liberada são derivadas. Gravado só `released_on`: o dia em
+    que o dono disse "não preciso mais separar isso".
+    """
+
+    __tablename__ = "provisions"
+    user_id: int = dono()
+    id: int | None = Field(default=None, primary_key=True)
+    released_on: dt.date | None = None
+    created_at: dt.datetime = Field(
+        default_factory=lambda: dt.datetime.now(dt.timezone.utc)
+    )
+
+
+class ProvisionCreate(SQLModel):
+    description: str | None = None
+    amount: float
+    # Sem data, hoje.
+    created_on: dt.date | None = None
+    commitment_id: int | None = None
+    commitment_no: int | None = None
+    target_date: dt.date | None = None
+    note: str | None = None
+
+
+class ProvisionUpdate(SQLModel):
+    description: str | None = None
+    amount: float | None = None
+    created_on: dt.date | None = None
+    target_date: dt.date | None = None
+    note: str | None = None
+    released_on: dt.date | None = None
+
+
+class ProvisionRead(ProvisionBase):
+    id: int
+    released_on: dt.date | None = None
+    status: str  # "ativa" | "cumprida" | "liberada"
+    commitment_description: str | None = None
+    occurrence_label: str | None = None
+    occurrence_due: dt.date | None = None
+
+
+# ---------- Cenário ----------
+#
+# Os enums daqui pra baixo vão pro banco como VARCHAR, não como tipo nativo do
+# Postgres. Tipo nativo novo é um `CREATE TYPE` que o `op.create_table` do
+# Alembic dispara sem conferir se já existe — e enum já quase quebrou produção
+# duas vezes sem a suíte perceber (ver 0004). Texto com o NOME do membro, como
+# os outros enums, e nenhuma DDL a mais.
+
+
+def _enum_texto(classe: type[Enum], tamanho: int = 16):
+    return sa.Enum(classe, native_enum=False, length=tamanho)
+
+
+class ScenarioItemKind(str, Enum):
+    ENTRADA = "entrada"
+    SAIDA = "saida"
+    RESERVA = "reserva"
+
+
+class Scenario(SQLModel, table=True):
+    """Uma hipótese com nome: "Viagem", "Amortizar Hunter", "Outubro apertado".
+
+    Mora em tabela própria e não toca em nenhuma outra. Apagar um cenário
+    apaga os itens dele e mais nada — é a garantia de que simular não mexe no
+    dinheiro de verdade.
+    """
+
+    __tablename__ = "scenarios"
+    user_id: int = dono()
+    id: int | None = Field(default=None, primary_key=True)
+    name: str
+    note: str | None = None
+    created_at: dt.datetime = Field(
+        default_factory=lambda: dt.datetime.now(dt.timezone.utc)
+    )
+
+
+class ScenarioItemBase(SQLModel):
+    kind: ScenarioItemKind = Field(sa_type=_enum_texto(ScenarioItemKind))
+    description: str
+    amount: float
+    # O dia em que a hipótese acontece. O mês dela é o que importa.
+    date: dt.date
+    # "Assumir uma parcela nova de 10x" = a mesma saída por 10 meses.
+    repeat_months: int = Field(default=1, ge=1, le=60)
+    # Nulo: um item novo, que só existe no cenário. Preenchido: muda um item
+    # REAL só dentro do cenário — "compromisso:12:3", "fatura:29",
+    # "lancamento:701", "reserva:4" —, e `amount` passa a ser o valor dele
+    # aqui (zero = some do cenário). É assim que se simula cancelar um gasto
+    # sem cancelar nada.
+    ref: str | None = None
+
+
+class ScenarioItem(ScenarioItemBase, table=True):
+    __tablename__ = "scenario_items"
+    user_id: int = dono()
+    id: int | None = Field(default=None, primary_key=True)
+    scenario_id: int = Field(foreign_key="scenarios.id", index=True)
+
+
+class ScenarioItemCreate(ScenarioItemBase):
+    pass
+
+
+class ScenarioItemUpdate(SQLModel):
+    kind: ScenarioItemKind | None = None
+    description: str | None = None
+    amount: float | None = None
+    date: dt.date | None = None
+    repeat_months: int | None = Field(default=None, ge=1, le=60)
+
+
+class ScenarioCreate(SQLModel):
+    name: str
+    note: str | None = None
+
+
+class ScenarioUpdate(SQLModel):
+    name: str | None = None
+    note: str | None = None
+
+
+class ScenarioRead(SQLModel):
+    id: int
+    name: str
+    note: str | None = None
+    created_at: dt.datetime
+    items: list[ScenarioItem] = []
+
+
+# ---------- Conferência ----------
+
+
+class ReconciliationKind(str, Enum):
+    """O que o candidato parece ser — decide as ações que a tela oferece."""
+
+    ENTRADA = "entrada"
+    SAIDA = "saida"
+    OBRIGACAO = "obrigacao"
+    RESERVA = "reserva"
+    # Um saldo observado ("R$ 8.393 em 08/10"). Nunca vira lançamento.
+    SALDO = "saldo"
+    OUTRO = "outro"
+
+
+class ReconciliationStatus(str, Enum):
+    PENDENTE = "pendente"
+    CONFIRMAR = "confirmar"
+    RESOLVIDO = "resolvido"
+    IGNORADO = "ignorado"
+
+
+class ReconciliationItemBase(SQLModel):
+    year: int = Field(ge=1900, le=2999)
+    month: int = Field(ge=1, le=12)
+    description: str
+    amount: float | None = None
+    date: dt.date | None = None
+    kind: ReconciliationKind = Field(
+        default=ReconciliationKind.OUTRO, sa_type=_enum_texto(ReconciliationKind)
+    )
+    # O que se sabe e o que falta saber, em texto de gente: "Pago, Pix
+    # 10/10 15:23" e "de qual conta saiu?".
+    suggestion: str | None = None
+    question: str | None = None
+    category_hint: str | None = None
+    # Dados pra pré-preencher o formulário de criação (parcelas, 1ª data,
+    # instituição). Só sugestão: quem cria é o dono, revisando.
+    prefill: dict[str, Any] | None = Field(default=None, sa_type=sa.JSON)
+    note: str | None = None
+
+
+class ReconciliationItem(ReconciliationItemBase, table=True):
+    """Um item da conferência de um mês: algo que talvez precise virar dado.
+
+    É lista de tarefas, não dinheiro. Nenhum número daqui entra em saldo,
+    gasto ou planejamento — é justamente o lugar onde o incerto espera a
+    confirmação, em vez de entrar no mês como se fosse fato.
+
+    Os vínculos (`transaction_id`, `commitment_id`, `provision_id`) são de
+    propósito SEM chave estrangeira: a anotação "isto é aquele lançamento" não
+    pode impedir alguém de apagar o lançamento. Se ele sumir, a tela mostra o
+    item como pendente de novo.
+    """
+
+    __tablename__ = "reconciliation_items"
+    user_id: int = dono()
+    id: int | None = Field(default=None, primary_key=True)
+    status: ReconciliationStatus = Field(
+        default=ReconciliationStatus.PENDENTE, sa_type=_enum_texto(ReconciliationStatus)
+    )
+    transaction_id: int | None = None
+    commitment_id: int | None = None
+    provision_id: int | None = None
+    # "arquivo" quando veio de um arquivo importado, "manual" quando foi
+    # digitado na tela. Só pra a tela saber de onde a pergunta veio.
+    source: str = "manual"
+    created_at: dt.datetime = Field(
+        default_factory=lambda: dt.datetime.now(dt.timezone.utc)
+    )
+
+
+class ReconciliationItemCreate(ReconciliationItemBase):
+    pass
+
+
+class ReconciliationItemUpdate(SQLModel):
+    description: str | None = None
+    amount: float | None = None
+    date: dt.date | None = None
+    kind: ReconciliationKind | None = None
+    status: ReconciliationStatus | None = None
+    suggestion: str | None = None
+    question: str | None = None
+    category_hint: str | None = None
+    note: str | None = None

@@ -23,10 +23,17 @@ from app.models import (
     Budget,
     Card,
     Category,
+    Commitment,
+    CommitmentSkip,
     Invoice,
     InvoicePayment,
     PaymentMethod,
+    Provision,
     Purchase,
+    ReconciliationItem,
+    Scenario,
+    ScenarioItem,
+    ScenarioItemKind,
     Transaction,
     User,
 )
@@ -95,11 +102,48 @@ def _semear(session: Session, dono: User) -> dict:
     session.commit()
     session.refresh(pagamento)
 
+    # ---------- Planejamento ----------
+    # Um financiamento em 3x com a 1ª paga, a 2ª dispensada e uma reserva pra
+    # 3ª; um cenário com um item; um item de conferência.
+    compromisso = Commitment(
+        user_id=dono.id, description=f"Financiamento de {dono.name}", category_id=cat.id,
+        amount=500.0, first_due=dt.date(2026, 10, 15), installments=3,
+    )
+    cenario = Scenario(user_id=dono.id, name=f"Cenário de {dono.name}")
+    session.add_all([compromisso, cenario])
+    session.commit()
+    session.refresh(compromisso)
+    session.refresh(cenario)
+
+    baixa = Transaction(
+        date=dt.date(2026, 10, 15), description=f"Baixa de {dono.name}",
+        amount_paid=500.0, amount_planned=500.0, category_id=cat.id, user_id=dono.id,
+        payment_method=PaymentMethod.CASH, commitment_id=compromisso.id, commitment_no=1,
+    )
+    dispensa = CommitmentSkip(user_id=dono.id, commitment_id=compromisso.id, number=2)
+    reserva = Provision(
+        user_id=dono.id, description=f"Reserva de {dono.name}", amount=500.0,
+        created_on=dt.date(2026, 10, 1), commitment_id=compromisso.id, commitment_no=3,
+    )
+    item_cenario = ScenarioItem(
+        user_id=dono.id, scenario_id=cenario.id, kind=ScenarioItemKind.SAIDA,
+        description=f"Hipótese de {dono.name}", amount=1000.0, date=dt.date(2026, 10, 20),
+    )
+    conferencia = ReconciliationItem(
+        user_id=dono.id, year=2026, month=10, description=f"Conferência de {dono.name}", amount=10.0,
+    )
+    session.add_all([baixa, dispensa, reserva, item_cenario, conferencia])
+    session.commit()
+    for x in (baixa, reserva, item_cenario, conferencia):
+        session.refresh(x)
+
     return {
         "categoria": cat.id, "transacao": tx.id, "meta": meta.id,
         "ativo": ativo.id, "saldo": snap.id,
         "cartao": cartao.id, "compra": compra.id,
         "fatura": fatura.id, "pagamento": pagamento.id,
+        "compromisso": compromisso.id, "baixa": baixa.id, "reserva": reserva.id,
+        "cenario": cenario.id, "item_cenario": item_cenario.id, "conferencia": conferencia.id,
     }
 
 
@@ -142,7 +186,48 @@ ROTAS_POR_ID = [
     ("post", "/invoices/{fatura}/payments", {"amount": 1.0, "date": "2026-10-02"}),
     ("delete", "/invoice_payments/{pagamento}", None),
     ("post", "/transactions/{transacao}/forma-de-pagamento", {"metodo": "cash"}),
+    # ---------- Planejamento ----------
+    # Rota nova de app/rotas_planejamento.py ou app/rotas_conferencia.py entra
+    # aqui, pelo mesmo motivo das de cartão.
+    ("get", "/commitments/{compromisso}", None),
+    ("patch", "/commitments/{compromisso}", {"description": "invadido"}),
+    ("delete", "/commitments/{compromisso}", None),
+    ("post", "/commitments/{compromisso}/ocorrencias/3/pagar", {}),
+    ("post", "/commitments/{compromisso}/ocorrencias/3/vincular", {"transaction_id": 1}),
+    ("delete", "/commitments/{compromisso}/ocorrencias/1/vincular", None),
+    ("post", "/commitments/{compromisso}/ocorrencias/3/dispensar", {}),
+    ("delete", "/commitments/{compromisso}/ocorrencias/2/dispensar", None),
+    ("patch", "/provisions/{reserva}", {"amount": 1.0}),
+    ("delete", "/provisions/{reserva}", None),
+    ("get", "/scenarios/{cenario}", None),
+    ("patch", "/scenarios/{cenario}", {"name": "invadido"}),
+    ("delete", "/scenarios/{cenario}", None),
+    ("post", "/scenarios/{cenario}/duplicar", {}),
+    ("post", "/scenarios/{cenario}/items",
+     {"kind": "saida", "description": "x", "amount": 1.0, "date": "2026-10-20"}),
+    ("patch", "/scenarios/{cenario}/items/{item_cenario}", {"amount": 1.0}),
+    ("delete", "/scenarios/{cenario}/items/{item_cenario}", None),
+    ("get", "/planning/month?year=2026&month=10&scenario_id={cenario}", None),
+    ("get", "/planning/compare?year=2026&month=10&scenario_id={cenario}", None),
+    ("get", "/planning/horizon?months=2&scenario_id={cenario}", None),
+    ("post", "/planning/simulate", {"year": 2026, "month": 10, "scenario_id": "{cenario}"}),
+    ("patch", "/reconciliation/{conferencia}", {"description": "invadido"}),
+    ("delete", "/reconciliation/{conferencia}", None),
+    ("post", "/reconciliation/{conferencia}/vincular", {"transaction_id": 1}),
+    ("post", "/reconciliation/{conferencia}/lancamento",
+     {"date": "2026-10-10", "description": "x", "amount_paid": 1.0, "category_id": 1}),
+    ("post", "/reconciliation/{conferencia}/compromisso",
+     {"description": "x", "category_id": 1, "amount": 1.0, "first_due": "2026-10-20"}),
+    ("post", "/reconciliation/{conferencia}/reserva", {"amount": 1.0, "description": "x"}),
 ]
+
+
+def _formatar(corpo, ids):
+    """Corpo com "{nome}" trocado pelo id — só onde o id vai no corpo."""
+    if not corpo:
+        return corpo
+    return {k: (int(v.format(**ids)) if isinstance(v, str) and v.startswith("{") else v)
+            for k, v in corpo.items()}
 
 
 @pytest.mark.parametrize("metodo,rota,corpo", ROTAS_POR_ID)
@@ -151,8 +236,12 @@ def test_nao_alcanca_dado_de_outra_conta(cliente_de, duas_contas, metodo, rota, 
     _, ids_do_bruno = duas_contas["bruno"]
 
     caminho = rota.format(**ids_do_bruno)
+    corpo = _formatar(corpo, ids_do_bruno)
     cliente = cliente_de(ana)
-    r = getattr(cliente, metodo)(caminho, **({"json": corpo} if corpo else {}))
+    if metodo in ("post", "put", "patch"):
+        r = getattr(cliente, metodo)(caminho, json=corpo or {})
+    else:
+        r = getattr(cliente, metodo)(caminho)
 
     assert r.status_code == 404, (
         f"{metodo.upper()} {caminho} respondeu {r.status_code} — a conta da Ana "
@@ -209,6 +298,68 @@ def test_resumos_nao_somam_dinheiro_alheio(cliente_de, duas_contas):
     assert len(faturas["payments"]) == 1
 
     assert len(cliente.get("/invoices").json()) == 1
+
+
+def test_planejamento_nao_mostra_nem_soma_dado_alheio(cliente_de, duas_contas, monkeypatch):
+    """O planejamento junta cinco fontes; nenhuma pode trazer linha da outra conta."""
+    monkeypatch.setattr("app.planejamento.hoje", lambda: dt.date(2026, 10, 10))
+    ana, ids_da_ana = duas_contas["ana"]
+    cliente = cliente_de(ana)
+
+    for rota in ("/commitments", "/provisions", "/scenarios", "/reconciliation?year=2026&month=10"):
+        texto = str(cliente.get(rota).json())
+        assert "Bruno" not in texto, f"{rota} devolveu dado do Bruno: {texto[:200]}"
+    assert len(cliente.get("/commitments").json()) == 1
+
+    corpo = cliente.get("/planning/horizon?months=3").json()
+    assert "Bruno" not in str(corpo)
+    outubro, novembro, dezembro = corpo["months"]
+    # Saldo de partida: só o ativo dela (1000, de setembro, classe Conta).
+    assert outubro["opening"] == 1000.0
+    # Outubro: a fatura dela (200 em aberto). A 1ª parcela já foi paga e a
+    # 2ª (novembro) está dispensada; a 3ª é dezembro, coberta pela reserva.
+    assert outubro["expense"] == 200.0
+    assert outubro["reserved"] == 500.0
+    assert novembro["expense"] == 0.0
+    assert dezembro["expense"] == 500.0 and dezembro["provisioned"] == 500.0
+
+    no_cenario = cliente.get(
+        f"/planning/month?year=2026&month=10&scenario_id={ids_da_ana['cenario']}"
+    ).json()["months"][0]
+    assert no_cenario["expense"] == 1200.0
+
+
+def test_baixa_e_reserva_nao_apontam_pra_compromisso_alheio(cliente_de, duas_contas):
+    """Os ids que vão no CORPO também são checados: lançamento e compromisso."""
+    ana, ids_da_ana = duas_contas["ana"]
+    _, ids_do_bruno = duas_contas["bruno"]
+    cliente = cliente_de(ana)
+
+    # Compromisso dela, lançamento dele.
+    r = cliente.post(
+        f"/commitments/{ids_da_ana['compromisso']}/ocorrencias/3/vincular",
+        json={"transaction_id": ids_do_bruno["transacao"]},
+    )
+    assert r.status_code == 404
+    # Reserva pra compromisso dele.
+    r = cliente.post(
+        "/provisions",
+        json={"amount": 1.0, "commitment_id": ids_do_bruno["compromisso"], "commitment_no": 3},
+    )
+    assert r.status_code == 400
+    # Conferência dela apontando pro lançamento dele.
+    r = cliente.post(
+        f"/reconciliation/{ids_da_ana['conferencia']}/vincular",
+        json={"transaction_id": ids_do_bruno["transacao"]},
+    )
+    assert r.status_code == 404
+    # Compromisso na categoria dele.
+    r = cliente.post(
+        "/commitments",
+        json={"description": "x", "category_id": ids_do_bruno["categoria"], "amount": 1.0,
+              "first_due": "2026-10-20"},
+    )
+    assert r.status_code == 400
 
 
 def test_nao_da_pra_lancar_na_categoria_de_outra_conta(cliente_de, duas_contas):
@@ -341,6 +492,33 @@ ROTAS_DE_ESCRITA = [
     ("delete", "/invoice_payments/1", None),
     ("post", "/transactions/forma-de-pagamento", {"ids": [1], "metodo": "cash"}),
     ("post", "/transactions/1/forma-de-pagamento", {"metodo": "cash"}),
+    # ---------- Planejamento ----------
+    ("post", "/commitments", {"description": "x", "category_id": 1, "amount": 1, "first_due": "2026-10-20"}),
+    ("patch", "/commitments/1", {"description": "x"}),
+    ("delete", "/commitments/1", None),
+    ("post", "/commitments/1/ocorrencias/1/pagar", {}),
+    ("post", "/commitments/1/ocorrencias/1/vincular", {"transaction_id": 1}),
+    ("delete", "/commitments/1/ocorrencias/1/vincular", None),
+    ("post", "/commitments/1/ocorrencias/1/dispensar", {}),
+    ("delete", "/commitments/1/ocorrencias/1/dispensar", None),
+    ("post", "/provisions", {"amount": 1, "description": "x"}),
+    ("patch", "/provisions/1", {"amount": 1}),
+    ("delete", "/provisions/1", None),
+    ("post", "/scenarios", {"name": "x"}),
+    ("patch", "/scenarios/1", {"name": "x"}),
+    ("delete", "/scenarios/1", None),
+    ("post", "/scenarios/1/duplicar", {}),
+    ("post", "/scenarios/1/items", {"kind": "saida", "description": "x", "amount": 1, "date": "2026-10-20"}),
+    ("patch", "/scenarios/1/items/1", {"amount": 1}),
+    ("delete", "/scenarios/1/items/1", None),
+    ("post", "/reconciliation", {"year": 2026, "month": 10, "description": "x"}),
+    ("patch", "/reconciliation/1", {"description": "x"}),
+    ("delete", "/reconciliation/1", None),
+    ("post", "/reconciliation/1/vincular", {"transaction_id": 1}),
+    ("post", "/reconciliation/1/lancamento", {"date": "2026-10-10", "description": "x", "amount_paid": 1, "category_id": 1}),
+    ("post", "/reconciliation/1/compromisso", {"description": "x", "category_id": 1, "amount": 1, "first_due": "2026-10-20"}),
+    ("post", "/reconciliation/1/reserva", {"amount": 1, "description": "x"}),
+    ("patch", "/assets/1", {"include_in_planning": True}),
 ]
 
 
@@ -356,7 +534,10 @@ def test_conta_de_demonstracao_nao_escreve(cliente_de, criar_usuario, metodo, ro
     # DELETE do TestClient não aceita corpo, então a chamada só leva `json`
     # quando há um.
     cliente = cliente_de(demo)
-    r = getattr(cliente, metodo)(rota, **({"json": corpo} if corpo else {}))
+    if metodo in ("post", "put", "patch"):
+        r = getattr(cliente, metodo)(rota, json=corpo or {})
+    else:
+        r = getattr(cliente, metodo)(rota)
 
     assert r.status_code == 403
 

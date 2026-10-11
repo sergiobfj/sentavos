@@ -25,7 +25,7 @@ from sqlmodel import Session, select
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from app.cartao import competencia_da_parcela, dividir_em_parcelas  # noqa: E402
+from app.cartao import avancar_meses, competencia_da_parcela, dia_do_mes, dividir_em_parcelas  # noqa: E402
 from app.database import engine  # noqa: E402
 from app.faturas import fatura_da_parcela  # noqa: E402
 from app.models import (  # noqa: E402
@@ -36,11 +36,20 @@ from app.models import (  # noqa: E402
     Card,
     Category,
     CategoryType,
+    Commitment,
+    CommitmentSkip,
     Finalidade,
     Invoice,
     InvoicePayment,
     PaymentMethod,
+    Provision,
     Purchase,
+    ReconciliationItem,
+    ReconciliationKind,
+    ReconciliationStatus,
+    Scenario,
+    ScenarioItem,
+    ScenarioItemKind,
     Transaction,
     User,
 )
@@ -315,6 +324,140 @@ def semear(dono: User, s: Session) -> dict:
             contagem["saldos"] += 1
 
     s.commit()
+
+    contagem.update(semear_planejamento(dono, s, categorias))
+    return contagem
+
+
+# ---------- Planejamento ----------
+#
+# Ancorado no mês CORRENTE, e não em FIM: o planejamento olha de hoje pra
+# frente, e um demo cujo "agora" é setembro de 2026 mostraria tudo vencido pra
+# quem abrir o link em março de 2027. Os valores continuam determinísticos;
+# só as datas andam com o calendário.
+#
+# Tudo inventado. Nenhum valor, contrato ou nome vem da conta de ninguém.
+
+# (descrição, categoria, valor, dia, parcelas, meses atrás da 1ª, confirmado, instituição)
+COMPROMISSOS = [
+    ("Salário", "Salário", 4500.00, 5, None, 0, True, None),
+    ("Aluguel", "Aluguel", 1450.00, 10, None, 0, True, None),
+    ("Academia", "Academia", 129.00, 12, None, 0, True, None),
+    ("Internet", "Assinaturas", 99.90, 15, None, 0, False, None),
+    ("Financiamento do carro", "Transporte", 890.00, 20, 36, 8, True, "Banco Fictício"),
+    ("IPVA", "Transporte", 412.40, 18, 3, -3, True, None),
+]
+
+
+def semear_planejamento(dono: User, s: Session, categorias: dict[str, Category]) -> dict:
+    """Compromissos, baixas, reservas, cenários e uma conferência pequena."""
+    contagem = {"compromissos": 0, "baixas": 0, "reservas": 0, "cenarios": 0, "conferencia": 0}
+    hoje = dt.date.today()
+
+    criados: dict[str, Commitment] = {}
+    for descricao, nome_cat, valor, dia, parcelas, atras, confirmado, instituicao in COMPROMISSOS:
+        cat = categorias[nome_cat]
+        ano, mes = avancar_meses(hoje.year, hoje.month, -atras)
+        c = Commitment(
+            user_id=dono.id,
+            description=descricao,
+            category_id=cat.id,
+            amount=valor,
+            first_due=dia_do_mes(ano, mes, dia),
+            installments=parcelas,
+            confirmed=confirmado,
+            institution=instituicao,
+            total_amount=26500.0 if parcelas == 36 else None,
+            finalidade=(Finalidade.FAMILIA if nome_cat == "Aluguel" else Finalidade.PESSOAL)
+            if cat.type == CategoryType.EXPENSE else None,
+        )
+        s.add(c)
+        s.flush()
+        criados[descricao] = c
+        contagem["compromissos"] += 1
+
+        # Baixa de tudo que já venceu — menos a internet deste mês, que fica
+        # atrasada de propósito: um demo sem nada pendente não mostraria o que
+        # o planejamento faz com o que passou do dia.
+        n = 1
+        while parcelas is None or n <= parcelas:
+            a, m_ = avancar_meses(c.first_due.year, c.first_due.month, n - 1)
+            venc = dia_do_mes(a, m_, dia)
+            if venc >= hoje:
+                break
+            if not (descricao == "Internet" and (a, m_) == (hoje.year, hoje.month)):
+                rotulo = f" {n}/{parcelas}" if parcelas and parcelas > 1 else ""
+                s.add(Transaction(
+                    user_id=dono.id, date=venc, description=descricao + rotulo,
+                    amount_planned=valor, amount_paid=valor, category_id=cat.id,
+                    payment_method=PaymentMethod.CASH, finalidade=c.finalidade,
+                    commitment_id=c.id, commitment_no=n,
+                ))
+                contagem["baixas"] += 1
+            n += 1
+
+    # A academia não cobrou o mês que vem (férias do plano): dispensada.
+    s.add(CommitmentSkip(user_id=dono.id, commitment_id=criados["Academia"].id, number=2,
+                         note="Plano em férias"))
+
+    # O saldo da conta neste mês, lido há três dias.
+    conta = s.exec(select(Asset).where(Asset.user_id == dono.id, Asset.asset_class == AssetClass.CHECKING)).first()
+    if conta is not None:
+        # Se o demo for semeado no próprio mês de FIM, o saldo já existe: só
+        # ganha o dia da leitura (a unicidade é por ativo e mês).
+        existente = s.exec(select(AssetSnapshot).where(
+            AssetSnapshot.asset_id == conta.id,
+            AssetSnapshot.year == hoje.year, AssetSnapshot.month == hoje.month,
+        )).first()
+        if existente is not None:
+            existente.observed_on = hoje - dt.timedelta(days=3)
+            s.add(existente)
+        else:
+            s.add(AssetSnapshot(
+                user_id=dono.id, asset_id=conta.id, year=hoje.year, month=hoje.month,
+                value=3180.00, observed_on=hoje - dt.timedelta(days=3),
+            ))
+
+    ipva = criados["IPVA"]
+    s.add(Provision(user_id=dono.id, description="IPVA 1/3", amount=412.40, created_on=hoje,
+                    commitment_id=ipva.id, commitment_no=1))
+    s.add(Provision(user_id=dono.id, description="Revisão do carro", amount=600.00, created_on=hoje,
+                    target_date=dia_do_mes(*avancar_meses(hoje.year, hoje.month, 2), 10)))
+    contagem["reservas"] += 2
+
+    def em(meses: int, dia: int) -> dt.date:
+        return dia_do_mes(*avancar_meses(hoje.year, hoje.month, meses), dia)
+
+    ferias = Scenario(user_id=dono.id, name="Férias em família",
+                      note="Viagem curta no fim do ano, sem parcelar.")
+    freela = Scenario(user_id=dono.id, name="Freela extra")
+    s.add_all([ferias, freela])
+    s.flush()
+    s.add_all([
+        ScenarioItem(user_id=dono.id, scenario_id=ferias.id, kind=ScenarioItemKind.SAIDA,
+                     description="Passagens e hospedagem", amount=2400.0, date=em(2, 15)),
+        ScenarioItem(user_id=dono.id, scenario_id=ferias.id, kind=ScenarioItemKind.RESERVA,
+                     description="Guardar pras férias", amount=500.0, date=em(0, 25), repeat_months=2),
+        ScenarioItem(user_id=dono.id, scenario_id=ferias.id, kind=ScenarioItemKind.SAIDA,
+                     description="Academia", amount=0.0, date=em(2, 12),
+                     ref=f"compromisso:{criados['Academia'].id}:3"),
+        ScenarioItem(user_id=dono.id, scenario_id=freela.id, kind=ScenarioItemKind.ENTRADA,
+                     description="Projeto de site", amount=1800.0, date=em(1, 20)),
+    ])
+    contagem["cenarios"] += 2
+
+    for descricao, valor, tipo, status, pergunta in (
+        ("Conta de luz", 187.30, ReconciliationKind.SAIDA, ReconciliationStatus.PENDENTE, "Já foi paga?"),
+        ("Presente de aniversário", 120.00, ReconciliationKind.SAIDA, ReconciliationStatus.CONFIRMAR, "Foi no Pix ou no cartão?"),
+        ("Reembolso do plano de saúde", 85.00, ReconciliationKind.ENTRADA, ReconciliationStatus.PENDENTE, "Caiu na conta?"),
+    ):
+        s.add(ReconciliationItem(
+            user_id=dono.id, year=hoje.year, month=hoje.month, description=descricao,
+            amount=valor, kind=tipo, status=status, question=pergunta, source="arquivo",
+        ))
+        contagem["conferencia"] += 1
+
+    s.commit()
     return contagem
 
 
@@ -344,9 +487,12 @@ def main() -> int:
             # estrangeira barra o delete.
             # Pagamento aponta pra fatura, parcela aponta pra compra e pra
             # fatura, compra aponta pro cartao: o que depende sai primeiro.
+            # Do planejamento: o que aponta pro compromisso sai antes dele, e
+            # a baixa (um lançamento) também.
             for modelo in (
-                InvoicePayment, Transaction, Purchase, Invoice, Card,
-                Budget, AssetSnapshot, Asset, Category,
+                InvoicePayment, ReconciliationItem, ScenarioItem, Scenario,
+                Provision, CommitmentSkip, Transaction, Commitment,
+                Purchase, Invoice, Card, Budget, AssetSnapshot, Asset, Category,
             ):
                 for linha in s.exec(select(modelo).where(modelo.user_id == dono.id)).all():
                     s.delete(linha)

@@ -115,6 +115,69 @@ em vez de o mesmo dinheiro ser contado duas vezes. É uma operação explícita,
 escolhida item a item — o app nunca faz isso sozinho por causa do nome da
 categoria.
 
+## Planejamento
+
+Fica fora da barra de abas (planejar é semanal, não diário): a porta é a linha
+**"Disponível em outubro"** no Início e o item *Planejamento* na lateral do
+desktop. Três sub-abas — **Simular mês**, **Próximos** e **Compromissos** — e a
+conferência do mês em `/organizar`.
+
+Quatro coisas que nunca se misturam:
+
+| | O que é | Onde mora |
+| --- | --- | --- |
+| **Realizado** | dinheiro que entrou ou saiu | `Transaction` com valor pago, parcela de cartão, pagamento de fatura |
+| **Compromisso** | o que vai ser pago (ou recebido) | `Commitment` — financiamento, parcelado direto, recorrência |
+| **Reserva** | dinheiro que existe e já tem destino | `Provision` — tira do disponível, nunca do patrimônio |
+| **Simulação** | o que aconteceria SE | `Scenario` — nunca cria lançamento |
+
+A conta do mês, feita no servidor (`app/planejamento.py`):
+
+    saldo atual (último saldo das contas marcadas)
+    + entradas restantes   receita prevista, entrada recorrente ainda não recebida
+    − saídas restantes     fatura a pagar, parcela/recorrência a pagar, despesa prevista
+    = saldo projetado
+    − reservas             reservas ativas, aporte previsto, reserva hipotética
+    = disponível
+
+- **Realizado nunca entra como futuro** — já está no saldo. Quando há lançamento
+  depois da data do saldo, a tela **lista** o que foi e pede pra atualizar o
+  saldo; não desconta sozinha, porque lançamento não tem conta de origem.
+- **Cartão não ganha compromisso**: as parcelas futuras já estão nas faturas, e
+  a visão futura lê o restante de cada fatura pelo mês do vencimento.
+- **O cronograma é calculado**, não gravado: 48 parcelas saem de (1ª data,
+  quantidade, periodicidade). A **baixa** é um lançamento com `commitment_id` +
+  `commitment_no` (índice único: não paga duas vezes); apagar o lançamento
+  desfaz a baixa. Mês que não cobrou se **dispensa**.
+- **Vencida ≠ paga**: o que venceu sem baixa entra no mês corrente como vencido
+  até ser pago ou dispensado. Previsto avulso de mês passado **não** é carregado.
+- **Reserva pra uma parcela** sai do disponível até o mês da parcela; nesse mês
+  quem conta é a própria saída (coberta), e a baixa a cumpre. Nada é contado
+  duas vezes.
+- **Investimento previsto é reserva**, não saída: guardar não é gastar.
+- **Saldo de partida**: só as contas marcadas (`include_in_planning`; sem
+  escolha, só a classe Conta). Dívida nunca entra.
+- **"Simular gasto"** calcula e esquece — por isso funciona até no demo.
+- **Valor total/financiado e entrada** de um contrato são só informação. A soma
+  das parcelas que faltam é **nominal**, não saldo devedor.
+
+### Organizar o mês
+
+A conferência (`reconciliation_items`) é uma lista de perguntas, não de
+lançamentos. Cada item mostra o que parece corresponder no app ("mesmo valor",
+"descrição parecida", "2 dias de diferença") e espera uma decisão: **já existe**,
+**criar realizado**, **criar previsto**, **criar compromisso**, **criar
+reserva**, **precisa confirmar** ou **ignorar**. Nada é vinculado nem criado
+automaticamente — valor parecido sozinho é coincidência demais pra ser sugestão.
+
+Os itens podem ser digitados na tela ou carregados de um arquivo **fora do
+repositório**:
+
+    uv run python -m scripts.importar_conferencia --usuario <email> --arquivo backups/conferencia.json
+    # modo seco: mostra os itens e as correspondências; --aplicar tira backup e grava
+
+O script só cria itens da conferência — nunca lançamento, compromisso ou reserva.
+
 ## Stack
 
 - **API** — FastAPI + SQLModel, Postgres (Neon)
@@ -320,6 +383,7 @@ altera uma que já existe.
 | `0003_rendimento` | `cdi_percent` no ativo e `cdi_annual` no usuário |
 | `0004_cartao` | cartões, compras, faturas, pagamentos e a forma de pagamento |
 | `0005_finalidade` | `finalidade` nulável em cartões, compras e lançamentos — nada preenchido |
+| `0006_planejamento` | compromissos, dispensas, reservas, cenários e conferência; baixa no lançamento; conta e dia do saldo — nada preenchido |
 
 Toda migração é **idempotente por coluna**: ela checa antes de adicionar. Num
 banco vazio a `0001` monta as tabelas com `create_all`, que usa o modelo de hoje
@@ -336,6 +400,11 @@ um JSON em `backups/` — use antes de qualquer script que escreva.
 > …)` criaria no Postgres um tipo que recusa exatamente o que o ORM manda — e a
 > suíte não pegaria, porque os testes montam o banco com `create_all` e nunca
 > executam a migração. Erro que só aparece em produção.
+>
+> E o `op.create_table` do Alembic dispara o `CREATE TYPE` de enum nativo **sem
+> conferir se ele existe**. Por isso os enums da `0006` são VARCHAR
+> (`native_enum=False`), e coluna nova de tipo nativo já existente entra por
+> `add_column`.
 
 ## Scripts opcionais
 

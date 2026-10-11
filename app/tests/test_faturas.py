@@ -91,12 +91,19 @@ def caixa_de(client, ano=2026, mes=9):
 # ---------- O cenário que o dono pediu pra conferir na mão ----------
 
 
-def test_cenario_completo_de_ponta_a_ponta(client, categoria, cartao, comprar, lancar):
+def test_cenario_completo_de_ponta_a_ponta(
+    client, categoria, cartao, comprar, lancar, monkeypatch
+):
     """Entrou 2.000, à vista 200, cartão 600, e os dois pagamentos da fatura.
 
     É o cenário do enunciado, conferido passo a passo. Cada asserção aqui é um
     número que o dono consegue refazer de cabeça olhando a tela.
+
+    O "hoje" fica preso em 20/09/2026, o dia do pagamento parcial: a fatura
+    vence 02/10/2026, e sem isto o teste envelheceu sozinho — a partir de 03/10
+    "parcial" virou "atrasada", que é a resposta certa pra quem olha depois.
     """
+    monkeypatch.setattr("app.rotas_cartao.hoje", lambda: dt.date(2026, 9, 20))
     salario = categoria("Salário", "income")
     alimentacao = categoria("Alimentação")
     nubank = cartao()
@@ -382,8 +389,10 @@ def test_pagamento_maior_que_o_restante_e_recusado(client, categoria, cartao, co
 
 
 def test_desfazer_pagamento_devolve_o_dinheiro_pra_carteira(
-    client, categoria, cartao, comprar
+    client, categoria, cartao, comprar, monkeypatch
 ):
+    # Antes do vencimento (02/10/2026): depois dele, "aberta" é "atrasada".
+    monkeypatch.setattr("app.rotas_cartao.hoje", lambda: dt.date(2026, 9, 20))
     compras = categoria("Compras")
     nubank = cartao()
     comprar(nubank, compras, 100.0, dt.date(2026, 9, 10))
