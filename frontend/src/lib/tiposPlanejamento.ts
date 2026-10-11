@@ -135,7 +135,7 @@ export interface Comparacao {
   diff: { projected: number; expense: number; income: number; reserved: number; available: number };
 }
 
-export type OccurrenceStatus = "pendente" | "vencida" | "paga" | "dispensada" | "cancelada";
+export type OccurrenceStatus = "pendente" | "vencida" | "paga" | "dispensada" | "cancelada" | "prevista";
 
 export const OCORRENCIA_LABEL: Record<OccurrenceStatus, string> = {
   pendente: "a pagar",
@@ -143,7 +143,12 @@ export const OCORRENCIA_LABEL: Record<OccurrenceStatus, string> = {
   paga: "paga",
   dispensada: "dispensada",
   cancelada: "cancelada",
+  // Entrada que já está num lançamento só previsto: conta uma vez, por ele.
+  prevista: "já prevista",
 };
+
+// Nota das dispensas criadas por "Pausar" (`planejamento.PAUSA`).
+export const PAUSA = "Pausa";
 
 export interface Ocorrencia {
   number: number;
@@ -156,6 +161,9 @@ export interface Ocorrencia {
   paid_date: string | null;
   provisioned: number;
   skip_note: string | null;
+  // Reconhecida num lançamento da mesma categoria perto do vencimento (não
+  // vinculada à mão).
+  matched?: boolean;
 }
 
 export interface CommitmentCreate {
@@ -209,6 +217,8 @@ export interface Commitment {
   // Soma NOMINAL do que falta — não é saldo devedor.
   remaining_nominal: number | null;
   next: Ocorrencia | null;
+  // Última ocorrência futura dispensada por pausa.
+  paused_until?: string | null;
 }
 
 export interface CommitmentDetail extends Commitment {

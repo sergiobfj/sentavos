@@ -356,6 +356,13 @@ export const commitmentsApi = {
     }),
   unskip: (id: number, numero: number) =>
     request<CommitmentDetail>(`/commitments/${id}/ocorrencias/${numero}/dispensar`, { method: "DELETE" }),
+  // Pausa = dispensa das ocorrências em aberto de hoje até o fim do mês de `ate`.
+  pause: (id: number, ate: string) =>
+    request<CommitmentDetail>(`/commitments/${id}/pausar`, {
+      method: "POST",
+      body: JSON.stringify({ ate }),
+    }),
+  resume: (id: number) => request<CommitmentDetail>(`/commitments/${id}/retomar`, { method: "POST" }),
 };
 
 export const provisionsApi = {

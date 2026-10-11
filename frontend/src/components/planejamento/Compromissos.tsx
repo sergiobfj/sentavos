@@ -13,7 +13,9 @@ import {
   useDesvincularOcorrencia,
   useDispensarOcorrencia,
   usePagarOcorrencia,
+  usePausarRecorrencia,
   useProvisions,
+  useRetomarRecorrencia,
   useVincularOcorrencia,
 } from "../../lib/queries";
 import { useAuth } from "../../lib/auth";
@@ -23,6 +25,7 @@ import { formatDate, formatDiaMes, formatMoney, formatYm, parseMoney, todayIso }
 import {
   CERTEZA_LABEL,
   OCORRENCIA_LABEL,
+  PAUSA,
   type Commitment,
   type CommitmentDetail,
   type Ocorrencia,
@@ -141,6 +144,7 @@ function LinhaCompromisso({ c, onClick }: { c: Commitment; onClick: () => void }
   const partes: string[] = [];
   if (c.overdue_count > 0) partes.push(`${c.overdue_count} vencida${c.overdue_count > 1 ? "s" : ""}`);
   else if (c.status !== "ativo") partes.push(c.status);
+  else if (c.paused_until) partes.push(`pausada até ${formatYm(c.paused_until.slice(0, 7))}`);
   else if (c.next) partes.push(`${c.next.label ? `${c.next.label} · ` : ""}${formatDiaMes(c.next.due_date)}`);
   if (c.kind === "recorrente") partes.push(PERIODO_LABEL[c.interval_months] ?? `a cada ${c.interval_months} meses`);
   if (!c.confirmed) partes.push(CERTEZA_LABEL.estimado);
@@ -189,6 +193,8 @@ function LinhaReserva({
 function Detalhe({ id, podeEscrever, onVoltar }: { id: number; podeEscrever: boolean; onVoltar: () => void }) {
   const { data: c, isLoading, error } = useCommitment(id);
   const [editando, setEditando] = useState(false);
+  const [pausando, setPausando] = useState(false);
+  const retomar = useRetomarRecorrencia();
   const [ocorrencia, setOcorrencia] = useState<Ocorrencia | null>(null);
   const [todas, setTodas] = useState(false);
 
@@ -221,6 +227,7 @@ function Detalhe({ id, podeEscrever, onVoltar }: { id: number; podeEscrever: boo
           {c.institution ? `${c.institution} · ` : ""}
           {c.kind === "parcelado" ? `1ª em ${formatDate(c.first_due)}` : `${PERIODO_LABEL[c.interval_months] ?? ""} desde ${formatDate(c.first_due)}`}
           {!c.confirmed && " · estimado"}
+          {c.paused_until && ` · pausada até ${formatYm(c.paused_until.slice(0, 7))}`}
           {c.cancelled_on && ` · cancelado em ${formatDate(c.cancelled_on)}`}
         </div>
       </section>
@@ -262,8 +269,23 @@ function Detalhe({ id, podeEscrever, onVoltar }: { id: number; podeEscrever: boo
 
       <div className="sec-title">
         <h2>Cronograma</h2>
-        {podeEscrever && <button className="link" onClick={() => setEditando(true)}>Editar</button>}
+        {podeEscrever && (
+          <span className="titulo-acoes">
+            {c.kind === "recorrente" && c.status === "ativo" && (
+              c.paused_until ? (
+                <button className="link" disabled={retomar.isPending} onClick={() => retomar.mutate({ id: c.id })}>
+                  Retomar
+                </button>
+              ) : (
+                <button className="link" onClick={() => setPausando((v) => !v)}>Pausar</button>
+              )
+            )}
+            <button className="link" onClick={() => setEditando(true)}>Editar</button>
+          </span>
+        )}
       </div>
+      {pausando && !c.paused_until && <PausarAte c={c} onFeito={() => setPausando(false)} />}
+      {retomar.error && <div className="error-box">{(retomar.error as ApiError).message}</div>}
       <ul className="lista-compacta">
         {visiveis.map((o) => (
           <Linha
@@ -272,7 +294,11 @@ function Detalhe({ id, podeEscrever, onVoltar }: { id: number; podeEscrever: boo
             legenda={
               o.status === "paga" && o.paid_date
                 ? `${entrada ? "recebida" : "paga"} em ${formatDiaMes(o.paid_date)}`
-                : o.status === "dispensada"
+                : o.status === "prevista" && o.paid_date
+                  ? `já prevista em ${formatDiaMes(o.paid_date)}`
+                  : o.status === "dispensada" && o.skip_note === PAUSA
+                    ? "pausada"
+                    : o.status === "dispensada"
                   ? `dispensada${o.skip_note ? ` · ${o.skip_note}` : ""}`
                   : o.provisioned > 0
                     ? `${formatMoney(o.provisioned)} reservado`
@@ -300,6 +326,30 @@ function Detalhe({ id, podeEscrever, onVoltar }: { id: number; podeEscrever: boo
         />
       )}
     </>
+  );
+}
+
+/** "Pausar até": as ocorrências em aberto até o fim daquele mês viram
+ *  "pausada" (Retomar, no título, desfaz as futuras). Encerrar de vez é no
+ *  Editar — data de fim ou cancelar. */
+function PausarAte({ c, onFeito }: { c: CommitmentDetail; onFeito: () => void }) {
+  const pausar = usePausarRecorrencia();
+  const [ate, setAte] = useState(todayIso().slice(0, 7));
+  const erro = pausar.error as ApiError | null;
+  return (
+    <form className="row2" onSubmit={(e) => {
+      e.preventDefault();
+      pausar.mutate({ id: c.id, ate: `${ate}-01` }, { onSuccess: onFeito });
+    }}>
+      <div className="field">
+        <label htmlFor="p-ate">Pausar até</label>
+        <input id="p-ate" type="month" min={todayIso().slice(0, 7)} value={ate} onChange={(e) => setAte(e.target.value)} />
+      </div>
+      <div className="field" style={{ alignSelf: "end" }}>
+        <button type="submit" className="btn btn-block" disabled={pausar.isPending || !ate}>Pausar</button>
+      </div>
+      {erro && <div className="error-box">{erro.message}</div>}
+    </form>
   );
 }
 
@@ -351,7 +401,7 @@ function OcorrenciaSheet({
           <span>
             {o.status === "paga" && o.paid_date
               ? `${entrada ? "recebida" : "paga"} em ${formatDate(o.paid_date)}`
-              : `${OCORRENCIA_LABEL[o.status]} · vence ${formatDate(o.due_date)}`}
+              : `${o.status === "pendente" && entrada ? "a receber" : OCORRENCIA_LABEL[o.status]} · vence ${formatDate(o.due_date)}`}
             {o.provisioned > 0 && aberta && ` · ${formatMoney(o.provisioned)} reservado`}
           </span>
         </div>
@@ -419,7 +469,23 @@ function OcorrenciaSheet({
           </form>
         )}
 
-        {podeEscrever && o.status === "paga" && (
+        {/* Reconhecida: o lançamento é da mesma categoria e caiu perto do
+            dia. Nada foi gravado — por isso não há o que desvincular. */}
+        {o.status === "paga" && o.matched && (
+          <p className="hint">
+            Reconhecida no lançamento de {o.paid_date ? formatDiaMes(o.paid_date) : "—"}: mesma categoria e
+            perto do vencimento. O valor que caiu vale, mesmo diferente do previsto. Se não for este,
+            mude a categoria ou a data do lançamento.
+          </p>
+        )}
+        {o.status === "prevista" && (
+          <p className="hint">
+            Já está prevista no lançamento de {o.paid_date ? formatDiaMes(o.paid_date) : "—"} e conta uma
+            vez, por ele. Quando {entrada ? "receber" : "pagar"}, lance o valor nesse lançamento.
+          </p>
+        )}
+
+        {podeEscrever && o.status === "paga" && !o.matched && (
           <>
             <p className="hint">
               Pra desfazer o pagamento, apague o lançamento em Lançamentos: a ocorrência volta a ficar em aberto.

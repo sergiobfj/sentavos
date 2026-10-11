@@ -569,6 +569,12 @@ export const useDesfazerDispensa = () =>
     commitmentsApi.unskip(id, numero)
   );
 
+export const usePausarRecorrencia = () =>
+  useMutacaoDeCompromisso(({ id, ate }: { id: number; ate: string }) => commitmentsApi.pause(id, ate));
+
+export const useRetomarRecorrencia = () =>
+  useMutacaoDeCompromisso(({ id }: { id: number }) => commitmentsApi.resume(id));
+
 // ---------- Reservas ----------
 // Reserva não mexe em lançamento: só o planejamento e a lista dela.
 
