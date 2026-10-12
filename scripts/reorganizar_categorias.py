@@ -48,7 +48,6 @@ relatório mostra cada movimento antes de qualquer escrita, e `--aplicar` grava
 um backup JSON em backups/ antes de encostar no banco.
 """
 
-import argparse
 import datetime as dt
 import json
 import os
@@ -61,6 +60,7 @@ from sqlmodel import Session, select
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from app.database import engine  # noqa: E402
+from scripts._admin import argumentos, auditar, cabecalho  # noqa: E402
 from scripts.backup import salvar  # noqa: E402
 from app.models import Budget, Category, CategoryType, Transaction, User  # noqa: E402
 
@@ -199,16 +199,14 @@ def backup(session: Session, dono: User) -> str:
 
 
 def main() -> int:
-    ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
-    ap.add_argument("--usuario", required=True, help="e-mail da conta")
-    ap.add_argument("--aplicar", action="store_true", help="escreve no banco")
-    args = ap.parse_args()
+    args = argumentos(__doc__.split("\n")[0]).parse_args()
 
     with Session(engine) as session:
         dono = session.exec(select(User).where(User.email == args.usuario.lower())).first()
         if not dono:
             print(f"Conta não encontrada: {args.usuario}")
             return 1
+        cabecalho("reorganizar_categorias", dono, args.apply)
 
         atuais = session.exec(select(Category).where(Category.user_id == dono.id)).all()
         por_nome = {normalizar(c.name): c for c in atuais}
@@ -234,7 +232,7 @@ def main() -> int:
         # sessão. Feito no fim, ele leria os objetos já alterados em memória e
         # salvaria o estado novo — um backup do depois, que é o mesmo que não
         # ter backup.
-        if args.aplicar:
+        if args.apply:
             print(f"\nBackup: {backup(session, dono)}")
         print()
 
@@ -260,10 +258,10 @@ def main() -> int:
                     user_id=dono.id, archived=arquivada,
                 )
                 criadas.append(nome)
-                if args.aplicar:
+                if args.apply:
                     session.add(alvo)
 
-            if args.aplicar:
+            if args.apply:
                 # A escrita de verdade. Sem ela o script era só um relatório
                 # bonito: "ACADEMIA → Saúde" saía na tela e o banco continuava
                 # com ACADEMIA.
@@ -275,7 +273,7 @@ def main() -> int:
 
             destinos[normalizar(nome)] = alvo
 
-        if args.aplicar:
+        if args.apply:
             # O flush é obrigatório aqui: as três categorias criadas do zero só
             # ganham id depois que o INSERT vai pro banco, e os passos 2 e 3
             # atribuem esse id aos lançamentos. Sem o flush, "Mercado" receberia
@@ -311,7 +309,7 @@ def main() -> int:
                 plano_desc.append((nome_origem, t.description, destino_nome))
                 movidos[destino_nome] += 1
                 movidos_ids.add(t.id)
-                if args.aplicar:
+                if args.apply:
                     t.category_id = destino.id
                     session.add(t)
 
@@ -340,7 +338,7 @@ def main() -> int:
 
             print(f"   {origem.name:<22} → {destino_nome:<22} ({len(restantes)} lançamentos)")
 
-            if args.aplicar:
+            if args.apply:
                 for t in restantes:
                     t.category_id = destino.id
                     session.add(t)
@@ -369,7 +367,8 @@ def main() -> int:
         print("   Caixinha 5K: o nome ficou, mesmo com a caixinha saindo do app —")
         print("     ali 'caixinha' é o nome do seu objetivo, não da funcionalidade.")
 
-        if args.aplicar:
+        if args.apply:
+            auditar(session, dono, "reorganizar_categorias", "reorganizar_categorias.aplicado", {})
             session.commit()
             print("\nAplicado.")
         else:

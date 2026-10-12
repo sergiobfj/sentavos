@@ -17,6 +17,7 @@ from sqlmodel import Session, SQLModel
 from app.auth import exigir_escrita, require_user
 from app.conferencia import Candidato, candidatos
 from app.database import get_session
+from app.dominio.contas import conta_valida
 from app.escopo import buscar, consulta, exigir
 from app.models import (
     Category,
@@ -263,6 +264,7 @@ def criar_lancamento(
             "description": _texto(dados.description, "A descrição"),
             "finalidade": finalidade,
             "payment_method": dados.payment_method or PaymentMethod.CASH,
+            "account_id": conta_valida(session, dono, dados.account_id),
         },
     )
     session.add(lancamento)
@@ -315,3 +317,22 @@ def criar_reserva(
     session.commit()
     session.refresh(item)
     return _ler(session, dono, item, com_candidatos=False)
+
+
+# ---------------------------------------------------------------------------
+# Conferir mês: a saúde do mês, derivada (app/dominio/saude.py)
+# ---------------------------------------------------------------------------
+
+
+@router_conferencia.get("/months/{ym}/health")
+def saude_do_mes(ym: str, session: Session = Depends(get_session), dono: User = Depends(require_user)):
+    """Conciliado / parcial / precisa revisar, com as pendências agrupadas."""
+    from app.dominio.saude import saude
+
+    try:
+        ano, mes = (int(x) for x in ym.split("-"))
+        if not (1900 <= ano <= 2999 and 1 <= mes <= 12):
+            raise ValueError
+    except ValueError:
+        raise HTTPException(status_code=422, detail="Mês no formato AAAA-MM.")
+    return saude(session, dono, ano, mes)

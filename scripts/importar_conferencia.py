@@ -23,7 +23,6 @@ Seguro de rodar duas vezes: item com a mesma descrição e o mesmo valor no
 mesmo mês é pulado. Modo seco por padrão, e backup antes de gravar.
 """
 
-import argparse
 import datetime as dt
 import json
 import os
@@ -35,6 +34,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from app.conferencia import candidatos  # noqa: E402
 from app.database import engine  # noqa: E402
+from scripts._admin import argumentos, auditar, cabecalho  # noqa: E402
 from app.models import (  # noqa: E402
     ReconciliationItem,
     ReconciliationKind,
@@ -70,10 +70,8 @@ def montar(dono: User, ano: int, mes: int, bruto: dict) -> ReconciliationItem:
 
 
 def main() -> int:
-    ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
-    ap.add_argument("--usuario", required=True)
+    ap = argumentos(__doc__.split("\n")[0])
     ap.add_argument("--arquivo", required=True)
-    ap.add_argument("--aplicar", action="store_true", help="grava (sem isto, só mostra)")
     args = ap.parse_args()
 
     ano, mes, brutos = ler(args.arquivo)
@@ -82,6 +80,7 @@ def main() -> int:
         if dono is None:
             print(f"Conta não encontrada: {args.usuario}", file=sys.stderr)
             return 1
+        cabecalho("importar_conferencia", dono, args.apply)
 
         existentes = {
             (i.description.casefold(), i.amount)
@@ -110,7 +109,7 @@ def main() -> int:
                 print(f"      parece: {c.kind} #{c.id} {c.description} {c.amount} {c.date} — {', '.join(c.reasons)}")
             item.id = None
 
-        if not args.aplicar:
+        if not args.apply:
             print(f"\nModo seco: {len(novos)} item(ns) seriam adicionados. Nada foi gravado.")
             print("Nenhum lançamento, compromisso ou reserva é criado por este script, nem com --aplicar.")
             return 0
@@ -121,6 +120,8 @@ def main() -> int:
         print(f"\nBackup: {caminho}")
         for item in novos:
             s.add(item)
+        auditar(s, dono, "importar_conferencia", "importar_conferencia.aplicado",
+                {"ano": ano, "mes": mes, "itens": len(novos)})
         s.commit()
         print(f"{len(novos)} item(ns) adicionados à conferência. Abra 'Organizar o mês' pra revisar.")
     return 0

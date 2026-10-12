@@ -4,6 +4,12 @@ from dotenv import load_dotenv
 from sqlalchemy.pool import NullPool
 from sqlmodel import Session, SQLModel, create_engine
 
+from app.ambiente import verificar_banco
+
+# O `.env` da raiz é o de DESENVOLVIMENTO (banco local). Produção vem do host,
+# ou — numa ferramenta local, de propósito — de `--env-file .env.production.local`
+# junto com ALLOW_PRODUCTION_DATABASE=true. load_dotenv não sobrescreve o que já
+# está no ambiente, então o arquivo explícito sempre ganha do `.env`.
 load_dotenv()
 
 DATABASE_URL = os.getenv("DATABASE_URL")
@@ -12,6 +18,9 @@ if not DATABASE_URL:
     # Em produção a variável vem do host. Falhar aqui com mensagem clara é melhor
     # que deixar o create_engine estourar um erro que não diz o que faltou.
     raise RuntimeError("DATABASE_URL não configurada. Veja o .env.example.")
+
+# Antes de qualquer engine: ambiente errado não chega a abrir conexão.
+APP_ENV = verificar_banco(DATABASE_URL)
 
 # echo=True loga todo SQL com os valores. Ótimo pra depurar, ruim em produção:
 # enche o log do host e joga dado do usuário nele.

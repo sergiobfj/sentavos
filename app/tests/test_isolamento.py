@@ -18,8 +18,14 @@ import pytest
 from sqlmodel import Session, select
 
 from app.models import (
+    AccountBalanceSnapshot,
+    AccountType,
     Asset,
     AssetSnapshot,
+    FinancialAccount,
+    InvestmentMovement,
+    InvestmentMovementType,
+    Transfer,
     Budget,
     Card,
     Category,
@@ -137,6 +143,39 @@ def _semear(session: Session, dono: User) -> dict:
     for x in (baixa, reserva, item_cenario, conferencia):
         session.refresh(x)
 
+    # ---------- Contas ----------
+    # Duas contas, um saldo observado em 01/10 e uma transferência de 50 entre
+    # elas — o saldo calculado da primeira é 950.
+    conta = FinancialAccount(user_id=dono.id, name=f"Conta de {dono.name}", type=AccountType.CHECKING)
+    conta2 = FinancialAccount(user_id=dono.id, name=f"Carteira de {dono.name}", type=AccountType.CASH)
+    session.add_all([conta, conta2])
+    session.commit()
+    session.refresh(conta)
+    session.refresh(conta2)
+    saldo_conta = AccountBalanceSnapshot(
+        user_id=dono.id, account_id=conta.id, balance=1000.0,
+        observed_at=dt.datetime(2026, 10, 1, 12, 0, tzinfo=dt.timezone.utc),
+    )
+    transferencia = Transfer(
+        user_id=dono.id, from_account_id=conta.id, to_account_id=conta2.id, amount=50.0,
+        date=dt.date(2026, 10, 5), description=f"Transferência de {dono.name}",
+    )
+    session.add_all([saldo_conta, transferencia])
+    session.commit()
+    session.refresh(saldo_conta)
+    session.refresh(transferencia)
+
+    # ---------- Investimento ----------
+    aplicacao = Asset(name=f"Caixinha de {dono.name}", asset_class="fixed_income", user_id=dono.id)
+    session.add(aplicacao)
+    session.commit()
+    session.refresh(aplicacao)
+    movimento = InvestmentMovement(user_id=dono.id, asset_id=aplicacao.id, type=InvestmentMovementType.ADJUSTMENT,
+                                   amount=10.0, date=dt.date(2026, 10, 3))
+    session.add(movimento)
+    session.commit()
+    session.refresh(movimento)
+
     return {
         "categoria": cat.id, "transacao": tx.id, "meta": meta.id,
         "ativo": ativo.id, "saldo": snap.id,
@@ -144,6 +183,8 @@ def _semear(session: Session, dono: User) -> dict:
         "fatura": fatura.id, "pagamento": pagamento.id,
         "compromisso": compromisso.id, "baixa": baixa.id, "reserva": reserva.id,
         "cenario": cenario.id, "item_cenario": item_cenario.id, "conferencia": conferencia.id,
+        "conta": conta.id, "conta2": conta2.id, "saldo_conta": saldo_conta.id,
+        "transferencia": transferencia.id, "aplicacao": aplicacao.id, "movimento": movimento.id,
     }
 
 
@@ -221,6 +262,25 @@ ROTAS_POR_ID = [
     ("post", "/reconciliation/{conferencia}/compromisso",
      {"description": "x", "category_id": 1, "amount": 1.0, "first_due": "2026-10-20"}),
     ("post", "/reconciliation/{conferencia}/reserva", {"amount": 1.0, "description": "x"}),
+    # ---------- Contas ----------
+    ("get", "/accounts/{conta}", None),
+    ("patch", "/accounts/{conta}", {"name": "invadida"}),
+    ("delete", "/accounts/{conta}", None),
+    ("get", "/accounts/{conta}/snapshots", None),
+    ("post", "/accounts/{conta}/snapshots", {"balance": 1.0}),
+    ("post", "/accounts/{conta}/snapshots/{saldo_conta}/aceitar", {}),
+    ("delete", "/accounts/{conta}/snapshots/{saldo_conta}", None),
+    ("get", "/accounts/{conta}/movimentos", None),
+    ("post", "/accounts/{conta}/distribuir", {"destinos": []}),
+    ("delete", "/transfers/{transferencia}", None),
+    # O id da conta no CORPO também é checado.
+    ("post", "/transfers", {"from_account_id": "{conta}", "to_account_id": "{conta2}",
+                            "amount": 1.0, "date": "2026-10-10"}),
+    # ---------- Investimento ----------
+    ("get", "/investments/movements?asset_id={aplicacao}", None),
+    ("post", "/investments/movements", {"asset_id": "{aplicacao}", "type": "adjustment", "amount": 1.0,
+                                        "date": "2026-10-10"}),
+    ("delete", "/investments/movements/{movimento}", None),
 ]
 
 
@@ -260,6 +320,8 @@ def test_listagens_so_trazem_o_proprio(cliente_de, duas_contas):
         ("/categories", "name"),
         ("/assets", "name"),
         ("/cards", "name"),
+        ("/accounts", "name"),
+        ("/transfers", "description"),
     ):
         itens = cliente.get(rota).json()
         assert itens, f"{rota} veio vazio — o teste não provaria nada"
@@ -281,9 +343,10 @@ def test_resumos_nao_somam_dinheiro_alheio(cliente_de, duas_contas):
     assert resumo["totals"]["expense"]["paid"] == 400.0
 
     patrimonio = cliente.get("/assets/summary?year=2026&month=9").json()
-    # Cada uma tem exatamente um ativo de 1000.
+    # Cada uma tem um ativo de 1000 (e uma caixinha ainda sem saldo).
     assert patrimonio["assets"] == 1000.0
-    assert len(patrimonio["items"]) == 1
+    assert len(patrimonio["items"]) == 2
+    assert all("Ana" in i["name"] for i in patrimonio["items"])
 
     # O resumo de caixa é o mais fácil de vazar sem ninguém ver: ele soma
     # lançamentos e pagamentos de fatura sem mostrar linha nenhuma.
@@ -328,8 +391,10 @@ def test_planejamento_nao_mostra_nem_soma_dado_alheio(cliente_de, duas_contas, m
     corpo = cliente.get("/planning/horizon?months=3").json()
     assert "Bruno" not in str(corpo)
     outubro, novembro, dezembro = corpo["months"]
-    # Saldo de partida: só o ativo dela (1000, de outubro, classe Conta).
-    assert outubro["opening"] == 1000.0
+    # Com contas, o saldo de partida vem delas: só a conta dela, 1000 observado
+    # em 01/10 − 50 transferidos pra carteira (que não tem saldo observado e
+    # fica de fora). Um vazamento apareceria como 1900.
+    assert outubro["opening"] == 950.0
     # Outubro: a fatura dela (200 em aberto). A 1ª parcela já foi paga e a
     # 2ª (novembro) está dispensada; a 3ª é dezembro, coberta pela reserva.
     assert outubro["expense"] == 200.0
@@ -535,6 +600,18 @@ ROTAS_DE_ESCRITA = [
     ("post", "/reconciliation/1/compromisso", {"description": "x", "category_id": 1, "amount": 1, "first_due": "2026-10-20"}),
     ("post", "/reconciliation/1/reserva", {"amount": 1, "description": "x"}),
     ("patch", "/assets/1", {"include_in_planning": True}),
+    # ---------- Contas ----------
+    ("post", "/accounts", {"name": "x", "type": "cash"}),
+    ("patch", "/accounts/1", {"name": "x"}),
+    ("delete", "/accounts/1", None),
+    ("post", "/accounts/1/snapshots", {"balance": 1}),
+    ("post", "/accounts/1/snapshots/1/aceitar", None),
+    ("delete", "/accounts/1/snapshots/1", None),
+    ("post", "/accounts/1/distribuir", {"destinos": []}),
+    ("post", "/transfers", {"from_account_id": 1, "to_account_id": 2, "amount": 1, "date": "2026-10-10"}),
+    ("delete", "/transfers/1", None),
+    ("post", "/investments/movements", {"asset_id": 1, "type": "adjustment", "amount": 1, "date": "2026-10-10"}),
+    ("delete", "/investments/movements/1", None),
 ]
 
 

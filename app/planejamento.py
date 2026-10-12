@@ -48,6 +48,8 @@ from typing import Iterable, Protocol
 from sqlmodel import Session, SQLModel
 
 from app.cartao import avancar_meses, dia_do_mes, limites_do_mes
+from app.dominio import tempo
+from app.dominio.caixa import efeito_no_caixa
 from app.escopo import consulta
 from app.faturas import TOLERANCIA, totais
 from app.models import (
@@ -61,6 +63,7 @@ from app.models import (
     CommitmentDetail,
     CommitmentRead,
     CommitmentSkip,
+    FinancialAccount,
     Invoice,
     InvoicePayment,
     OccurrenceRead,
@@ -75,9 +78,10 @@ from app.models import (
 
 
 def hoje() -> dt.date:
-    """O dia de referência. Função, e não `date.today()` espalhado, pra o teste
-    poder fixar "hoje" — vencida e pendente dependem dele."""
-    return dt.date.today()
+    """O dia de referência, no fuso do Brasil. Função, e não `date.today()`
+    espalhado, pra o teste poder fixar "hoje" — vencida e pendente dependem
+    dele. (No servidor, em UTC, `date.today()` virava o dia seguinte às 21h.)"""
+    return tempo.hoje_local()
 
 
 Mes = tuple[int, int]
@@ -436,9 +440,18 @@ def ler_compromisso(
 
 
 class ContaPlanejamento(SQLModel):
-    asset_id: int
+    # Uma das duas: a conta financeira (quem tem contas) ou o ativo (o jeito
+    # anterior, que continua valendo pra quem ainda não cadastrou contas).
+    asset_id: int | None = None
+    account_id: int | None = None
     name: str
-    asset_class: AssetClass
+    asset_class: AssetClass | None = None
+    account_type: str | None = None
+    restricted: bool = False
+    # Qualidade do saldo da conta (dominio/contas.py); nula no caminho de ativos.
+    quality: str | None = None
+    observed_at: dt.datetime | None = None
+    maybe_incomplete: bool = False
     included: bool
     value: float = 0
     # "2026-09" do saldo usado; nulo se a conta nunca teve saldo.
@@ -488,6 +501,32 @@ def conta_entra(asset: Asset) -> bool:
     return AssetClass(asset.asset_class) == AssetClass.CHECKING
 
 
+def _contas_financeiras(session: Session, dono: User, contas: list[FinancialAccount]) -> list[ContaPlanejamento]:
+    """O saldo de partida pelas contas: o saldo calculado de cada uma.
+
+    Conta sem saldo observado fica de fora (`stale`, sem valor). Desatualizada
+    (observação com mais de 31 dias) entra, marcada — com os movimentos
+    conhecidos aplicados, o dinheiro não some porque o mês virou. Restrita
+    (vale-transporte) nunca é dinheiro livre.
+    """
+    from app.dominio import contas as dominio_contas
+
+    saida = []
+    for s in dominio_contas.saldos(session, dono, contas=contas):
+        c = s.conta
+        dia = dominio_contas.dia_local(s.observado_em) if s.observado_em else None
+        saida.append(ContaPlanejamento(
+            account_id=c.id, name=c.name, account_type=c.type, restricted=c.restricted,
+            quality=s.qualidade, observed_at=s.observado_em, maybe_incomplete=s.incompleto,
+            included=c.include_in_planning and not c.restricted,
+            value=s.saldo if s.saldo is not None else 0.0,
+            as_of=f"{dia.year}-{dia.month:02d}" if dia else None,
+            observed_on=dia,
+            stale=s.saldo is None,
+        ))
+    return saida
+
+
 def contas_de_partida(
     session: Session, dono: User, m0: Mes, agora: dt.date
 ) -> list[ContaPlanejamento]:
@@ -497,7 +536,17 @@ def contas_de_partida(
     parcelas dele já entram como saída. Saldo de mês anterior vem marcado
     `stale` e não soma — o planejamento parte do que se sabe hoje.
     """
-    ativos = session.exec(consulta(Asset, dono).order_by(Asset.asset_class, Asset.name)).all()
+    financeiras = list(session.exec(
+        consulta(FinancialAccount, dono).where(FinancialAccount.archived == False)  # noqa: E712
+        .order_by(FinancialAccount.id)
+    ).all())
+    if financeiras:
+        return _contas_financeiras(session, dono, financeiras)
+
+    ativos = [
+        a for a in session.exec(consulta(Asset, dono).order_by(Asset.asset_class, Asset.name)).all()
+        if a.archived_on is None or indice((a.archived_on.year, a.archived_on.month)) > indice(m0)
+    ]
     saldos = session.exec(consulta(AssetSnapshot, dono)).all()
 
     ultimo: dict[int, AssetSnapshot] = {}
@@ -536,6 +585,8 @@ def aviso_do_saldo(
     aviso = AvisoSaldo(sem_contas=not marcadas)
     if not marcadas:
         return aviso
+    if any(c.account_id is not None for c in contas):
+        return _aviso_das_contas(session, dono, marcadas, aviso)
 
     aviso.contas_sem_saldo = [c.name for c in marcadas if c.as_of is None]
     aviso.contas_desatualizadas = [c.name for c in marcadas if c.stale]
@@ -584,8 +635,9 @@ def aviso_do_saldo(
             # Pode ser transferência entre duas contas suas. Fica à parte.
             aviso.investimentos += valor
             movimentos.append(MovimentoDepois(date=t.date, description=t.description, amount=valor, tipo="investimento"))
-        elif t.payment_method != PaymentMethod.CREDIT:
-            # Compra no cartão não sai da conta agora; sai quando a fatura é paga.
+        elif efeito_no_caixa(tipo, t.payment_method, valor) != 0:
+            # A regra do caixa (dominio/caixa.py): compra no cartão não sai da
+            # conta agora; sai quando a fatura é paga.
             aviso.saidas += valor
             movimentos.append(MovimentoDepois(date=t.date, description=t.description, amount=valor, tipo="saida"))
 
@@ -597,6 +649,45 @@ def aviso_do_saldo(
         aviso.saidas += p.amount
         movimentos.append(MovimentoDepois(date=p.date, description="Pagamento de fatura", amount=p.amount, tipo="fatura"))
 
+    movimentos.sort(key=lambda m: (m.date, m.description), reverse=True)
+    aviso.quantidade = len(movimentos)
+    aviso.movimentos = movimentos[:12]
+    aviso.entradas = round(aviso.entradas, 2)
+    aviso.saidas = round(aviso.saidas, 2)
+    aviso.investimentos = round(aviso.investimentos, 2)
+    return aviso
+
+
+def _aviso_das_contas(
+    session: Session, dono: User, marcadas: list[ContaPlanejamento], aviso: AvisoSaldo
+) -> AvisoSaldo:
+    """Com contas, os movimentos COM conta já estão no saldo calculado. O que
+    falta são os movimentos SEM conta depois do saldo observado: listados,
+    nunca somados — o app não sabe de qual conta saíram."""
+    from app.dominio import contas as dominio_contas
+
+    aviso.contas_sem_saldo = [c.name for c in marcadas if c.quality == dominio_contas.SEM_SALDO]
+    aviso.contas_desatualizadas = [c.name for c in marcadas if c.quality == dominio_contas.DESATUALIZADO]
+    aviso.desatualizado = bool(aviso.contas_desatualizadas)
+    observados = [c.observed_at for c in marcadas if c.observed_at is not None]
+    if not observados:
+        return aviso
+    desde = min(observados)
+    aviso.desde = dominio_contas.dia_local(desde)
+    rotulo = {"entrada": "entrada", "saida": "saida", "fatura": "fatura", "aporte": "investimento",
+              "resgate": "investimento"}
+    movimentos: list[MovimentoDepois] = []
+    for m in dominio_contas.movimentos(session, dono, None, aviso.desde):
+        if not dominio_contas.depois(m.data, m.ocorrido_em, desde):
+            continue
+        tipo = rotulo.get(m.tipo, "saida")
+        if tipo == "entrada":
+            aviso.entradas += m.valor
+        elif tipo == "investimento":
+            aviso.investimentos += -m.valor
+        else:
+            aviso.saidas += -m.valor
+        movimentos.append(MovimentoDepois(date=m.data, description=m.descricao, amount=abs(m.valor), tipo=tipo))
     movimentos.sort(key=lambda m: (m.date, m.description), reverse=True)
     aviso.quantidade = len(movimentos)
     aviso.movimentos = movimentos[:12]

@@ -32,6 +32,7 @@ import datetime as dt
 from sqlmodel import Session, func, select
 
 from app.cartao import avancar_meses, limites_do_mes
+from app.dominio import natureza as dominio_natureza
 from app.models import (
     Category,
     CategoryType,
@@ -39,12 +40,13 @@ from app.models import (
     InvoicePayment,
     PaymentMethod,
     Transaction,
+    TransactionNature,
     User,
 )
 
-# Chave de uma soma: (tipo de categoria, forma de pagamento, finalidade), com
-# nulo como valor legítimo nas duas últimas — é o estado dos lançamentos antigos.
-Chave = tuple[str, str | None, str | None]
+# A regra do saldo (`somar`, `saldo_do_mes`) mora em app/dominio/caixa.py; o
+# agrupamento continua aqui. Importados de volta pra quem já os usava daqui.
+from app.dominio.caixa import Chave, saldo_do_mes, somar  # noqa: E402,F401
 
 
 def _ano_mes():
@@ -62,13 +64,14 @@ def _ano_mes():
 def somas_por_mes(
     session: Session, dono: User, inicio: dt.date, fim: dt.date
 ) -> dict[tuple[int, int], dict[Chave, float]]:
-    """{(ano, mês): {(tipo, forma, finalidade): soma de amount_paid}} em [início, fim).
+    """{(ano, mês): {(tipo, forma, finalidade, natureza): soma de amount_paid}} em [início, fim).
 
     Agrupado por forma de pagamento e finalidade e resolvido em Python pelo
     mesmo motivo de sempre: `forma != 'credit'` em SQL descarta o NULL, e NULL é
     justamente o estado dos lançamentos anteriores ao cartão.
     """
     ano, mes = _ano_mes()
+    nat = dominio_natureza.expressao()
     linhas = session.exec(
         select(
             ano,
@@ -76,6 +79,7 @@ def somas_por_mes(
             Category.type,
             Transaction.payment_method,
             Transaction.finalidade,
+            nat,
             func.coalesce(func.sum(Transaction.amount_paid), 0.0),
         )
         .join(Category, Transaction.category_id == Category.id)
@@ -84,61 +88,21 @@ def somas_por_mes(
             Transaction.date >= inicio,
             Transaction.date < fim,
         )
-        .group_by(ano, mes, Category.type, Transaction.payment_method, Transaction.finalidade)
+        .group_by(ano, mes, Category.type, Transaction.payment_method, Transaction.finalidade, nat)
     ).all()
 
     saida: dict[tuple[int, int], dict[Chave, float]] = {}
-    for a, m, tipo, forma, finalidade, soma in linhas:
+    for a, m, tipo, forma, finalidade, natureza, soma in linhas:
+        tipo = CategoryType(tipo)
         chave = (
-            CategoryType(tipo).value,
+            tipo.value,
             PaymentMethod(forma).value if forma else None,
             Finalidade(finalidade).value if finalidade else None,
+            dominio_natureza.do_nome(natureza) if tipo == CategoryType.EXPENSE else None,
         )
         bucket = saida.setdefault((int(a), int(m)), {})
         bucket[chave] = bucket.get(chave, 0.0) + float(soma or 0.0)
     return saida
-
-
-def somar(
-    somas: dict[Chave, float],
-    tipo: str,
-    formas: tuple[str | None, ...] | None = None,
-    finalidade: str | None = None,
-) -> float:
-    """Soma o que casa com o filtro. `formas=None` = qualquer forma;
-    `finalidade=None` = qualquer finalidade (inclusive nula)."""
-    return sum(
-        valor
-        for (t, forma, fin), valor in somas.items()
-        if t == tipo
-        and (formas is None or forma in formas)
-        and (finalidade is None or fin == finalidade)
-    )
-
-
-def saldo_do_mes(somas: dict[Chave, float], faturas_pagas: float) -> dict[str, float]:
-    """Os números de caixa de um mês. A regra de sempre, num lugar só:
-
-        saldo = entrou − despesa à vista (inclui forma nula) − investido − faturas pagas
-
-    Compra no cartão não entra: ela sai da conta quando a fatura é paga. A
-    forma nula conta como à vista porque é assim que ela já era contada antes
-    do cartão — tratá-la de outro jeito mudaria o saldo de todo mês passado.
-    """
-    entrou = somar(somas, "income")
-    investido = somar(somas, "investment")
-    sem_forma = somar(somas, "expense", (None,))
-    a_vista = somar(somas, "expense", ("cash",)) + sem_forma
-    no_cartao = somar(somas, "expense", ("credit",))
-    return {
-        "entrou": entrou,
-        "investido": investido,
-        "a_vista": a_vista,
-        "sem_forma": sem_forma,
-        "no_cartao": no_cartao,
-        "gasto_total": a_vista + no_cartao,
-        "saldo": entrou - a_vista - investido - faturas_pagas,
-    }
 
 
 def faturas_pagas_por_mes(
@@ -199,6 +163,11 @@ def serie_mensal(
                 # Eixo do gasto — o único que o filtro de finalidade estreita.
                 "expense": round(gasto, 2),
                 "expense_total": round(gasto_total, 2),
+                # O mesmo gasto (com o filtro) pelas três naturezas; somam `expense`.
+                "consumption": round(somar(do_mes, "expense", finalidade=fin, natureza="consumption"), 2),
+                "asset_acquisition": round(
+                    somar(do_mes, "expense", finalidade=fin, natureza="asset_acquisition"), 2),
+                "financial": round(somar(do_mes, "expense", finalidade=fin, natureza="financial"), 2),
                 "expense_sem_finalidade": round(
                     somar(do_mes, "expense") - sum(
                         somar(do_mes, "expense", finalidade=f.value) for f in Finalidade
@@ -222,8 +191,12 @@ def distribuicao(
     mes: int,
     finalidade: Finalidade | None,
     top: int,
+    natureza: TransactionNature | None = None,
 ) -> dict:
     """Gasto do mês por categoria: as `top` maiores e o resto em "Outras".
+
+    `natureza` estreita do mesmo jeito que a finalidade: "custo de vida por
+    categoria" é a rosca só com o consumo.
 
     O percentual é sobre o total do filtro, sempre. Dividir pela soma só das
     categorias exibidas faria a fatia mudar de tamanho conforme o top escolhido.
@@ -254,6 +227,8 @@ def distribuicao(
     )
     if finalidade is not None:
         query = query.where(Transaction.finalidade == finalidade)
+    if natureza is not None:
+        query = query.where(dominio_natureza.expressao() == natureza.name)
 
     linhas = [
         {
@@ -293,7 +268,7 @@ def distribuicao(
     # Quanto do mês não tem finalidade — o que um filtro não-Todos deixa de fora.
     # É o que permite a tela dizer isso em vez de apresentar um total parcial
     # como se fosse o completo.
-    sem = session.exec(
+    sem_query = (
         select(func.count(Transaction.id), func.coalesce(func.sum(Transaction.amount_paid), 0.0))
         .join(Category, Transaction.category_id == Category.id)
         .where(
@@ -304,12 +279,16 @@ def distribuicao(
             Transaction.finalidade.is_(None),
             Transaction.amount_paid.is_not(None),
         )
-    ).one()
+    )
+    if natureza is not None:
+        sem_query = sem_query.where(dominio_natureza.expressao() == natureza.name)
+    sem = session.exec(sem_query).one()
 
     return {
         "year": ano,
         "month": mes,
         "finalidade": finalidade.value if finalidade else None,
+        "natureza": natureza.value if natureza else None,
         "total": round(total, 2),
         "categories": visiveis,
         "others": outras,

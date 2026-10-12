@@ -1,3 +1,13 @@
+import os
+
+# Os testes têm ambiente próprio, decidido ANTES de importar o app: nunca o
+# banco do `.env` de quem rodou. Cada teste usa um SQLite em memória (fixture
+# `session`); o engine global do app aponta pra outro SQLite em memória, só pra
+# existir. TEST_DATABASE_URL permite apontar pra um Postgres local, se preciso.
+os.environ["APP_ENV"] = "test"
+os.environ["DATABASE_URL"] = os.getenv("TEST_DATABASE_URL", "sqlite://")
+os.environ.pop("ALLOW_PRODUCTION_DATABASE", None)
+
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import event

@@ -16,7 +16,7 @@ from sqlmodel import Session
 
 from app.auth import require_user
 from app.database import get_session
-from app.models import Finalidade, User
+from app.models import Finalidade, TransactionNature, User
 from app.relatorios import distribuicao, meses_entre, serie_mensal
 
 router_relatorios = APIRouter(dependencies=[Depends(require_user)])
@@ -29,6 +29,8 @@ MES = re.compile(r"^(\d{4})-(\d{2})$")
 
 # "todos" é o padrão e o único que inclui gasto sem finalidade.
 FiltroFinalidade = Literal["todos", "pessoal", "familia", "empresa"]
+# "todas" é o gasto total; "consumption" é o custo de vida.
+FiltroNatureza = Literal["todas", "consumption", "asset_acquisition", "financial"]
 
 
 def _mes(texto: str, campo: str) -> tuple[int, int]:
@@ -73,8 +75,15 @@ def relatorio_categorias(
     month: int = Query(ge=1, le=12),
     finalidade: FiltroFinalidade = Query(default="todos"),
     top: int = Query(default=5, ge=1, le=12),
+    natureza: FiltroNatureza = Query(default="todas"),
     session: Session = Depends(get_session),
     dono: User = Depends(require_user),
 ):
-    """Gasto do mês por categoria, as `top` maiores e o resto agrupado."""
-    return distribuicao(session, dono, year, month, _finalidade(finalidade), top)
+    """Gasto do mês por categoria, as `top` maiores e o resto agrupado.
+
+    `natureza=consumption` é o custo de vida por categoria.
+    """
+    return distribuicao(
+        session, dono, year, month, _finalidade(finalidade), top,
+        None if natureza == "todas" else TransactionNature(natureza),
+    )
