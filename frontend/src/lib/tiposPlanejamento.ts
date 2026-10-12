@@ -5,7 +5,7 @@
 // toda conta vem pronta do servidor — refazê-la aqui seria a segunda cópia da
 // regra, e duas cópias de uma regra de dinheiro discordam um dia.
 
-import type { AssetClass, Finalidade } from "./types";
+import type { AssetClass, Finalidade, Natureza } from "./types";
 
 export type Certeza = "confirmado" | "estimado" | "hipotetico";
 export type OrigemPlano = "cartao" | "parcelado" | "recorrente" | "previsto" | "cenario";
@@ -85,9 +85,17 @@ export interface PlanoMes {
 }
 
 export interface ContaPlanejamento {
-  asset_id: number;
+  // Uma das duas: a conta financeira (quem tem contas) ou o ativo (o jeito
+  // anterior, pra quem ainda não cadastrou contas).
+  asset_id: number | null;
+  account_id?: number | null;
   name: string;
-  asset_class: AssetClass;
+  asset_class: AssetClass | null;
+  account_type?: string | null;
+  restricted?: boolean;
+  quality?: "reconciliado" | "calculado" | "desatualizado" | "sem_saldo" | null;
+  observed_at?: string | null;
+  maybe_incomplete?: boolean;
   included: boolean;
   value: number;
   as_of: string | null;
@@ -176,6 +184,7 @@ export interface CommitmentCreate {
   end_date?: string | null;
   confirmed?: boolean;
   finalidade?: Finalidade | null;
+  nature?: Natureza | null;
   institution?: string | null;
   total_amount?: number | null;
   down_payment?: number | null;
@@ -196,6 +205,7 @@ export interface Commitment {
   end_date: string | null;
   confirmed: boolean;
   finalidade: Finalidade | null;
+  nature: Natureza | null;
   institution: string | null;
   total_amount: number | null;
   down_payment: number | null;
@@ -357,3 +367,35 @@ export interface ReconciliationItemCreate {
   kind?: ReconciliationKind;
   question?: string | null;
 }
+
+// ---------- Conferir mês (app/dominio/saude.py) ----------
+// Derivado no servidor: nada é gravado. Pendências agrupadas por tipo.
+
+export type EstadoDoMes = "conciliado" | "parcial" | "precisa_revisar";
+
+export interface Pendencia {
+  code: string;
+  severity: "revisar" | "aviso";
+  title: string;
+  detail: string | null;
+  count: number;
+  amount: number | null;
+  where: string | null;
+  items: { label: string; date: string | null; amount: number | null; ref: number | null }[];
+}
+
+export interface SaudeDoMes {
+  year: number;
+  month: number;
+  state: EstadoDoMes;
+  issues: Pendencia[];
+  to_review: number;
+  warnings: number;
+  trustworthy_balance: boolean;
+}
+
+export const ESTADO_DO_MES_LABEL: Record<EstadoDoMes, string> = {
+  conciliado: "conciliado",
+  parcial: "parcial",
+  precisa_revisar: "precisa revisar",
+};

@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import Modal from "../components/Modal";
 import ConfirmDialog from "../components/ConfirmDialog";
 import CategoryPicker from "../components/CategoryPicker";
@@ -18,11 +18,13 @@ import {
   useReconProvision,
   useReconTransaction,
   useUpdateReconciliation,
+  useMonthHealth,
 } from "../lib/queries";
 import { usePeriod } from "../lib/period";
 import { useAuth } from "../lib/auth";
 import { ApiError } from "../lib/api";
 import { formatDate, formatDiaMes, formatMoney, parseMoney, todayIso } from "../lib/format";
+import type { Pendencia } from "../lib/tiposPlanejamento";
 import type { Category, Finalidade } from "../lib/types";
 import {
   CONFERENCIA_TIPO_LABEL,
@@ -64,8 +66,14 @@ export default function Organizar() {
 
   return (
     <>
-      <Cabecalho titulo={`Organizar ${nomeDoMes(period.year, period.month)}`} voltar="Planejamento" voltarPara="/planejamento" />
+      <Cabecalho titulo={`Conferir ${nomeDoMes(period.year, period.month)}`} voltar="Planejamento" voltarPara="/planejamento" />
 
+      {/* O estado do mês e o que impede ele de ser confiável — derivado no
+          servidor, agrupado ("6 lançamentos sem conta", não seis alertas).
+          Os itens anotados à mão (a lista abaixo) são uma das pendências. */}
+      <SaudeDoMesBloco />
+
+      {data && data.items.length > 0 && <div className="sec-title"><h2>Itens anotados</h2></div>}
       {data && data.items.length > 0 && (
         <Segmentado
           rotulo="Filtro"
@@ -521,5 +529,53 @@ function NovoItem({ ano, mes, onClose }: { ano: number; mes: number; onClose: ()
         {adicionar.error && <div className="error-box">{(adicionar.error as ApiError).message}</div>}
       </form>
     </Modal>
+  );
+}
+
+
+function SaudeDoMesBloco() {
+  const { data } = useMonthHealth();
+  const navigate = useNavigate();
+  const [aberta, setAberta] = useState<Pendencia | null>(null);
+  if (!data) return null;
+  const outras = data.issues.filter((i) => i.code !== "REVIEW_ITEMS");
+  return (
+    <>
+      <div className="folha-total">
+        <b>{data.state === "conciliado" ? "Mês conciliado" : data.state === "parcial" ? "Conciliado em parte" : "Precisa revisar"}</b>
+        <span>
+          {data.issues.length === 0
+            ? "nada pendente: os números deste mês são confiáveis"
+            : `${data.to_review} pra revisar · ${data.warnings} ${data.warnings === 1 ? "aviso" : "avisos"}`}
+        </span>
+      </div>
+      {outras.length > 0 && (
+        <ul className="lista-compacta">
+          {outras.map((p) => (
+            <Linha key={p.code + p.title} rotulo={p.title}
+              legenda={p.detail ?? (p.amount != null ? formatMoney(p.amount) : undefined)}
+              tom={p.severity === "revisar" ? "neg" : undefined}
+              valor={p.amount != null && p.detail ? formatMoney(p.amount) : ""}
+              onClick={() => (p.items.length ? setAberta(p) : p.where && navigate(p.where))} />
+          ))}
+        </ul>
+      )}
+      {aberta && (
+        <Modal title={aberta.title} onClose={() => setAberta(null)}>
+          <div className="m-body">
+            {aberta.detail && <p className="hint" style={{ marginTop: 0 }}>{aberta.detail}</p>}
+            <ul className="lista-compacta">
+              {aberta.items.map((i, n) => (
+                <Linha key={n} rotulo={i.label} legenda={i.date ? formatDiaMes(i.date) : undefined}
+                  valor={i.amount != null ? formatMoney(i.amount) : ""} />
+              ))}
+            </ul>
+            {aberta.where && (
+              <button className="btn btn-block" onClick={() => navigate(aberta.where!)}>Abrir onde se resolve</button>
+            )}
+          </div>
+        </Modal>
+      )}
+    </>
   );
 }

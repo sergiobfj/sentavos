@@ -339,7 +339,8 @@ h1, h2, h3 { margin: 0; letter-spacing: -0.01em; line-height: 1.25; font-weight:
 .sec-title a::after, .link-seta::after { content: "→"; color: var(--text-faint); }
 .sec-title button.link { color: var(--gold-hi); }
 /* Duas ações no título (Pausar · Editar) sem virar barra de botões. */
-.sec-title .titulo-acoes { display: inline-flex; gap: var(--s4); }
+.sec-title .titulo-acoes { display: inline-flex; gap: var(--s4); flex: none; }
+.sec-title .titulo-acoes button { white-space: nowrap; }
 
 /* ---------------------------------------------------------------- Cards --- */
 

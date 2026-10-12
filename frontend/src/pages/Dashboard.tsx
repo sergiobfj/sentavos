@@ -5,7 +5,7 @@ import { LinhaLancamento } from "../components/TransactionList";
 import Segmentado from "../components/Segmentado";
 import { Evolucao, Rosca, type Fatia, type PontoEvolucao } from "../components/Graficos";
 import {
-  useAssetSummary,
+  useMonthHealth,
   useBudgetSummary,
   useCards,
   useCategories,
@@ -19,8 +19,9 @@ import { currentPeriod, usePeriod } from "../lib/period";
 import { ApiError } from "../lib/api";
 import { formatDiaMes, formatMoney } from "../lib/format";
 import { FRASE_FILTRO, OPCOES_FILTRO, useFiltroFinalidade } from "../lib/finalidade";
+import { useLeituraDoGasto } from "../lib/natureza";
 import { COR_OUTRAS } from "../lib/paleta";
-import { INVESTMENT_CLASSES, type CardInvoices, type Category, type Invoice, type Transaction } from "../lib/types";
+import type { CardInvoices, Category, Invoice, Transaction } from "../lib/types";
 
 /* O Início é relatório, não painel. A ordem responde as perguntas na ordem em
    que elas são feitas ao abrir o app:
@@ -46,15 +47,19 @@ export default function Dashboard() {
   const { period, isCurrent } = usePeriod();
   const [editando, setEditando] = useState<Transaction | null>(null);
   const [filtro, setFiltro] = useFiltroFinalidade();
+  // Gasto total (padrão, o de sempre) ou custo de vida: a mesma rosca e a
+  // mesma linha, sem a entrada da moto e a parcela do financiamento.
+  const [leitura, setLeitura] = useLeituraDoGasto();
+  const vida = leitura === "vida";
   const [janela, setJanela] = useState<"6" | "12">("6");
 
   const { data: transactions, isLoading, error } = useTransactions();
   const { data: categories } = useCategories(true);
   const { data: resumo } = useBudgetSummary();
-  const { data: ativos } = useAssetSummary();
+  const { data: saudeDoMes } = useMonthHealth();
   const { data: faturas } = useInvoicesSummary();
   const { data: cards } = useCards();
-  const distribuicao = useCategoryReport(filtro);
+  const distribuicao = useCategoryReport(filtro, vida ? "consumption" : "todas");
   const serie = useMonthlyReport(Number(janela), filtro);
 
   const caixa = resumo?.caixa;
@@ -114,12 +119,19 @@ export default function Dashboard() {
           valor:
             filtro !== "todos" && m.expense === 0 && m.expense_sem_finalidade > 0
               ? null
-              : m.expense,
+              : vida ? m.consumption : m.expense,
           atual: m.year === period.year && m.month === period.month,
         };
       }),
-    [serie.data, period, filtro]
+    [serie.data, period, filtro, vida]
   );
+  // O que o mês tem fora do custo de vida. Com a finalidade escolhida, como a
+  // rosca: vem do ponto do mês na série, já filtrado no servidor.
+  const pontoDoMes = (serie.data?.months ?? []).find((m) => m.year === period.year && m.month === period.month);
+  const foraDoCusto = [
+    pontoDoMes && pontoDoMes.asset_acquisition > 0 ? `${formatMoney(pontoDoMes.asset_acquisition)} de aquisição de bem` : null,
+    pontoDoMes && pontoDoMes.financial > 0 ? `${formatMoney(pontoDoMes.financial)} de financiamento` : null,
+  ].filter(Boolean) as string[];
 
   if (isLoading) return <Esqueleto />;
   if (error) return <div className="error-box">{(error as ApiError).message}</div>;
@@ -131,9 +143,11 @@ export default function Dashboard() {
   // Investimento com saldo lançado por conferência neste mês: houve um resgate
   // (ou movimento) sem valor conciliado, e o saldo do mês não o enxerga. Sem a
   // frase, gasto pago com dinheiro da caixinha parece rombo na conta.
-  const semConciliar = (ativos?.items ?? []).filter(
-    (i) => i.reconciliation_note && INVESTMENT_CLASSES.includes(i.asset_class)
-  );
+  // A saúde do mês (servidor) diz se o saldo do mês é resultado ou só
+  // aproximação: com resgate sem valor conciliado, o gasto pago com o dinheiro
+  // resgatado aparece e o resgate não.
+  const resgateSemValor = (saudeDoMes?.issues ?? []).filter((i) => i.code === "UNMATCHED_REDEMPTION");
+  const semConciliar = saudeDoMes && !saudeDoMes.trustworthy_balance ? resgateSemValor : [];
 
   // Cartão ainda sem finalidade: as compras dele ficam fora de Pessoal/Família/
   // Empresa até alguém dizer pra que ele serve. A tela avisa uma vez, baixo.
@@ -181,7 +195,7 @@ export default function Dashboard() {
         {semConciliar.length > 0 && (
           <div className="nota">
             Falta conciliar{" "}
-            {semConciliar.map((i) => `${i.name}: ${i.reconciliation_note}`).join(" ")} Até lá, este
+            {semConciliar.map((i) => `${i.title.replace("Resgate sem valor conciliado — ", "")}: ${i.detail ?? ""}`).join(" ")} Até lá, este
             número não é o resultado de {nomeDoMes}.
           </div>
         )}
@@ -191,6 +205,18 @@ export default function Dashboard() {
           aparece olhando o saldo do mês, então a resposta mora logo abaixo dele.
           Só no mês corrente — o planejamento olha de hoje pra frente. */}
       {isCurrent && <LinhaDoPlanejamento />}
+
+      {/* O mês ainda não é confiável: uma linha, não um painel. */}
+      {saudeDoMes && saudeDoMes.state !== "conciliado" && (
+        <Link className="aviso-acao" to="/organizar">
+          <div>
+            <b>{nomeDoMes.charAt(0).toUpperCase() + nomeDoMes.slice(1)}</b>{" "}
+            {saudeDoMes.state === "parcial" ? "conciliado em parte" : "ainda não está conciliado"} ·{" "}
+            {saudeDoMes.issues.length} {saudeDoMes.issues.length === 1 ? "pendência" : "pendências"}
+          </div>
+          <span aria-hidden>›</span>
+        </Link>
+      )}
 
       {(caixa?.sem_forma_definida_qtd ?? 0) > 0 && (
         <Link className="aviso-acao" to="/rever">
@@ -227,8 +253,24 @@ export default function Dashboard() {
 
           <div className="total-filtro">
             <div className="v tnum">{formatMoney(d?.total ?? 0)}</div>
-            <div className="r">{FRASE_FILTRO[filtro]} em {nomeDoMes}</div>
+            <div className="r">
+              {vida ? `custo de vida${filtro === "todos" ? "" : ` (${FRASE_FILTRO[filtro]})`}` : FRASE_FILTRO[filtro]} em {nomeDoMes}
+            </div>
           </div>
+          {/* Só a exceção ganha frase: mês sem aquisição nem financiamento não
+              diz nada (custo de vida = gasto total). */}
+          {(foraDoCusto.length > 0 || vida) && (
+            <div className="nota">
+              {foraDoCusto.length === 0
+                ? "Sem aquisição nem financiamento neste mês. "
+                : vida
+                  ? `Fora: ${foraDoCusto.join(" e ")}. `
+                  : `Inclui ${foraDoCusto.join(" e ")}. `}
+              <button type="button" className="link-inline" onClick={() => setLeitura(vida ? "total" : "vida")}>
+                {vida ? "Ver gasto total" : "Ver custo de vida"}
+              </button>
+            </div>
+          )}
 
           {distribuicao.isLoading ? (
             <div className="skel" style={{ height: 184 }} />
@@ -259,7 +301,7 @@ export default function Dashboard() {
 
           {/* ---------- Evolução ---------- */}
           <div className="sec-title">
-            <h2>Evolução dos gastos</h2>
+            <h2>{vida ? "Evolução do custo de vida" : "Evolução dos gastos"}</h2>
           </div>
           <div className="cabeca-grafico">
             <Segmentado
