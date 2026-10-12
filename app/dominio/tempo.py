@@ -3,7 +3,8 @@
 `hoje()` é o dia local (UTC−3) — no servidor (UTC), `date.today()` virava o
 dia seguinte depois das 21h. `agora()` é o instante, coerente com `hoje()`:
 quando um teste fixa o dia (monkeypatch em `app.planejamento.hoje`), o
-instante cai nesse dia, na hora corrente.
+instante é o fim desse dia — fixo, pra o resultado não depender da hora em
+que o teste roda.
 """
 
 import datetime as dt
@@ -25,4 +26,4 @@ def agora() -> dt.datetime:
     dia = planejamento.hoje()
     if dia == real.date():
         return real.astimezone(dt.timezone.utc)
-    return dt.datetime.combine(dia, real.timetz()).astimezone(dt.timezone.utc)
+    return dt.datetime.combine(dia, dt.time(23, 59, 59), FUSO).astimezone(dt.timezone.utc)
