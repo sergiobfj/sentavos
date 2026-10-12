@@ -18,7 +18,13 @@ existe um e-mail e uma senha configurados no servidor, e mais ninguém entra.
 | **Investir** | Quanto tenho aplicado, quanto aportei e resgatei, e quanto rendeu. Visão cruzada de Patrimônio — não guarda dado próprio. |
 | **Patrimônio** | Quanto cada coisa vale hoje, incluindo dívida (que entra subtraindo). |
 
-Configurações (cartões, CDI e categorias) fica no ⚙️ do topo, fora da barra.
+Configurações (contas e saldos, cartões, CDI e categorias) fica no ⚙️ do topo,
+fora da barra.
+
+As regras de dinheiro — o que é verdade onde, as invariantes, conta × ativo,
+aporte/resgate, natureza do gasto — estão em
+[`docs/financial-domain.md`](docs/financial-domain.md). Ambientes, CI e o
+caminho até a produção, em [`docs/fluxo-de-trabalho.md`](docs/fluxo-de-trabalho.md).
 
 Transação é **fluxo** (o que se moveu no mês); ativo é **estoque** (quanto vale
 num ponto do tempo). Por isso patrimônio não sai da soma das transações — precisa
@@ -439,6 +445,14 @@ altera uma que já existe.
 | `0005_finalidade` | `finalidade` nulável em cartões, compras e lançamentos — nada preenchido |
 | `0006_planejamento` | compromissos, dispensas, reservas, cenários e conferência; baixa no lançamento; conta e dia do saldo — nada preenchido |
 | `0007_conciliacao_saldo` | nota de conferência no saldo do ativo: o rendimento do mês vira "não apurado" — nada preenchido |
+| `0008_auditoria` | `audit_events`: quem mexeu em dinheiro fora do fluxo comum |
+| `0009_contas` | contas financeiras, saldo observado com instante, transferências; conta e instante no lançamento e no pagamento de fatura; `archived_on` no ativo — nada preenchido |
+| `0010_movimentos_investimento` | aporte/resgate/ajuste ligados ao ativo, à conta e ao lançamento — nada preenchido |
+| `0011_natureza` | natureza do gasto no lançamento, na categoria e no compromisso — nula = consumo |
+
+Dado existente nunca é reclassificado por migração: o que muda de sentido
+(o saldo agregado vira conta, a entrada da moto vira aquisição) passa pelo
+`scripts/foundation_v3.py`, com plano explícito, backup, auditoria e `--undo`.
 
 Toda migração é **idempotente por coluna**: ela checa antes de adicionar. Num
 banco vazio a `0001` monta as tabelas com `create_all`, que usa o modelo de hoje
@@ -461,11 +475,20 @@ um JSON em `backups/` — use antes de qualquer script que escreva.
 > (`native_enum=False`), e coluna nova de tipo nativo já existente entra por
 > `add_column`.
 
-## Scripts opcionais
+## Scripts
 
-- `scripts/redistribuir_cores.py --usuario <email>` — troca as cores das
-  categorias pelas da paleta fechada (`frontend/src/lib/paleta.ts`), a mais usada
-  primeiro. Seco por padrão; `--aplicar` tira backup e grava só a coluna `color`.
+Todo script que escreve segue o mesmo esqueleto (`scripts/_admin.py`): **seco
+por padrão**, `--apply` (ou `--aplicar`) pra gravar, `--usuario <email>`
+obrigatório, cabeçalho com ambiente e banco, backup antes de gravar e
+`audit_event` depois. Contra a produção, só com `APP_ENV=production` e
+`ALLOW_PRODUCTION_DATABASE=true` (ver `docs/fluxo-de-trabalho.md`).
+
+- `scripts/foundation_v3.py --usuario <email> --plano <json>` — migração
+  assistida das contas, investimentos e natureza; `--undo --apply` desfaz.
+- `scripts/redistribuir_cores.py --usuario <email>` — cores da paleta fechada.
+- `scripts/backup.py --usuario <email>` — a conta inteira num JSON em `backups/`.
+- `scripts/regressao.py` — carrega backups num Postgres local e compara os
+  números de dois códigos/estados mês a mês.
 
 ## Ainda não tem
 
