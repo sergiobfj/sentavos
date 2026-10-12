@@ -21,9 +21,17 @@ config = context.config
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
+from dotenv import load_dotenv  # noqa: E402
+
+from app.ambiente import verificar_banco  # noqa: E402
+
+# A mesma regra da API: `.env` de desenvolvimento por padrão, e a trava contra
+# rodar migração na produção por acidente (ver app/ambiente.py).
+load_dotenv()
 url = os.getenv("DATABASE_URL")
 if not url:
     raise RuntimeError("DATABASE_URL não configurada. Veja o .env.example.")
+verificar_banco(url)
 config.set_main_option("sqlalchemy.url", url.replace("%", "%%"))
 
 target_metadata = SQLModel.metadata
