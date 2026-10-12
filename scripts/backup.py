@@ -55,6 +55,13 @@ TABELAS = [
     "scenarios",
     "scenario_items",
     "reconciliation_items",
+    # Foundation V3: contas (0009), movimentos de investimento (0010) e o
+    # rastro de auditoria (0008). Tabela que ainda não existe é pulada.
+    "financial_accounts",
+    "account_balance_snapshots",
+    "transfers",
+    "investment_movements",
+    "audit_events",
 ]
 
 

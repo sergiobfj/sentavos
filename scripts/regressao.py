@@ -23,9 +23,12 @@ import sys
 from collections import Counter
 
 ORDEM = [
-    "categories", "cards", "purchases", "invoices", "commitments", "transactions",
-    "invoice_payments", "budgets", "assets", "asset_snapshots", "commitment_skips",
-    "provisions", "scenarios", "scenario_items", "reconciliation_items",
+    # Ordem de dependência: conta antes de lançamento, pagamento e transferência;
+    # lançamento e ativo antes do movimento de investimento.
+    "categories", "financial_accounts", "cards", "purchases", "invoices", "commitments", "transactions",
+    "invoice_payments", "budgets", "assets", "asset_snapshots", "account_balance_snapshots", "transfers",
+    "investment_movements", "commitment_skips", "provisions", "scenarios", "scenario_items",
+    "reconciliation_items", "audit_events",
 ]
 MESES = [(2025 + (7 + i) // 12, (7 + i) % 12 + 1) for i in range(24)]  # 2025-08 .. 2027-07
 
@@ -141,6 +144,7 @@ def despejar(saida: str) -> None:
                 for x in get("/categories?incluir_arquivadas=1&incluir_uso=1")
             ]
             conta["_metas"] = get("/budgets")
+            conta["_ativos"] = get("/assets")
             conta["_transacoes"] = sorted(
                 [t["id"], t["date"], t["amount_paid"], t["amount_planned"], t["category_id"],
                  t.get("payment_method"), t.get("finalidade"), t.get("purchase_id"), t.get("invoice_id")]
