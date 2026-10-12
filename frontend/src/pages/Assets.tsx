@@ -76,15 +76,11 @@ export default function Assets() {
   // o patrimônio "subiu R$ 6.864" em setembro porque duas aplicações ganharam
   // o primeiro saldo, não porque renderam. É a mesma armadilha que tira daqui
   // a linha de evolução.
-  const novos = data.items.filter((i) => !i.stale && i.previous === 0 && i.value !== 0 && i.as_of === ym);
-  const cadastrados = novos.reduce((s, i) => s + (i.liability ? -i.value : i.value), 0);
-  // A variação soma ativo por ativo, só os atualizados e que já existiam. Saldo
-  // desatualizado não tem variação conhecida — e o patrimônio do mês anterior
-  // o contava, então "patrimônio − anterior" mostraria a ausência dele como
-  // queda.
-  const variacaoReal = data.items
-    .filter((i) => !i.stale && !novos.includes(i))
-    .reduce((s, i) => s + (i.liability ? -(i.value - i.previous) : i.value - i.previous), 0);
+  // Variação e cadastro vêm prontos do servidor (app/dominio/patrimonio.py),
+  // contas incluídas: cadastro não é crescimento, e com ativo desatualizado a
+  // variação não é apurável (vem nula).
+  const cadastrados = data.new_total ?? 0;
+  const variacaoReal = data.variation ?? 0;
   const foraDoTotal = data.stale_count ?? 0;
   const temDividas = data.liabilities > 0;
 

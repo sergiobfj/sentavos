@@ -17,8 +17,9 @@ import {
   reconciliationApi,
   accountsApi,
   transfersApi,
+  investmentsApi,
 } from "./api";
-import type { AccountCreate, AccountUpdate, TransferCreate } from "./tiposContas";
+import type { AccountCreate, AccountUpdate, InvestmentMovementCreate, TransferCreate } from "./tiposContas";
 import type {
   CommitmentCreate,
   CommitmentUpdate,
@@ -63,6 +64,7 @@ const keys = {
   // Contas: o saldo calculado depende de lançamento, fatura paga e transferência.
   accounts: ["accounts"] as const,
   transfers: ["transfers"] as const,
+  investments: ["investments"] as const,
 };
 
 // O planejamento lê tudo: lançamento previsto, fatura, saldo, compromisso,
@@ -83,6 +85,7 @@ function invalidatePlanning(qc: QueryClient) {
 // desconta pagamento de fatura. Esquecer um dos três deixaria a tela com dois
 // números do mesmo mês discordando — que é o defeito mais caro de depurar aqui.
 function invalidateMovement(qc: QueryClient) {
+  qc.invalidateQueries({ queryKey: keys.investments });
   qc.invalidateQueries({ queryKey: keys.transfers });
   qc.invalidateQueries({ queryKey: keys.transactions });
   qc.invalidateQueries({ queryKey: keys.budgets });
@@ -731,3 +734,19 @@ export function useTransfers() {
 }
 export const useCreateTransfer = () => useMutacaoDeConta((data: TransferCreate) => transfersApi.create(data));
 export const useDeleteTransfer = () => useMutacaoDeConta((id: number) => transfersApi.remove(id));
+
+// ---------- Investimento ----------
+
+export function useInvestmentSummary() {
+  const { period, ym } = usePeriod();
+  return useQuery({ queryKey: [...keys.investments, "resumo", ym], queryFn: () => investmentsApi.summary(period) });
+}
+
+export function useInvestmentMovements() {
+  const { period, ym } = usePeriod();
+  return useQuery({ queryKey: [...keys.investments, "movimentos", ym], queryFn: () => investmentsApi.movements(period) });
+}
+
+export const useCreateMovement = () =>
+  useMutacaoDeConta((data: InvestmentMovementCreate) => investmentsApi.createMovement(data));
+export const useRemoveMovement = () => useMutacaoDeConta((id: number) => investmentsApi.removeMovement(id));

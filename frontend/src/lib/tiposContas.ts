@@ -144,3 +144,72 @@ export function lembrarConta(id: number | null): void {
     /* sem storage: só não lembra */
   }
 }
+
+// ---------- Investimento (dominio/investimentos.py) ----------
+// Rendimento, aportado e resgatado vêm prontos: a tela não recalcula.
+
+export type YieldStatus = "apurado" | "nao_apurado" | "sem_base";
+export type MovementType = "contribution" | "redemption" | "adjustment";
+
+export interface InvestmentAssetItem {
+  asset_id: number;
+  name: string;
+  asset_class: "fixed_income" | "equity" | "crypto";
+  value: number;
+  previous: number;
+  stale: boolean;
+  as_of: string | null;
+  reconciliation_note: string | null;
+  cdi_percent: number | null;
+  expected_yield: number | null;
+  share: number | null;
+  contributed: number;
+  redeemed: number;
+  adjusted: number;
+  yield_amount: number | null;
+  yield_status: YieldStatus;
+}
+
+export interface InvestmentSummary {
+  year: number;
+  month: number;
+  items: InvestmentAssetItem[];
+  total: number;
+  previous_total: number;
+  variation: number | null;
+  contributed: number;
+  redeemed: number;
+  adjusted: number;
+  yield_amount: number | null;
+  yield_status: YieldStatus;
+  reasons: string[];
+  expected_yield: number | null;
+  unlinked: number;
+  stale_names: string[];
+  stale_total: number;
+}
+
+export interface InvestmentMovement {
+  id: number;
+  asset_id: number;
+  asset_name: string;
+  type: MovementType;
+  amount: number;
+  date: string;
+  account_id: number | null;
+  account_name: string | null;
+  note: string | null;
+  transaction_id: number | null;
+}
+
+export interface InvestmentMovementCreate {
+  asset_id: number;
+  type: MovementType;
+  amount: number;
+  date: string;
+  account_id?: number | null;
+  transaction_id?: number | null;
+  category_id?: number | null;
+  description?: string | null;
+  occurred_at?: string | null;
+}

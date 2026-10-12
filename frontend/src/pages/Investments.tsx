@@ -1,116 +1,77 @@
 import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
+import Modal from "../components/Modal";
 import TransactionForm from "../components/TransactionForm";
+import ContaPicker from "../components/ContaPicker";
 import { MarcaEditavel } from "../components/TransactionList";
 import { Rosca } from "../components/Graficos";
 import {
-  useAssetSummary,
-  usePerfil,
-  useBudgetSummary,
   useCategories,
+  useCreateMovement,
+  useInvestmentMovements,
+  useInvestmentSummary,
+  usePerfil,
+  useRemoveMovement,
   useTransactions,
 } from "../lib/queries";
+import { useAuth } from "../lib/auth";
 import { usePeriod } from "../lib/period";
 import { ApiError } from "../lib/api";
-import { formatDiaMes, formatMoney, formatYm } from "../lib/format";
+import { formatDiaMes, formatMoney, formatYm, parseMoney, todayIso } from "../lib/format";
 import { PALETA_CATEGORIAS, fundoDaCor } from "../lib/paleta";
+import { ASSET_CLASS_LABEL, type Transaction } from "../lib/types";
 import {
-  ASSET_CLASS_LABEL,
-  INVESTMENT_CLASSES,
-  type AssetSummaryItem,
-  type Transaction,
-} from "../lib/types";
+  instanteSeHoje,
+  lembrarConta,
+  ultimaConta,
+  type InvestmentAssetItem,
+  type InvestmentMovement,
+  type MovementType,
+} from "../lib/tiposContas";
 
-// Esta aba não tem dados próprios de propósito: o saldo vem de Patrimônio
-// (classes de investimento) e o aporte vem dos lançamentos de categoria
-// "investimento". Se ela tivesse números próprios, começaria a divergir das
-// outras duas telas sobre o mesmo dinheiro.
+// Os números desta aba vêm prontos do servidor (app/dominio/investimentos.py):
+// total atualizado, variação, aportado, resgatado e o rendimento — com o motivo
+// quando ele não é apurável. A tela formata; não recalcula nada.
 
-/** A cor de cada aplicação segue o ATIVO, não a posição no ranking: se o
- *  Mercado Pago passar o Nubank no mês que vem, os dois não trocam de cor.
- *  O id é estável; a ordem por valor não é. */
-function corDoAtivo(itens: AssetSummaryItem[], id: number): string {
+/** A cor de cada aplicação segue o ATIVO, não a posição no ranking. */
+function corDoAtivo(itens: InvestmentAssetItem[], id: number): string {
   const ids = itens.map((i) => i.asset_id).sort((a, b) => a - b);
   return PALETA_CATEGORIAS[ids.indexOf(id) % PALETA_CATEGORIAS.length].cor;
 }
 
 export default function Investments() {
-  const { label, ym } = usePeriod();
-  const assets = useAssetSummary();
+  const { label } = usePeriod();
+  const resumo = useInvestmentSummary();
+  const movimentos = useInvestmentMovements();
   const perfil = usePerfil();
-  const budget = useBudgetSummary();
   const transactions = useTransactions();
   const categories = useCategories();
-  // O aporte errado tem que ter conserto aqui. Esta aba mostrava os aportes
-  // com `cursor: default` e nada acontecia ao tocar: quem lançou R$ 500 num
-  // lugar errado não tinha como apagar sem descobrir que o lançamento mora na
-  // aba de Lançamentos. O jeito que sobrava era lançar −500 pra anular, e é
-  // exatamente o que aconteceu duas vezes em setembro.
+  const { sessao } = useAuth();
+  const podeEscrever = !sessao?.somenteLeitura;
   const [editando, setEditando] = useState<Transaction | null>(null);
+  const [aberto, setAberto] = useState<Transaction | null>(null);
+  const [novo, setNovo] = useState<MovementType | null>(null);
 
-  const erro = (assets.error || budget.error) as ApiError | null;
-
-  const itens = useMemo(
-    () =>
-      (assets.data?.items ?? [])
-        .filter((i) => INVESTMENT_CLASSES.includes(i.asset_class))
-        // Os atualizados primeiro, por valor; os desatualizados no fim.
-        .sort((a, b) => Number(!!a.stale) - Number(!!b.stale) || b.value - a.value),
-    [assets.data]
-  );
-
+  // Os lançamentos de investimento do mês (o lado caixa) — cada um com o
+  // ativo dele, quando ligado.
   const aportes = useMemo(() => {
-    const investCats = new Set(
-      (categories.data ?? []).filter((c) => c.type === "investment").map((c) => c.id)
-    );
+    const investCats = new Set((categories.data ?? []).filter((c) => c.type === "investment").map((c) => c.id));
     return (transactions.data ?? [])
-      .filter((t) => investCats.has(t.category_id))
+      .filter((t) => investCats.has(t.category_id) && t.amount_paid != null)
       .sort((a, b) => b.date.localeCompare(a.date));
   }, [transactions.data, categories.data]);
+  const porLancamento = useMemo(() => {
+    const m = new Map<number, InvestmentMovement>();
+    for (const mv of movimentos.data ?? []) if (mv.transaction_id != null) m.set(mv.transaction_id, mv);
+    return m;
+  }, [movimentos.data]);
 
-  if (assets.isLoading || budget.isLoading || transactions.isLoading) return <Esqueleto />;
-  if (erro) return <div className="error-box">{erro.message}</div>;
-
-  // Saldo desatualizado (último conhecido é de mês anterior) aparece na lista,
-  // mas não soma: o Nubank de setembro não pode inflar o "investido" de hoje.
-  const atuais = itens.filter((i) => !i.stale);
-  const desatualizados = itens.filter((i) => i.stale);
-  const total = atuais.reduce((acc, i) => acc + i.value, 0);
-  const anterior = atuais.reduce((acc, i) => acc + i.previous, 0);
-  const variacao = total - anterior;
-  const aporte = budget.data?.totals.investment.paid ?? 0;
-
-  // Rendimento é o que sobrou da variação depois de descontar o que você
-  // colocou. Só faz sentido com um mês anterior pra comparar: no primeiro mês
-  // o saldo inteiro apareceria como "rendimento", o que seria falso.
-  const temBase = anterior > 0;
-
-  // Quanto as aplicações DEVERIAM render no mês, somando as que têm taxa. Null
-  // quando nenhuma tem — aí não há o que comparar e a linha não aparece.
-  const comTaxa = atuais.filter((i) => i.expected_yield != null);
-  const esperadoTotal = comTaxa.length
-    ? comTaxa.reduce((s, i) => s + (i.expected_yield ?? 0), 0)
-    : null;
-  const rendimento = variacao - aporte;
-  const comValor = atuais.filter((i) => i.value > 0);
-
-  // Aporte e resgate separados: o resgate é dinheiro que SAIU do investimento,
-  // não prejuízo nem gasto. Somados num número só, um resgate de R$ 1.000
-  // pareceria um mês sem aporte.
-  const aportado = aportes.reduce((s, t) => s + Math.max(t.amount_paid ?? 0, 0), 0);
-  const resgatado = aportes.reduce((s, t) => s + Math.max(-(t.amount_paid ?? 0), 0), 0);
-
-  // Saldo lançado por conferência: no mês houve um movimento cujo valor não
-  // está registrado (a caixinha usada numa compra, sem o extrato). A conta
-  // variação − aportes daria um "prejuízo" que não aconteceu. Traço + motivo.
-  // Aplicação sem saldo do mês também deixa o rendimento sem conta possível.
-  const conferidos = itens.filter((i) => i.reconciliation_note);
-  const naoApurado = conferidos.length > 0 || desatualizados.length > 0;
-  // O desatualizado já é dito embaixo do total; aqui só entra como motivo
-  // quando não há outro, pra não repetir a mesma frase duas vezes na tela.
-  const motivos = conferidos.length
-    ? conferidos.map((i) => `${i.name} — ${i.reconciliation_note}`)
-    : [`${desatualizados.map((i) => i.name).join(", ")} sem saldo de ${label}.`];
+  if (resumo.isLoading || transactions.isLoading) return <Esqueleto />;
+  if (resumo.error) return <div className="error-box">{(resumo.error as ApiError).message}</div>;
+  const r = resumo.data!;
+  const itens = r.items;
+  const comValor = itens.filter((i) => !i.stale && i.value > 0);
+  const conciliacaoPendente = itens.some((i) => i.reconciliation_note);
 
   if (itens.length === 0) {
     return (
@@ -118,13 +79,9 @@ export default function Investments() {
         <div className="big">📈</div>
         <div className="tit">Nada investido ainda</div>
         <div>
-          Esta aba lê os ativos de renda fixa, renda variável e cripto do
-          Patrimônio.
-          {aporte > 0 && (
-            <>
-              {" "}Você já aportou <b>{formatMoney(aporte)}</b> em {label} — cadastre
-              onde esse dinheiro está.
-            </>
+          Esta aba lê os ativos de renda fixa, renda variável e cripto do Patrimônio.
+          {r.contributed > 0 && (
+            <> Você já aportou <b>{formatMoney(r.contributed)}</b> em {label} — cadastre onde esse dinheiro está.</>
           )}
         </div>
         <div style={{ marginTop: "var(--s4)" }}>
@@ -138,187 +95,275 @@ export default function Investments() {
     <>
       <section className="hero">
         <div className="rot">Total investido</div>
-        <div className="big tnum">{formatMoney(total)}</div>
-        {/* Com aplicação desatualizada, a variação do total não é apurável. */}
-        {temBase && desatualizados.length === 0 && Math.abs(variacao) >= 0.01 && (
-          <div className={`delta ${variacao > 0 ? "pos" : "neg"}`}>
-            <span className="seta" aria-hidden>{variacao > 0 ? "↑" : "↓"}</span>
-            {formatMoney(Math.abs(variacao))} no mês
+        <div className="big tnum">{formatMoney(r.total)}</div>
+        {r.variation != null && r.previous_total > 0 && Math.abs(r.variation) >= 0.01 && (
+          <div className={`delta ${r.variation > 0 ? "pos" : "neg"}`}>
+            <span className="seta" aria-hidden>{r.variation > 0 ? "↑" : "↓"}</span>
+            {formatMoney(Math.abs(r.variation))} no mês
           </div>
         )}
-        {desatualizados.length > 0 && (
+        {r.stale_names.length > 0 && (
           <div className="nota">
-            Não entra no total:{" "}
-            {desatualizados.map((i, n) => (
-              <span key={i.asset_id}>
-                {n > 0 && ", "}
-                {i.name} ({formatMoney(i.value)} em {i.as_of ? formatYm(i.as_of) : "—"})
-              </span>
-            ))}
-            {" "}— sem saldo de {label}.
+            Não entra no total: {r.stale_names.join(", ")} ({formatMoney(r.stale_total)} no último saldo) — sem saldo de {label}.
           </div>
         )}
       </section>
 
-      {/* Dois números em linha, separados por fio — não dois cards. O total
-          já é o herói, e a variação virou a linha dele. */}
+      {/* Dois números em linha. O resgate é linha do aporte, não terceira
+          coluna: três valores em dinheiro não cabem lado a lado em 360px. */}
       <div className="metricas">
         <div className="metrica">
           <div className="rot">Aportado</div>
-          <div className="val tnum">{formatMoney(aportado)}</div>
-          {/* O resgate é linha do aporte, não terceira coluna: três valores
-              em dinheiro não cabem lado a lado em 360px. Mês sem resgate não
-              ganha um zero. */}
-          {resgatado > 0 ? (
-            <div className="s">
-              resgatado <span className="tnum">{formatMoney(resgatado)}</span>
-            </div>
+          <div className="val tnum">{formatMoney(r.contributed)}</div>
+          {r.redeemed > 0 ? (
+            <div className="s">resgatado <span className="tnum">{formatMoney(r.redeemed)}</span></div>
           ) : (
-            naoApurado && <div className="s">resgate não conciliado</div>
+            conciliacaoPendente && <div className="s">resgate não conciliado</div>
           )}
         </div>
         <div className="metrica">
           <div className="rot">Rendeu</div>
-          {naoApurado ? (
+          {r.yield_status === "apurado" && r.yield_amount != null ? (
+            <div className="val tnum">{r.yield_amount > 0 ? "+" : ""}{formatMoney(r.yield_amount)}</div>
+          ) : (
             <>
               <div className="val fraco">—</div>
-              <div className="s">não apurado</div>
+              <div className="s">{r.yield_status === "sem_base" ? "sem mês anterior" : "não apurado"}</div>
             </>
-          ) : temBase ? (
-            <div className="val tnum">
-              {rendimento > 0 ? "+" : ""}{formatMoney(rendimento)}
-            </div>
-          ) : (
-            // Sem mês anterior o número seria o saldo inteiro travestido de
-            // lucro. Melhor um traço honesto do que um número bonito e falso.
-            <div className="val fraco">—</div>
           )}
-          {esperadoTotal !== null && !naoApurado && (
-            <div className="s">
-              esperado <span className="tnum">{formatMoney(esperadoTotal)}</span>
-            </div>
+          {r.expected_yield != null && (
+            <div className="s">esperado <span className="tnum">{formatMoney(r.expected_yield)}</span></div>
           )}
         </div>
       </div>
-      {naoApurado && (
+      {/* O motivo "falta o saldo de X" vem por último; quando há outro motivo,
+          ele já está dito embaixo do total e não se repete aqui. */}
+      {r.yield_status === "nao_apurado" && r.reasons.length > 0 && (
         <p className="nota">
-          Rendimento de {label} não apurado: {motivos.join(" ")}
+          Rendimento de {label} não apurado:{" "}
+          {(r.stale_names.length && r.reasons.length > 1 ? r.reasons.slice(0, -1) : r.reasons).join(" ")}
         </p>
       )}
 
-      {/* Sem o CDI não dá pra projetar nada, e a pessoa ficaria olhando um
-          traço sem saber por quê. O aviso aponta pro lugar de resolver. */}
-      {perfil.data && perfil.data.cdi_annual == null &&
-        itens.some((i) => i.cdi_percent != null) && (
-          <div className="aviso-box" style={{ marginTop: "var(--s4)" }}>
-            Você marcou a taxa das aplicações, mas falta informar o <b>CDI atual</b>{" "}
-            para calcular o rendimento. <Link to="/configuracoes">Informar agora</Link>
-          </div>
-        )}
+      {perfil.data && perfil.data.cdi_annual == null && itens.some((i) => i.cdi_percent != null) && (
+        <div className="aviso-box" style={{ marginTop: "var(--s4)" }}>
+          Você marcou a taxa das aplicações, mas falta informar o <b>CDI atual</b> para calcular o rendimento.{" "}
+          <Link to="/configuracoes">Informar agora</Link>
+        </div>
+      )}
 
       <div className="sec-title">
         <h2>Onde está</h2>
         <Link to="/patrimonio">Editar</Link>
       </div>
 
-      {/* Rosca por APLICAÇÃO, não por classe: hoje as duas são renda fixa, e
-          uma rosca de classe seria um anel inteiro de uma cor só. Com uma
-          aplicação só ela também some — 100% de um lugar não precisa de
-          gráfico pra ser entendido. A lista embaixo é a legenda: o círculo de
-          cada linha tem a cor da fatia. */}
       {comValor.length >= 2 && (
         <div style={{ marginBottom: "var(--s4)" }}>
-          <Rosca
-            semLegenda
-            total={total}
-            rotuloCentro="investido"
+          <Rosca semLegenda total={r.total} rotuloCentro="investido"
             fatias={comValor.map((i) => ({
-              id: String(i.asset_id),
-              nome: i.name,
-              cor: corDoAtivo(itens, i.asset_id),
-              valor: i.value,
-              pct: (i.value / total) * 100,
-            }))}
-          />
+              id: String(i.asset_id), nome: i.name, cor: corDoAtivo(itens, i.asset_id), valor: i.value,
+              pct: (i.share ?? 0) * 100,
+            }))} />
         </div>
       )}
 
       <div className="list">
         {itens.map((item) => (
-          // Ativo se edita em Patrimônio: duas telas editando o mesmo ativo é
-          // como as duas começam a discordar.
           <Link className={`row${item.stale ? " desatualizado" : ""}`} key={item.asset_id} to="/patrimonio">
-            <div
-              className="avatar"
-              style={{ background: fundoDaCor(corDoAtivo(itens, item.asset_id), 26) }}
-              aria-hidden
-            >
+            <div className="avatar" style={{ background: fundoDaCor(corDoAtivo(itens, item.asset_id), 26) }} aria-hidden>
               {item.asset_class === "crypto" ? "₿" : item.asset_class === "equity" ? "📊" : "🏦"}
             </div>
             <div className="mid">
               <div className="t">{item.name}</div>
               <div className="s">
-                {/* Saldo lançado por conferência: é o que a linha precisa dizer
-                    neste mês, e a legenda só tem lugar pra uma coisa. */}
                 {item.stale ? (
                   <span className="aviso-txt">não atualizado · {item.as_of ? formatYm(item.as_of) : ""}</span>
                 ) : item.reconciliation_note ? (
                   "ajuste de conferência"
+                ) : item.yield_status === "apurado" && item.yield_amount != null ? (
+                  <>rendeu {item.yield_amount >= 0 ? "+" : ""}{formatMoney(item.yield_amount)}</>
                 ) : (
                   <>
                     {ASSET_CLASS_LABEL[item.asset_class]}
                     {item.cdi_percent != null && <> · {item.cdi_percent}% do CDI</>}
-                    {/* Saldo herdado de mês anterior: sem avisar, o número parece
-                        atual e a pessoa confia num dado que não atualizou. */}
-                    {item.as_of && item.as_of !== ym && <> · de {formatYm(item.as_of)}</>}
                   </>
                 )}
               </div>
             </div>
             <div className="amt tnum">
               {formatMoney(item.value)}
-              {total > 0 && !item.stale && <span className="sub">{Math.round((item.value / total) * 100)}%</span>}
+              {item.share != null && <span className="sub">{Math.round(item.share * 100)}%</span>}
             </div>
             <MarcaEditavel />
           </Link>
         ))}
       </div>
 
-      {aportes.length > 0 && (
-        <>
-          <div className="sec-title">
-            <h2>{resgatado > 0 ? "Aportes e resgates" : "Aportes"} de {label}</h2>
-            <Link to="/orcamento?aba=lancamentos">Ver todos</Link>
-          </div>
-          <div className="list">
-            {/* Três e não a lista inteira: aqui o aporte é contexto do número
-                lá de cima, não o assunto da tela. Quem quer todos vai na aba
-                de lançamentos, que é onde eles moram. */}
-            {aportes.slice(0, 3).map((t) => (
-              <button className="row" key={t.id} onClick={() => setEditando(t)}>
-                <div className="avatar" style={{ background: fundoDaCor("#93a6dc", 18) }} aria-hidden>
-                  🏦
-                </div>
+      <div className="sec-title">
+        {/* Sem o mês no título: ele já está no topo, e com as duas ações ao
+            lado o título longo quebrava em 360px. */}
+        <h2>{r.redeemed > 0 ? "Aportes e resgates" : "Aportes"}</h2>
+        {podeEscrever && (
+          <span className="titulo-acoes">
+            <button className="link" onClick={() => setNovo("redemption")}>Resgate</button>
+            <button className="link" onClick={() => setNovo("contribution")}>+ Aporte</button>
+          </span>
+        )}
+      </div>
+      {aportes.length === 0 ? (
+        <p className="nota">Nenhum aporte ou resgate em {label}.</p>
+      ) : (
+        <div className="list">
+          {aportes.map((t) => {
+            const mv = porLancamento.get(t.id);
+            return (
+              <button className="row" key={t.id} onClick={() => setAberto(t)}>
+                <div className="avatar" style={{ background: fundoDaCor("#93a6dc", 18) }} aria-hidden>🏦</div>
                 <div className="mid">
                   <div className="t">{t.description}</div>
-                  <div className="s">{formatDiaMes(t.date)}</div>
+                  <div className="s">
+                    {formatDiaMes(t.date)} · {mv ? mv.asset_name : <span className="aviso-txt">sem ativo</span>}
+                  </div>
                 </div>
                 <div className="amt tnum">{formatMoney(t.amount_paid)}</div>
                 <MarcaEditavel />
               </button>
-            ))}
-          </div>
-        </>
+            );
+          })}
+        </div>
       )}
 
+      {aberto && (
+        <MovimentoSheet t={aberto} mov={porLancamento.get(aberto.id) ?? null} itens={itens} podeEscrever={podeEscrever}
+          onEditar={() => { setEditando(aberto); setAberto(null); }} onClose={() => setAberto(null)} />
+      )}
+      {novo && <NovoMovimento tipo={novo} itens={itens} onClose={() => setNovo(null)} />}
       {editando && categories.data && (
-        <TransactionForm
-          categories={categories.data}
-          transaction={editando}
-          onClose={() => setEditando(null)}
-        />
+        <TransactionForm categories={categories.data} transaction={editando} onClose={() => setEditando(null)} />
       )}
     </>
+  );
+}
+
+/** Um aporte/resgate do mês: de qual ativo, e o lançamento por trás. */
+function MovimentoSheet({
+  t, mov, itens, podeEscrever, onEditar, onClose,
+}: {
+  t: Transaction; mov: InvestmentMovement | null; itens: InvestmentAssetItem[]; podeEscrever: boolean;
+  onEditar: () => void; onClose: () => void;
+}) {
+  const criar = useCreateMovement();
+  const remover = useRemoveMovement();
+  const resgate = (t.amount_paid ?? 0) < 0;
+  const erro = (criar.error || remover.error) as ApiError | null;
+  return (
+    <Modal title={t.description} onClose={onClose}>
+      <div className="m-body">
+        <div className="folha-total">
+          <b className="tnum">{formatMoney(Math.abs(t.amount_paid ?? 0))}</b>
+          <span>{resgate ? "resgate" : "aporte"} · {formatDiaMes(t.date)}{t.account_name ? ` · ${t.account_name}` : ""}</span>
+        </div>
+        {mov ? (
+          <p className="hint">{resgate ? "Saiu de" : "Foi para"} <b>{mov.asset_name}</b>. Não é gasto, nem receita, nem rendimento.</p>
+        ) : (
+          <p className="hint">Este {resgate ? "resgate" : "aporte"} ainda não diz de qual ativo é — o rendimento por ativo fica sem conta até ligar.</p>
+        )}
+        {podeEscrever && !mov && (
+          <div className="field">
+            <span className="label">Ligar ao ativo</span>
+            <div className="chip-linha" role="group" aria-label="Ativo">
+              {itens.map((i) => (
+                <button type="button" key={i.asset_id} disabled={criar.isPending}
+                  onClick={() => criar.mutate({
+                    asset_id: i.asset_id, type: resgate ? "redemption" : "contribution",
+                    amount: Math.abs(t.amount_paid ?? 0), date: t.date, transaction_id: t.id,
+                  }, { onSuccess: onClose })}>
+                  {i.name}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+        {podeEscrever && (
+          <div className="acoes-linha">
+            {mov && (
+              <button className="link" disabled={remover.isPending} onClick={() => remover.mutate(mov.id, { onSuccess: onClose })}>
+                Desvincular do ativo
+              </button>
+            )}
+            <button className="link" onClick={onEditar}>Editar lançamento</button>
+          </div>
+        )}
+        {erro && <div className="error-box">{erro.message}</div>}
+      </div>
+    </Modal>
+  );
+}
+
+/** Aporte ou resgate novo: ativo, conta, valor, data. Cria o lançamento (o lado
+ *  caixa) e o movimento juntos. */
+function NovoMovimento({ tipo, itens, onClose }: { tipo: MovementType; itens: InvestmentAssetItem[]; onClose: () => void }) {
+  const criar = useCreateMovement();
+  const categories = useCategories();
+  const investCats = (categories.data ?? []).filter((c) => c.type === "investment" && !c.archived);
+  const [ativo, setAtivo] = useState<number | null>(itens[0]?.asset_id ?? null);
+  const [categoria, setCategoria] = useState<number | null>(null);
+  const [conta, setConta] = useState<number | null>(ultimaConta());
+  const [valor, setValor] = useState("");
+  const [data, setData] = useState(todayIso());
+  const numero = parseMoney(valor) ?? 0;
+  const cat = categoria ?? investCats[0]?.id ?? null;
+  const erro = criar.error as ApiError | null;
+  const aporte = tipo === "contribution";
+  return (
+    <Modal title={aporte ? "Novo aporte" : "Novo resgate"} onClose={onClose}>
+      <form className="m-body" onSubmit={(e) => {
+        e.preventDefault();
+        if (ativo == null || cat == null) return;
+        lembrarConta(conta);
+        criar.mutate({ asset_id: ativo, type: tipo, amount: numero, date: data, account_id: conta, category_id: cat,
+          occurred_at: instanteSeHoje(data) }, { onSuccess: onClose });
+      }}>
+        <div className="field">
+          <span className="label">{aporte ? "Para o ativo" : "Do ativo"}</span>
+          <div className="chip-linha" role="group" aria-label="Ativo">
+            {itens.map((i) => (
+              <button type="button" key={i.asset_id} className={i.asset_id === ativo ? "on" : ""}
+                aria-pressed={i.asset_id === ativo} onClick={() => setAtivo(i.asset_id)}>{i.name}</button>
+            ))}
+          </div>
+        </div>
+        <ContaPicker rotulo={aporte ? "Saiu de" : "Entrou em"} valor={conta} aoEscolher={setConta} />
+        {investCats.length > 1 && (
+          <div className="field">
+            <span className="label">Categoria</span>
+            <div className="chip-linha" role="group" aria-label="Categoria">
+              {investCats.map((c) => (
+                <button type="button" key={c.id} className={c.id === cat ? "on" : ""} aria-pressed={c.id === cat}
+                  onClick={() => setCategoria(c.id)}>{c.name}</button>
+              ))}
+            </div>
+          </div>
+        )}
+        <div className="row2">
+          <div className="field">
+            <label htmlFor="mv-valor">Valor</label>
+            <input id="mv-valor" inputMode="decimal" placeholder="0,00" autoFocus value={valor} onChange={(e) => setValor(e.target.value)} />
+          </div>
+          <div className="field">
+            <label htmlFor="mv-data">Data</label>
+            <input id="mv-data" type="date" value={data} onChange={(e) => setData(e.target.value)} />
+          </div>
+        </div>
+        <p className="hint">
+          {aporte ? "Sai da conta e entra no ativo: não é gasto." : "Sai do ativo e volta pra conta: não é receita nem rendimento."}
+        </p>
+        <button type="submit" className="btn btn-primary btn-block" disabled={criar.isPending || numero <= 0 || ativo == null || cat == null}>
+          {aporte ? "Registrar aporte" : "Registrar resgate"}
+        </button>
+        {erro && <div className="error-box">{erro.message}</div>}
+      </form>
+    </Modal>
   );
 }
 

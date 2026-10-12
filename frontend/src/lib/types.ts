@@ -475,6 +475,9 @@ export interface AssetSummary {
   }[];
   accounts_total?: number;
   previous_accounts_total?: number;
+  // Variação do mês sem cadastro (new_total); nula com ativo desatualizado.
+  variation?: number | null;
+  new_total?: number;
 }
 
 export const ASSET_CLASS_LABEL: Record<AssetClass, string> = {

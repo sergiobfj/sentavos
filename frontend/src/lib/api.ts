@@ -7,6 +7,9 @@ import type {
   AccountsSummary,
   AccountUpdate,
   FinancialAccount,
+  InvestmentMovement,
+  InvestmentMovementCreate,
+  InvestmentSummary,
   Transfer,
   TransferCreate,
 } from "./tiposContas";
@@ -468,4 +471,12 @@ export const transfersApi = {
   create: (data: TransferCreate) =>
     request<Transfer>("/transfers", { method: "POST", body: JSON.stringify(data) }),
   remove: (id: number) => request<{ message: string }>(`/transfers/${id}`, { method: "DELETE" }),
+};
+
+export const investmentsApi = {
+  summary: ({ year, month }: Period) => request<InvestmentSummary>(`/investments/summary?year=${year}&month=${month}`),
+  movements: ({ year, month }: Period) => request<InvestmentMovement[]>(`/investments/movements?year=${year}&month=${month}`),
+  createMovement: (data: InvestmentMovementCreate) =>
+    request<InvestmentMovement>("/investments/movements", { method: "POST", body: JSON.stringify(data) }),
+  removeMovement: (id: number) => request<{ message: string }>(`/investments/movements/${id}`, { method: "DELETE" }),
 };
