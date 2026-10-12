@@ -1,6 +1,7 @@
 """Preenche a conta de demonstração com uma vida financeira fictícia.
 
-    uv run python -m scripts.semear_demo demo@sentavos.app
+    uv run python -m scripts.semear_demo --usuario demo@sentavos.app                  # seco
+    uv run python -m scripts.semear_demo --usuario demo@sentavos.app --limpar --apply # grava
 
 Gera 12 meses coerentes: salário que cai todo dia 5, aluguel que não muda,
 mercado que oscila, uma categoria estourando o orçamento, patrimônio subindo e
@@ -13,9 +14,13 @@ falhado depois que já foi visto.
 
 O gerador é determinístico (semente fixa). Rodar duas vezes produz exatamente o
 mesmo demo, então dá pra recriar a conta sem ela mudar de cara.
+
+Do mês corrente em diante o demo mostra a Foundation V3: duas contas com saldo
+observado no dia 1 e calculado desde então, uma transferência entre elas, um
+aporte e um resgate ligados aos ativos, o financiamento como compromisso
+financeiro e uma aquisição de bem fora do custo de vida.
 """
 
-import argparse
 import datetime as dt
 import os
 import random
@@ -27,8 +32,12 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from app.cartao import avancar_meses, competencia_da_parcela, dia_do_mes, dividir_em_parcelas  # noqa: E402
 from app.database import engine  # noqa: E402
+from app.dominio import investimentos  # noqa: E402
+from app.dominio.tempo import FUSO, hoje_local  # noqa: E402
 from app.faturas import fatura_da_parcela  # noqa: E402
 from app.models import (  # noqa: E402
+    AccountBalanceSnapshot,
+    AccountType,
     Asset,
     AssetClass,
     AssetSnapshot,
@@ -39,8 +48,12 @@ from app.models import (  # noqa: E402
     Commitment,
     CommitmentSkip,
     Finalidade,
+    FinancialAccount,
     Invoice,
     InvoicePayment,
+    InvestmentMovement,
+    InvestmentMovementCreate,
+    InvestmentMovementType,
     PaymentMethod,
     Provision,
     Purchase,
@@ -50,9 +63,13 @@ from app.models import (  # noqa: E402
     Scenario,
     ScenarioItem,
     ScenarioItemKind,
+    SnapshotSource,
     Transaction,
+    TransactionNature,
+    Transfer,
     User,
 )
+from scripts._admin import argumentos, cabecalho  # noqa: E402
 
 # Semente fixa: o demo precisa ser o mesmo toda vez que for recriado.
 rnd = random.Random(20260913)
@@ -110,7 +127,7 @@ def periodos() -> list[tuple[int, int]]:
 
 def meses_ate_hoje() -> list[tuple[int, int]]:
     """Os meses depois de FIM até o corrente (vazio se FIM já é o corrente)."""
-    hoje = dt.date.today()
+    hoje = hoje_local()
     fim = FIM.year * 12 + (FIM.month - 1)
     agora = hoje.year * 12 + (hoje.month - 1)
     return [(i // 12, i % 12 + 1) for i in range(fim + 1, agora + 1)]
@@ -216,7 +233,7 @@ def semear_cartoes(dono: User, s: Session, categorias: dict[str, Category]) -> d
     # As faturas já vencidas aparecem pagas; a que ainda vai vencer fica em
     # aberto. Um demo com tudo pago não mostraria o botão de pagar, e um com
     # tudo em aberto pareceria de alguém que nunca paga a fatura.
-    hoje = dt.date.today()
+    hoje = hoje_local()
     faturas = s.exec(select(Invoice).where(Invoice.user_id == dono.id)).all()
     contagem["faturas"] = len(faturas)
 
@@ -345,6 +362,89 @@ def semear(dono: User, s: Session) -> dict:
     s.commit()
 
     contagem.update(semear_planejamento(dono, s, categorias))
+    contagem.update(semear_contas(dono, s, categorias))
+    return contagem
+
+
+# ---------- Contas, investimento e natureza (mês corrente) ----------
+#
+# O ativo "Conta corrente" foi o quebra-galho de antes das contas: do mês
+# corrente em diante ele sai (arquivado, histórico intacto) e a conta assume,
+# com o mesmo valor — como a migração assistida faz numa conta de verdade.
+
+def semear_contas(dono: User, s: Session, categorias: dict[str, Category]) -> dict:
+    contagem = {"contas": 0, "transferencias": 0, "movimentos": 0}
+    hoje = hoje_local()
+    primeiro = hoje.replace(day=1)
+    observado = dt.datetime.combine(primeiro, dt.time(9, 0), FUSO)
+
+    def dia(n: int) -> dt.date:
+        return min(hoje, primeiro + dt.timedelta(days=n - 1))
+
+    ativos = {a.name: a for a in s.exec(select(Asset).where(Asset.user_id == dono.id)).all()}
+    saldos = {(x.asset_id, x.year, x.month): x for x in s.exec(
+        select(AssetSnapshot).where(AssetSnapshot.user_id == dono.id)).all()}
+
+    antiga = ativos["Conta corrente"]
+    valor_conta = saldos[(antiga.id, hoje.year, hoje.month)].value
+    antiga.archived_on = primeiro
+    s.add(antiga)
+
+    corrente = FinancialAccount(user_id=dono.id, name="Conta corrente", institution="Banco Fictício",
+                                type=AccountType.CHECKING)
+    digital = FinancialAccount(user_id=dono.id, name="Carteira digital", type=AccountType.PAYMENT)
+    s.add(corrente)
+    s.add(digital)
+    s.flush()
+    for conta, saldo in ((corrente, valor_conta), (digital, 350.0)):
+        s.add(AccountBalanceSnapshot(user_id=dono.id, account_id=conta.id, observed_at=observado,
+                                     balance=round(saldo, 2), source=SnapshotSource.MANUAL))
+        contagem["contas"] += 1
+
+    # Uma aquisição de bem: entra no gasto total, fica fora do custo de vida.
+    s.add(Transaction(
+        user_id=dono.id, date=dia(4), description="Bicicleta elétrica", amount_paid=1850.0,
+        category_id=categorias["Transporte"].id, payment_method=PaymentMethod.CASH,
+        finalidade=Finalidade.PESSOAL, nature=TransactionNature.ASSET_ACQUISITION,
+    ))
+    s.flush()
+
+    # Tudo o que saiu ou entrou à vista no mês corrente passou pela conta corrente.
+    for t in s.exec(select(Transaction).where(
+            Transaction.user_id == dono.id, Transaction.date >= primeiro,
+            Transaction.amount_paid.is_not(None))).all():
+        if t.payment_method != PaymentMethod.CREDIT and t.account_id is None:
+            t.account_id = corrente.id
+            s.add(t)
+    for pg in s.exec(select(InvoicePayment).where(
+            InvoicePayment.user_id == dono.id, InvoicePayment.date >= primeiro)).all():
+        pg.account_id = corrente.id
+        s.add(pg)
+
+    s.add(Transfer(user_id=dono.id, from_account_id=corrente.id, to_account_id=digital.id,
+                   amount=150.0, date=dia(2), description="Pra carteira digital"))
+    contagem["transferencias"] += 1
+
+    # Aporte e resgate ligados ao ativo; o saldo do ativo no mês reflete os dois
+    # e um rendimento plausível (52 e 95), não a reta do histórico.
+    anterior = avancar_meses(hoje.year, hoje.month, -1)
+    for ativo, categoria, tipo, valor, n, rendeu, descricao in (
+        ("Reserva de emergência", "Reserva", InvestmentMovementType.CONTRIBUTION, 600.0, 6, 52.0, "Aporte na reserva"),
+        ("Tesouro Selic", "Tesouro Selic", InvestmentMovementType.REDEMPTION, 300.0, 8, 95.0, "Resgate parcial"),
+    ):
+        a = ativos[ativo]
+        investimentos.registrar(s, dono, InvestmentMovementCreate(
+            asset_id=a.id, type=tipo, amount=valor, date=dia(n), account_id=corrente.id,
+            category_id=categorias[categoria].id, description=descricao,
+        ), "script:semear_demo")
+        antes = saldos[(a.id, *anterior)].value
+        sinal = 1 if tipo == InvestmentMovementType.CONTRIBUTION else -1
+        atual = saldos[(a.id, hoje.year, hoje.month)]
+        atual.value = round(antes + sinal * valor + rendeu, 2)
+        s.add(atual)
+        contagem["movimentos"] += 1
+
+    s.commit()
     return contagem
 
 
@@ -371,7 +471,7 @@ COMPROMISSOS = [
 def semear_planejamento(dono: User, s: Session, categorias: dict[str, Category]) -> dict:
     """Compromissos, baixas, reservas, cenários e uma conferência pequena."""
     contagem = {"compromissos": 0, "baixas": 0, "reservas": 0, "cenarios": 0, "conferencia": 0}
-    hoje = dt.date.today()
+    hoje = hoje_local()
 
     criados: dict[str, Commitment] = {}
     for descricao, nome_cat, valor, dia, parcelas, atras, confirmado, instituicao in COMPROMISSOS:
@@ -386,6 +486,8 @@ def semear_planejamento(dono: User, s: Session, categorias: dict[str, Category])
             installments=parcelas,
             confirmed=confirmado,
             institution=instituicao,
+            # O financiamento é compromisso financeiro: fora do custo de vida.
+            nature=TransactionNature.FINANCIAL if parcelas == 36 else None,
             total_amount=26500.0 if parcelas == 36 else None,
             finalidade=(Finalidade.FAMILIA if nome_cat == "Aluguel" else Finalidade.PESSOAL)
             if cat.type == CategoryType.EXPENSE else None,
@@ -409,7 +511,7 @@ def semear_planejamento(dono: User, s: Session, categorias: dict[str, Category])
                 s.add(Transaction(
                     user_id=dono.id, date=venc, description=descricao + rotulo,
                     amount_planned=valor, amount_paid=valor, category_id=cat.id,
-                    payment_method=PaymentMethod.CASH, finalidade=c.finalidade,
+                    payment_method=PaymentMethod.CASH, finalidade=c.finalidade, nature=c.nature,
                     commitment_id=c.id, commitment_no=n,
                 ))
                 contagem["baixas"] += 1
@@ -481,18 +583,18 @@ def semear_planejamento(dono: User, s: Session, categorias: dict[str, Category])
 
 
 def main() -> int:
-    p = argparse.ArgumentParser(description="Popula a conta de demonstração.")
-    p.add_argument("email", help="e-mail da conta demo")
+    p = argumentos("Popula a conta de demonstração.")
     p.add_argument("--limpar", action="store_true",
                    help="apaga o que a conta já tem antes de semear")
     args = p.parse_args()
 
     with Session(engine) as s:
-        dono = s.exec(select(User).where(User.email == args.email.strip().lower())).first()
+        dono = s.exec(select(User).where(User.email == args.usuario.strip().lower())).first()
         if dono is None:
-            print(f"Não existe conta para {args.email}. "
+            print(f"Não existe conta para {args.usuario}. "
                   "Crie com: uv run python -m app.criar_usuario", file=sys.stderr)
             return 1
+        cabecalho("semear_demo", dono, args.apply, "| LIMPAR antes" if args.limpar else "")
 
         if not dono.read_only:
             # Aviso e não erro: pode ser proposital semear uma conta de teste
@@ -501,6 +603,15 @@ def main() -> int:
             print(f"Atenção: {dono.email} NÃO é somente-leitura. "
                   "Como conta de demonstração pública, ela deveria ser.\n")
 
+        if not args.apply:
+            ja = s.exec(select(Transaction).where(Transaction.user_id == dono.id).limit(1)).first()
+            print(f"Semearia 12 meses fictícios + o mês corrente em {dono.email}"
+                  f"{' depois de apagar o que ela tem' if args.limpar else ''}.")
+            if ja is not None and not args.limpar:
+                print("A conta já tem lançamentos: sem --limpar, o demo ficaria duplicado.")
+            print("Seco: nada foi gravado. Rode com --apply pra gravar.")
+            return 0
+
         if args.limpar:
             # Ordem importa: o que aponta pra outro sai primeiro, senão a chave
             # estrangeira barra o delete.
@@ -508,9 +619,12 @@ def main() -> int:
             # fatura, compra aponta pro cartao: o que depende sai primeiro.
             # Do planejamento: o que aponta pro compromisso sai antes dele, e
             # a baixa (um lançamento) também.
+            # Movimento de investimento aponta pra lançamento, ativo e conta;
+            # transferência e saldo, pra conta; lançamento e pagamento, pra conta.
             for modelo in (
+                InvestmentMovement, Transfer, AccountBalanceSnapshot,
                 InvoicePayment, ReconciliationItem, ScenarioItem, Scenario,
-                Provision, CommitmentSkip, Transaction, Commitment,
+                Provision, CommitmentSkip, Transaction, Commitment, FinancialAccount,
                 Purchase, Invoice, Card, Budget, AssetSnapshot, Asset, Category,
             ):
                 for linha in s.exec(select(modelo).where(modelo.user_id == dono.id)).all():
