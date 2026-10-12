@@ -243,12 +243,15 @@ só é pequena o bastante pra morar no projeto.
 ## Rodando local
 
 ```bash
-# 1. Gere suas credenciais (pede a senha escondida e imprime o que colar)
+# 0. Postgres local (binários do pacote pgserver, porta 54329, dados em .local/)
 uv sync
+uv run --with pgserver python -m scripts.postgres_local start
+cp .env.example .env      # APP_ENV=development + banco local; gere um SENTAVOS_JWT_SECRET
+
+# 1. Sua conta no banco local
 uv run python -m app.criar_usuario
 
 # 2. Backend — http://localhost:8000
-cp .env.example .env      # cole as três variáveis + DATABASE_URL
 uv run uvicorn app.main:app --reload
 
 # 3. Frontend — http://localhost:5173
@@ -258,7 +261,10 @@ cp .env.example .env
 npm run dev
 ```
 
-Testes: `uv run pytest`
+Testes: `uv run pytest` (ambiente `test`, SQLite em memória — nunca o banco do
+`.env`). Migrações em Postgres: `uv run python -m scripts.ci_migracoes
+postgresql://postgres@127.0.0.1:54329`. Ambientes, CI e o caminho até a main:
+[docs/fluxo-de-trabalho.md](docs/fluxo-de-trabalho.md).
 
 ## Deploy
 

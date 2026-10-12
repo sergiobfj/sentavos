@@ -26,3 +26,6 @@ wheels/
 
 # Backups de dado real: ficam na maquina, nunca no repositorio.
 backups/
+
+# Postgres de desenvolvimento (scripts/postgres_local.py)
+.local/
