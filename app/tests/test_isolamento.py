@@ -23,6 +23,8 @@ from app.models import (
     Asset,
     AssetSnapshot,
     FinancialAccount,
+    InvestmentMovement,
+    InvestmentMovementType,
     Transfer,
     Budget,
     Card,
@@ -163,6 +165,17 @@ def _semear(session: Session, dono: User) -> dict:
     session.refresh(saldo_conta)
     session.refresh(transferencia)
 
+    # ---------- Investimento ----------
+    aplicacao = Asset(name=f"Caixinha de {dono.name}", asset_class="fixed_income", user_id=dono.id)
+    session.add(aplicacao)
+    session.commit()
+    session.refresh(aplicacao)
+    movimento = InvestmentMovement(user_id=dono.id, asset_id=aplicacao.id, type=InvestmentMovementType.ADJUSTMENT,
+                                   amount=10.0, date=dt.date(2026, 10, 3))
+    session.add(movimento)
+    session.commit()
+    session.refresh(movimento)
+
     return {
         "categoria": cat.id, "transacao": tx.id, "meta": meta.id,
         "ativo": ativo.id, "saldo": snap.id,
@@ -171,7 +184,7 @@ def _semear(session: Session, dono: User) -> dict:
         "compromisso": compromisso.id, "baixa": baixa.id, "reserva": reserva.id,
         "cenario": cenario.id, "item_cenario": item_cenario.id, "conferencia": conferencia.id,
         "conta": conta.id, "conta2": conta2.id, "saldo_conta": saldo_conta.id,
-        "transferencia": transferencia.id,
+        "transferencia": transferencia.id, "aplicacao": aplicacao.id, "movimento": movimento.id,
     }
 
 
@@ -263,6 +276,11 @@ ROTAS_POR_ID = [
     # O id da conta no CORPO também é checado.
     ("post", "/transfers", {"from_account_id": "{conta}", "to_account_id": "{conta2}",
                             "amount": 1.0, "date": "2026-10-10"}),
+    # ---------- Investimento ----------
+    ("get", "/investments/movements?asset_id={aplicacao}", None),
+    ("post", "/investments/movements", {"asset_id": "{aplicacao}", "type": "adjustment", "amount": 1.0,
+                                        "date": "2026-10-10"}),
+    ("delete", "/investments/movements/{movimento}", None),
 ]
 
 
@@ -325,9 +343,10 @@ def test_resumos_nao_somam_dinheiro_alheio(cliente_de, duas_contas):
     assert resumo["totals"]["expense"]["paid"] == 400.0
 
     patrimonio = cliente.get("/assets/summary?year=2026&month=9").json()
-    # Cada uma tem exatamente um ativo de 1000.
+    # Cada uma tem um ativo de 1000 (e uma caixinha ainda sem saldo).
     assert patrimonio["assets"] == 1000.0
-    assert len(patrimonio["items"]) == 1
+    assert len(patrimonio["items"]) == 2
+    assert all("Ana" in i["name"] for i in patrimonio["items"])
 
     # O resumo de caixa é o mais fácil de vazar sem ninguém ver: ele soma
     # lançamentos e pagamentos de fatura sem mostrar linha nenhuma.
@@ -591,6 +610,8 @@ ROTAS_DE_ESCRITA = [
     ("post", "/accounts/1/distribuir", {"destinos": []}),
     ("post", "/transfers", {"from_account_id": 1, "to_account_id": 2, "amount": 1, "date": "2026-10-10"}),
     ("delete", "/transfers/1", None),
+    ("post", "/investments/movements", {"asset_id": 1, "type": "adjustment", "amount": 1, "date": "2026-10-10"}),
+    ("delete", "/investments/movements/1", None),
 ]
 
 

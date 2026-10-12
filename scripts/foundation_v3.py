@@ -166,6 +166,27 @@ class Plano:
         self.s.flush()
         self.registrar("revisar_ativo", {"asset_id": ativo.id, "item_id": item.id}, "reconciliation_item", item.id)
 
+    def movimento_investimento(self, a: dict) -> None:
+        """Liga um lançamento de investimento ao ativo (aporte/resgate explícito)."""
+        from app.dominio import investimentos
+        from app.models import InvestmentMovementCreate
+
+        t = self.s.get(Transaction, a["transaction_id"])
+        if t is None or t.user_id != self.dono.id:
+            sys.exit(f"Lançamento {a['transaction_id']} não é desta conta.")
+        ativo = self.ativo(a["asset"])
+        existente = investimentos.movimento_do_lancamento(self.s, self.dono, t.id)
+        self.log(existente is not None, f"lançamento {t.id} ({t.description}, {t.amount_paid:.2f} em "
+                                        f"{t.date:%d/%m}) = {a['type']} do ativo '{ativo.name}'")
+        if existente or not self.aplicar:
+            return
+        conta = self.conta(a["account"]) if a.get("account") else None
+        mov = investimentos.registrar(self.s, self.dono, InvestmentMovementCreate(
+            asset_id=ativo.id, type=a["type"], amount=abs(t.amount_paid), date=t.date, transaction_id=t.id,
+            account_id=conta.id if conta else None, note=a.get("note")), ATOR)
+        self.registrar("movimento_investimento", {"movement_id": mov.id, "transaction_id": t.id,
+                                                  "conta_definida": bool(conta)}, "investment_movement", mov.id)
+
     def executar(self, acoes: list[dict]) -> None:
         for a in acoes:
             tipo = a.get("tipo")
@@ -207,6 +228,16 @@ class Plano:
                 if ativo and ativo.user_id == self.dono.id and ativo.name == d["para"]:
                     ativo.name = d["de"]
                     self.s.add(ativo)
+            elif acao == "movimento_investimento":
+                from app.models import InvestmentMovement
+                mov = self.s.get(InvestmentMovement, d["movement_id"])
+                if mov and mov.user_id == self.dono.id:
+                    self.s.delete(mov)
+                if d.get("conta_definida"):
+                    t = self.s.get(Transaction, d["transaction_id"])
+                    if t and t.user_id == self.dono.id:
+                        t.account_id = None
+                        self.s.add(t)
             elif acao == "revisar_ativo":
                 item = self.s.get(ReconciliationItem, d["item_id"])
                 if item and item.user_id == self.dono.id and item.status == ReconciliationStatus.PENDENTE:

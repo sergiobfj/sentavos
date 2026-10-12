@@ -194,6 +194,8 @@ class Transaction(TransactionBase, table=True):
         ),
         sa.Index("ix_transactions_user_date", "user_id", "date"),
         sa.Index("ix_transactions_account_date", "account_id", "date"),
+        # Alvo da chave composta do movimento de investimento (mesmo dono).
+        sa.UniqueConstraint("user_id", "id", name="uq_transactions_user_id"),
     )
     user_id: int = dono()
     id: int | None = Field(default=None, primary_key=True)
@@ -747,6 +749,9 @@ class AssetBase(SQLModel):
 
 class Asset(AssetBase, table=True):
     __tablename__ = "assets"
+    # Alvo da chave composta de investment_movements: movimento só aponta pra
+    # ativo do mesmo dono.
+    __table_args__ = (UniqueConstraint("user_id", "id", name="uq_assets_user_id"),)
     user_id: int = dono()
     id: int | None = Field(default=None, primary_key=True)
 
@@ -862,6 +867,9 @@ class AssetSummary(SQLModel):
     accounts: list[AccountPatrimonyItem] = []
     accounts_total: float = 0
     previous_accounts_total: float = 0
+    # Variação do mês sem cadastro (`new_total`); nula com ativo desatualizado.
+    variation: float | None = None
+    new_total: float = 0
 
 
 # ===========================================================================
@@ -1486,3 +1494,64 @@ class AuditEvent(SQLModel, table=True):
     entity_id: int | None = None
     details: dict[str, Any] | None = Field(default=None, sa_type=sa.JSON)
     created_at: dt.datetime = Field(default_factory=lambda: dt.datetime.now(dt.timezone.utc))
+
+
+# ---------------------------------------------------------------------------
+# Movimentos de investimento (Foundation V3)
+# ---------------------------------------------------------------------------
+
+
+class InvestmentMovementType(str, Enum):
+    # Dinheiro sai da conta e entra no ativo. Não é gasto nem perda: é alocação.
+    CONTRIBUTION = "contribution"
+    # Dinheiro sai do ativo e volta pra conta. Não é receita nem rendimento.
+    REDEMPTION = "redemption"
+    # Principal que entra no ativo SEM passar pelo caixa (ex.: saldo que já
+    # existia e não estava registrado). Conta como aporte no rendimento.
+    ADJUSTMENT = "adjustment"
+
+
+class InvestmentMovementBase(SQLModel):
+    asset_id: int
+    type: InvestmentMovementType = Field(sa_type=_enum_texto(InvestmentMovementType))
+    amount: float
+    date: dt.date
+    account_id: int | None = None
+    note: str | None = None
+
+
+class InvestmentMovement(InvestmentMovementBase, table=True):
+    """A semântica de um aporte, resgate ou ajuste: qual ativo, qual conta.
+
+    O lado CAIXA continua sendo o lançamento de categoria investimento
+    (`transaction_id`): é ele que entra no "investido" e no saldo do mês, como
+    sempre. Um lançamento representa no máximo um movimento (índice único), e
+    apagar o lançamento leva o movimento junto (cascade).
+    """
+
+    __tablename__ = "investment_movements"
+    __table_args__ = (
+        sa.ForeignKeyConstraint(["user_id", "asset_id"], ["assets.user_id", "assets.id"],
+                                name="fk_investment_movements_asset"),
+        sa.ForeignKeyConstraint(["user_id", "account_id"],
+                                ["financial_accounts.user_id", "financial_accounts.id"],
+                                name="fk_investment_movements_account"),
+        sa.ForeignKeyConstraint(["user_id", "transaction_id"], ["transactions.user_id", "transactions.id"],
+                                name="fk_investment_movements_transaction", ondelete="CASCADE"),
+        sa.CheckConstraint("amount > 0", name="ck_investment_movements_valor_positivo"),
+        sa.Index("uq_investment_movements_transaction", "transaction_id", unique=True),
+        sa.Index("ix_investment_movements_asset_date", "asset_id", "date"),
+    )
+    user_id: int = dono()
+    id: int | None = Field(default=None, primary_key=True)
+    transaction_id: int | None = None
+    created_at: dt.datetime = Field(default_factory=lambda: dt.datetime.now(dt.timezone.utc))
+
+
+class InvestmentMovementCreate(InvestmentMovementBase):
+    # Ligar a um lançamento que já existe (o aporte de 06/10, por exemplo)...
+    transaction_id: int | None = None
+    # ...ou criar o lado caixa agora: categoria de investimento obrigatória.
+    category_id: int | None = None
+    description: str | None = None
+    occurred_at: dt.datetime | None = None

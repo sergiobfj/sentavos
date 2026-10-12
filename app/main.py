@@ -17,6 +17,8 @@ from app.rotas_relatorios import router_relatorios
 from app.rotas_planejamento import router_planejamento
 from app.rotas_conferencia import router_conferencia
 from app.rotas_contas import router_contas
+from app.rotas_investimentos import router_investimentos
+from app.dominio import investimentos
 from app.dominio.contas import conta_valida
 from app.dominio import patrimonio
 from app.database import create_db_and_tables, get_session
@@ -322,6 +324,14 @@ def update_transaction(
         transaction.finalidade,
         padrao=virou_despesa and "finalidade" not in update_data,
     )
+
+    # Lançamento que é aporte/resgate de um ativo: o movimento acompanha (valor,
+    # data, conta) ou a edição é recusada (virar despesa, trocar o sinal).
+    try:
+        investimentos.sincronizar_lancamento(session, dono, transaction)
+    except HTTPException:
+        session.rollback()
+        raise
 
     session.add(transaction)
     session.commit()
@@ -1069,3 +1079,6 @@ app.include_router(router_conferencia)
 
 # Contas, saldos observados e transferências (app/rotas_contas.py).
 app.include_router(router_contas)
+
+# Investimento: resumo do mês com o rendimento, e movimentos (app/rotas_investimentos.py).
+app.include_router(router_investimentos)

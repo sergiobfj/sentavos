@@ -184,8 +184,22 @@ def resumo(session: Session, dono: User, year: int, month: int) -> AssetSummary:
 
     # ---------- Contas ----------
     contas = contas_no_mes(session, dono, year, month)
+    antes_por_conta = {s.conta.id: s.saldo for s in contas_no_mes(session, dono, *anterior)}
     contas_total = sum(s.saldo for s in contas if s.saldo is not None)
-    contas_antes = sum(s.saldo for s in contas_no_mes(session, dono, *anterior) if s.saldo is not None)
+    contas_antes = sum(v for v in antes_por_conta.values() if v is not None)
+
+    # ---------- Variação do mês (regra única; a tela não recalcula) ----------
+    # Cadastro não é crescimento: ativo com o primeiro saldo neste mês e conta
+    # que passou a ter saldo agora entram como "novos", fora da variação. Com
+    # ativo desatualizado, a variação não é apurável — o mês anterior o contava
+    # e este não sabe quanto ele vale.
+    novos = sum(
+        (-i.value if i.liability else i.value)
+        for i in items
+        if not i.stale and i.previous == 0 and i.value != 0 and i.as_of == f"{year}-{month:02d}"
+    ) + sum(s.saldo for s in contas if s.saldo is not None and antes_por_conta.get(s.conta.id) is None)
+    net_worth = total_assets - total_liabilities + contas_total
+    previous_net_worth = prev_assets - prev_liabilities + contas_antes
 
     return AssetSummary(
         year=year,
@@ -194,8 +208,10 @@ def resumo(session: Session, dono: User, year: int, month: int) -> AssetSummary:
         by_class=by_class,
         assets=total_assets,
         liabilities=total_liabilities,
-        net_worth=total_assets - total_liabilities + contas_total,
-        previous_net_worth=prev_assets - prev_liabilities + contas_antes,
+        net_worth=net_worth,
+        previous_net_worth=previous_net_worth,
+        variation=None if stale_count else round(net_worth - previous_net_worth - novos, 2),
+        new_total=round(novos, 2),
         stale_count=stale_count,
         stale_assets=stale_assets,
         stale_liabilities=stale_liabilities,
