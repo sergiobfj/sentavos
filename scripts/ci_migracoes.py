@@ -23,13 +23,18 @@ import sqlalchemy as sa
 
 RAIZ = Path(__file__).resolve().parents[1]
 FIXTURE = RAIZ / "app" / "tests" / "fixtures" / "base_0007.json"
-BASE_DA_FIXTURE = "0007_conciliacao_saldo"
+BASE_DA_FIXTURE = "0007_conciliacao_saldo"  # o schema em que a fixture foi gerada
 
 
 def rodar(url: str, *args: str) -> str:
     env = {**os.environ, "DATABASE_URL": url, "APP_ENV": "test", "PYTHONIOENCODING": "utf-8"}
     env.pop("ALLOW_PRODUCTION_DATABASE", None)
     r = subprocess.run([sys.executable, *args], env=env, cwd=RAIZ, capture_output=True, text=True, encoding="utf-8")
+    if r.returncode > 255 and not (r.stdout or r.stderr):
+        # Processo morto antes do Python começar (visto no Windows, código
+        # 0xC000xxxx, sem saída nenhuma): não é falha do comando. Uma segunda
+        # tentativa, só nesse caso — erro de verdade sempre tem saída.
+        r = subprocess.run([sys.executable, *args], env=env, cwd=RAIZ, capture_output=True, text=True, encoding="utf-8")
     if r.returncode:
         print(r.stdout[-3000:], r.stderr[-6000:])
         raise SystemExit(f"falhou (código {r.returncode}): {' '.join(args)}")
