@@ -28,7 +28,6 @@ duas categorias de pouco uso subirem juntas pro topo no mesmo mês.
 Não roda sozinho em lugar nenhum: nem na migração, nem no deploy.
 """
 
-import argparse
 import os
 import sys
 
@@ -37,6 +36,7 @@ from sqlmodel import Session, func, select
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from app.database import engine  # noqa: E402
+from scripts._admin import argumentos, auditar, cabecalho  # noqa: E402
 from app.models import Category, CategoryType, Transaction, User  # noqa: E402
 
 # Espelho de PALETA_CATEGORIAS em frontend/src/lib/paleta.ts, na mesma ordem.
@@ -70,16 +70,14 @@ def plano(s: Session, dono: User) -> list[tuple[Category, str]]:
 
 
 def main() -> int:
-    ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
-    ap.add_argument("--usuario", required=True)
-    ap.add_argument("--aplicar", action="store_true", help="grava (sem isso, só mostra)")
-    args = ap.parse_args()
+    args = argumentos(__doc__.split("\n")[0]).parse_args()
 
     with Session(engine) as s:
         dono = s.exec(select(User).where(User.email == args.usuario.strip().lower())).first()
         if dono is None:
             print(f"Conta não encontrada: {args.usuario}", file=sys.stderr)
             return 1
+        cabecalho("redistribuir_cores", dono, args.apply)
 
         mudancas = plano(s, dono)
         if not mudancas:
@@ -90,7 +88,7 @@ def main() -> int:
             print(f"  {c.type.value:10} {c.icon} {c.name:28} {c.color} -> {nova}"
                   f"{'  (arquivada)' if c.archived else ''}")
 
-        if not args.aplicar:
+        if not args.apply:
             print(f"\n{len(mudancas)} categoria(s) mudariam. Nada foi gravado — rode com --aplicar.")
             return 0
 
@@ -101,6 +99,7 @@ def main() -> int:
         for c, nova in mudancas:
             c.color = nova
             s.add(c)
+        auditar(s, dono, "redistribuir_cores", "redistribuir_cores.aplicado", {"categorias": len(mudancas)})
         s.commit()
         print(f"{len(mudancas)} cor(es) gravada(s).")
     return 0
