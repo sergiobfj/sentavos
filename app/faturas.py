@@ -30,6 +30,7 @@ import datetime as dt
 from sqlmodel import Session, func, select
 
 from app.cartao import ciclo_da_parcela, referencia
+from app.dominio import natureza
 from app.escopo import consulta
 from app.relatorios import saldo_do_mes, somas_por_mes
 from app.models import (
@@ -190,6 +191,11 @@ def enriquecer(
             consulta(Commitment, dono).where(Commitment.id.in_(ids_de_compromisso))
         ).all()
     } if ids_de_compromisso else {}
+    ids_de_categoria = {t.category_id for t in lancamentos}
+    categorias = {
+        c.id: c
+        for c in session.exec(consulta(Category, dono).where(Category.id.in_(ids_de_categoria))).all()
+    } if ids_de_categoria else {}
 
     def com_compromisso(linha: TransactionRead, t: Transaction) -> TransactionRead:
         c = compromissos.get(t.commitment_id) if t.commitment_id else None
@@ -197,6 +203,8 @@ def enriquecer(
             linha.commitment_description = c.description
             linha.commitment_installments = c.installments
         linha.account_name = nomes_de_conta.get(t.account_id) if t.account_id else None
+        cat = categorias.get(t.category_id)
+        linha.effective_nature = natureza.efetiva(cat.type, t.nature, cat.default_nature) if cat else None
         return linha
 
     if not ids_de_compra:
@@ -304,6 +312,9 @@ def resumo_de_caixa(
         carteira=round(carteira, 2),
         gasto_total=round(conta["gasto_total"], 2),
         no_cartao=round(conta["no_cartao"], 2),
+        custo_de_vida=round(conta["custo_de_vida"], 2),
+        aquisicoes=round(conta["aquisicoes"], 2),
+        financeiro=round(conta["financeiro"], 2),
         sem_forma_definida=round(conta["sem_forma"], 2),
         sem_forma_definida_qtd=int(sem_forma_qtd or 0),
         faturas_do_mes=round(faturas_do_mes, 2),

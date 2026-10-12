@@ -51,6 +51,24 @@ class CategoryType(str, Enum):
     INCOME = "income"
     INVESTMENT = "investment"
 
+class TransactionNature(str, Enum):
+    """Que evento econômico foi o gasto — não "com o quê" (isso é a categoria).
+
+    Só despesa tem natureza, e o gasto total continua somando as três. A
+    entrada da moto é Moto + aquisição; os equipamentos são Moto + consumo; a
+    parcela do financiamento é financeiro. "Custo de vida" é só o consumo.
+    Como os outros enums, o banco grava o NOME (`CONSUMPTION`).
+    """
+
+    CONSUMPTION = "consumption"
+    ASSET_ACQUISITION = "asset_acquisition"
+    FINANCIAL = "financial"
+
+
+def _natureza():
+    return sa.Enum(TransactionNature, native_enum=False, length=20)
+
+
 class Finalidade(str, Enum):
     """Quem, ou qual contexto, consumiu o gasto.
 
@@ -84,6 +102,10 @@ class CategoryBase(SQLModel):
     # herdadas da planilha" e "perder um ano de dados".
     archived: bool = False
 
+    # Natureza padrão dos gastos desta categoria (nula = consumo). O lançamento
+    # herda e pode sobrescrever: Moto é consumo, a entrada da moto não.
+    default_nature: TransactionNature | None = Field(default=None, sa_type=_natureza())
+
 class Category(CategoryBase, table=True):
     __tablename__ = "categories"
     user_id: int = dono()
@@ -98,6 +120,7 @@ class CategoryUpdate(SQLModel):
     color: str | None = None
     icon: str | None = None
     archived: bool | None = None
+    default_nature: TransactionNature | None = None
 
 
 class CategoryRead(CategoryBase):
@@ -171,6 +194,9 @@ class TransactionBase(SQLModel):
     # (AccountBalanceSnapshot) tem: sem isto, um Pix das 14h e um saldo lido às
     # 10h do mesmo dia seriam ambíguos. Nulo = só a data (ver app/dominio/contas.py).
     occurred_at: dt.datetime | None = Field(default=None, sa_type=sa.DateTime(timezone=True))
+    # Sobrescreve a natureza da categoria só neste lançamento (nula = herda).
+    # Só despesa; a baixa de compromisso copia a do compromisso.
+    nature: TransactionNature | None = Field(default=None, sa_type=_natureza())
 
 
 class Transaction(TransactionBase, table=True):
@@ -236,6 +262,7 @@ class TransactionUpdate(SQLModel):
     finalidade: Finalidade | None = None
     account_id: int | None = None
     occurred_at: dt.datetime | None = None
+    nature: TransactionNature | None = None
 
 
 class TransactionRead(TransactionBase):
@@ -265,6 +292,9 @@ class TransactionRead(TransactionBase):
     commitment_installments: int | None = None
     # Nome da conta, pra lista não precisar de uma chamada por linha.
     account_name: str | None = None
+    # A natureza que vale: a do lançamento, senão a da categoria, senão
+    # consumo. Nula em receita e investimento.
+    effective_nature: TransactionNature | None = None
 
 
 # ---------- Cartão de crédito ----------
@@ -662,6 +692,11 @@ class Caixa(SQLModel):
     # gasto_total inclui o que foi no cartão; é o número das metas.
     gasto_total: float = 0
     no_cartao: float = 0
+    # O mesmo gasto total pelas três naturezas (somam gasto_total). Custo de
+    # vida é só o consumo: fora a entrada da moto e a parcela do financiamento.
+    custo_de_vida: float = 0
+    aquisicoes: float = 0
+    financeiro: float = 0
 
     # ---------- Transição ----------
     # Despesa anterior ao cartão, ainda sem forma de pagamento definida. Conta
@@ -923,6 +958,8 @@ class CommitmentBase(SQLModel):
     confirmed: bool = True
     # Só em despesa, como no lançamento. Copiada pra cada baixa.
     finalidade: Finalidade | None = None
+    # Idem: a parcela do financiamento é FINANCIAL, e cada baixa nasce assim.
+    nature: TransactionNature | None = Field(default=None, sa_type=_natureza())
 
     # ---------- Só informação ----------
     # Nenhum destes entra em conta nenhuma. "Valor financiado R$ 13.990" e
@@ -977,6 +1014,7 @@ class CommitmentUpdate(SQLModel):
     end_date: dt.date | None = None
     confirmed: bool | None = None
     finalidade: Finalidade | None = None
+    nature: TransactionNature | None = None
     institution: str | None = None
     total_amount: float | None = None
     down_payment: float | None = None

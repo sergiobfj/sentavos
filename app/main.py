@@ -20,7 +20,7 @@ from app.rotas_contas import router_contas
 from app.rotas_investimentos import router_investimentos
 from app.dominio import investimentos
 from app.dominio.contas import conta_valida
-from app.dominio import patrimonio
+from app.dominio import natureza, patrimonio
 from app.database import create_db_and_tables, get_session
 from app.security import RateLimitMiddleware, SecurityHeadersMiddleware
 from app.models import (
@@ -179,6 +179,7 @@ def create_transaction(transaction: TransactionCreate, session: Session = Depend
         update={
             "user_id": dono.id,
             "finalidade": finalidade_efetiva(category, transaction.finalidade, padrao=True),
+            "nature": natureza.gravavel(category.type, transaction.nature),
             "account_id": conta_valida(session, dono, transaction.account_id, transaction.payment_method),
         },
     )
@@ -324,6 +325,8 @@ def update_transaction(
         transaction.finalidade,
         padrao=virou_despesa and "finalidade" not in update_data,
     )
+    # Natureza, idem: só despesa. Nula = herda da categoria.
+    transaction.nature = natureza.gravavel(categoria.type if categoria else None, transaction.nature)
 
     # Lançamento que é aporte/resgate de um ativo: o movimento acompanha (valor,
     # data, conta) ou a edição é recusada (virar despesa, trocar o sinal).
@@ -353,6 +356,15 @@ def finalidade_efetiva(
         return None
     if escolhida is None and padrao:
         return Finalidade.PESSOAL
+    return escolhida
+
+
+def _natureza_padrao(tipo, escolhida, recusar: bool = True):
+    """Só categoria de despesa tem natureza padrão."""
+    if escolhida is not None and CategoryType(tipo) != CategoryType.EXPENSE:
+        if recusar:
+            raise HTTPException(status_code=400, detail="Só categoria de despesa tem natureza.")
+        return None
     return escolhida
 
 
@@ -452,6 +464,7 @@ def create_category(category: CategoryCreate, session: Session = Depends(get_ses
             "name": nome,
             "icon": _icone(category.icon),
             "color": _cor(category.color),
+            "default_nature": _natureza_padrao(category.type, category.default_nature),
         },
     )
     session.add(db_category)
@@ -560,6 +573,8 @@ def update_category(
 
     for key, value in update_data.items():
         setattr(category, key, value)
+    category.default_nature = _natureza_padrao(category.type, category.default_nature,
+                                               recusar="default_nature" in update_data)
 
     session.add(category)
     session.commit()

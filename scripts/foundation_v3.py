@@ -21,8 +21,12 @@ Ações:
     conferência do mês. Não se decide sozinho.
   - `movimento_investimento`: {transaction_id, asset, type, account?}
     Liga um lançamento de investimento ao ativo (aporte/resgate explícito).
-  - `natureza_lancamento`: {transaction_id, nature}
-  - `natureza_compromisso`: {commitment_id, nature}
+  - `natureza_lancamento`: {transaction_id, nature, confere: {amount_paid?, description?}}
+    Natureza de um gasto (ex.: a entrada da moto = asset_acquisition).
+  - `natureza_compromisso`: {commitment_id, nature, confere: {amount?, description?}}
+    Natureza do compromisso e das baixas que ainda tinham a anterior (ex.: o
+    financiamento = financial). `confere` protege contra id trocado: se o
+    lançamento/compromisso não bater, o script para sem gravar nada.
 
 Cada ação aplicada vira um `audit_event` com o que foi criado/mudado, e é por
 eles que `--undo` desfaz — na ordem inversa, pulando o que já foi desfeito.
@@ -46,6 +50,9 @@ from app.models import (  # noqa: E402
     Asset,
     AssetSnapshot,
     AuditEvent,
+    Category,
+    CategoryType,
+    Commitment,
     FinancialAccount,
     InvoicePayment,
     ReconciliationItem,
@@ -53,6 +60,7 @@ from app.models import (  # noqa: E402
     ReconciliationStatus,
     SnapshotSource,
     Transaction,
+    TransactionNature,
     Transfer,
 )
 
@@ -64,6 +72,9 @@ class Plano:
     def __init__(self, session, dono, aplicar: bool):
         self.s, self.dono, self.aplicar = session, dono, aplicar
         self.feitas = 0
+        # No seco o renome não é gravado; as ações seguintes do plano já usam o
+        # nome novo, então o seco resolve o nome novo pro antigo.
+        self.renomes: dict[str, str] = {}
 
     def log(self, feito: bool, texto: str) -> None:
         print(("  já feito  " if feito else ("  APLICANDO " if self.aplicar else "  APLICAR   ")) + texto)
@@ -81,7 +92,10 @@ class Plano:
         return None
 
     def ativo(self, nome: str) -> Asset:
-        achados = [a for a in self.s.exec(consulta(Asset, self.dono)).all() if a.name.casefold() == nome.casefold()]
+        todos = self.s.exec(consulta(Asset, self.dono)).all()
+        achados = [a for a in todos if a.name.casefold() == nome.casefold()]
+        if not achados and nome.casefold() in self.renomes:
+            achados = [a for a in todos if a.name.casefold() == self.renomes[nome.casefold()].casefold()]
         if len(achados) != 1:
             sys.exit(f"Ativo '{nome}': {len(achados)} encontrados — o plano precisa apontar um só.")
         return achados[0]
@@ -138,6 +152,8 @@ class Plano:
         novo = a["name"]
         ja = [x for x in self.s.exec(consulta(Asset, self.dono)).all() if x.name == novo]
         self.log(bool(ja), f"ativo '{a['asset']}' passa a se chamar '{novo}'")
+        if not ja and not self.aplicar:
+            self.renomes[novo.casefold()] = a["asset"]
         if ja or not self.aplicar:
             return
         ativo = self.ativo(a["asset"])
@@ -186,6 +202,60 @@ class Plano:
             account_id=conta.id if conta else None, note=a.get("note")), ATOR)
         self.registrar("movimento_investimento", {"movement_id": mov.id, "transaction_id": t.id,
                                                   "conta_definida": bool(conta)}, "investment_movement", mov.id)
+
+    def _conferir(self, obj, rotulo: str, confere: dict | None) -> None:
+        for campo, esperado in (confere or {}).items():
+            valor = getattr(obj, campo, None)
+            igual = abs(float(valor or 0) - float(esperado)) < 0.005 if isinstance(esperado, (int, float)) \
+                else str(valor or "").casefold() == str(esperado).casefold()
+            if not igual:
+                sys.exit(f"{rotulo}: {campo} é {valor!r}, o plano esperava {esperado!r}. Nada foi gravado.")
+
+    def _despesa(self, category_id: int, rotulo: str) -> None:
+        cat = self.s.get(Category, category_id)
+        if cat is None or CategoryType(cat.type) != CategoryType.EXPENSE:
+            sys.exit(f"{rotulo}: só despesa tem natureza.")
+
+    def natureza_lancamento(self, a: dict) -> None:
+        t = self.s.get(Transaction, a["transaction_id"])
+        if t is None or t.user_id != self.dono.id:
+            sys.exit(f"Lançamento {a['transaction_id']} não é desta conta.")
+        rotulo = f"lançamento {t.id} ({t.description}, {t.amount_paid or 0:.2f} em {t.date:%d/%m/%Y})"
+        self._conferir(t, rotulo, a.get("confere"))
+        self._despesa(t.category_id, rotulo)
+        nova = TransactionNature(a["nature"])
+        atual = TransactionNature(t.nature) if t.nature else None
+        self.log(atual == nova, f"{rotulo}: natureza {nova.value}")
+        if atual == nova or not self.aplicar:
+            return
+        t.nature = nova
+        self.s.add(t)
+        self.s.flush()
+        self.registrar("natureza_lancamento", {"transaction_id": t.id, "de": atual.value if atual else None,
+                                               "para": nova.value}, "transaction", t.id)
+
+    def natureza_compromisso(self, a: dict) -> None:
+        from app.dominio import natureza
+
+        c = self.s.get(Commitment, a["commitment_id"])
+        if c is None or c.user_id != self.dono.id:
+            sys.exit(f"Compromisso {a['commitment_id']} não é desta conta.")
+        rotulo = f"compromisso {c.id} ({c.description}, {c.amount:.2f})"
+        self._conferir(c, rotulo, a.get("confere"))
+        self._despesa(c.category_id, rotulo)
+        nova = TransactionNature(a["nature"])
+        atual = TransactionNature(c.nature) if c.nature else None
+        baixas = self.s.exec(consulta(Transaction, self.dono).where(Transaction.commitment_id == c.id)).all()
+        levar = [t for t in baixas if (TransactionNature(t.nature) if t.nature else None) == atual]
+        self.log(atual == nova, f"{rotulo}: natureza {nova.value}, e {len(levar)} baixa(s) já paga(s) junto")
+        if atual == nova or not self.aplicar:
+            return
+        c.nature = nova
+        self.s.add(c)
+        mudadas = natureza.levar_as_baixas(self.s, self.dono, c, atual)
+        self.s.flush()
+        self.registrar("natureza_compromisso", {"commitment_id": c.id, "de": atual.value if atual else None,
+                                                "para": nova.value, "baixas": mudadas}, "commitment", c.id)
 
     def executar(self, acoes: list[dict]) -> None:
         for a in acoes:
@@ -242,6 +312,21 @@ class Plano:
                 item = self.s.get(ReconciliationItem, d["item_id"])
                 if item and item.user_id == self.dono.id and item.status == ReconciliationStatus.PENDENTE:
                     self.s.delete(item)
+            elif acao == "natureza_lancamento":
+                t = self.s.get(Transaction, d["transaction_id"])
+                if t and t.user_id == self.dono.id and t.nature and TransactionNature(t.nature).value == d["para"]:
+                    t.nature = TransactionNature(d["de"]) if d["de"] else None
+                    self.s.add(t)
+            elif acao == "natureza_compromisso":
+                c = self.s.get(Commitment, d["commitment_id"])
+                if c and c.user_id == self.dono.id and c.nature and TransactionNature(c.nature).value == d["para"]:
+                    c.nature = TransactionNature(d["de"]) if d["de"] else None
+                    self.s.add(c)
+                for tid, antes in d.get("baixas", []):
+                    t = self.s.get(Transaction, tid)
+                    if t and t.user_id == self.dono.id and t.nature and TransactionNature(t.nature).value == d["para"]:
+                        t.nature = TransactionNature(antes) if antes else None
+                        self.s.add(t)
             elif acao in self.desfazedores:
                 self.desfazedores[acao](self, d)
             registrar(self.s, acao=f"{SCRIPT}.desfeito", ator=ATOR, user_id=self.dono.id, detalhes={"evento": e.id})

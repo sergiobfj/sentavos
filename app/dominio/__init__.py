@@ -10,6 +10,11 @@ verdade e as invariantes.
     depois dele, com a qualidade do número (reconciliado, calculado,
     desatualizado, sem saldo).
   - `auditoria`: o rastro das mudanças financeiras fora do fluxo comum.
+  - `patrimonio`: o patrimônio do mês (ativos com frescor + contas).
+  - `investimentos`: aporte, resgate e ajuste por ativo; rendimento numa regra só.
+  - `saude`: o estado do mês (conciliado, parcial, precisa revisar), derivado.
+  - `natureza`: consumo, aquisição de bem, financeiro — o custo de vida.
+  - `tempo`: o dia e o instante de referência, no fuso do Brasil.
 
 Os módulos que já eram regra pura continuam onde estão: `app/faturas.py`
 (fatura), `app/planejamento.py` (futuro), `app/relatorios.py` (somas por mês e

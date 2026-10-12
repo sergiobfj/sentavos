@@ -30,6 +30,7 @@ from app import planejamento
 from app.auth import exigir_escrita, require_user
 from app.cartao import avancar_meses, limites_do_mes
 from app.database import get_session
+from app.dominio import natureza
 from app.dominio.contas import conta_valida
 from app.escopo import buscar, consulta, exigir
 from app.models import (
@@ -180,6 +181,7 @@ def novo_compromisso(session: Session, dono: User, dados: CommitmentCreate) -> C
             "user_id": dono.id,
             "description": _texto(dados.description, "A descrição"),
             "finalidade": _finalidade(categoria, dados.finalidade),
+            "nature": natureza.gravavel(categoria.type, dados.nature),
             "institution": _opcional(dados.institution, 80),
             "payment_hint": _opcional(dados.payment_hint, 40),
             "note": _opcional(dados.note, 500),
@@ -225,6 +227,7 @@ def atualizar_compromisso(
     exigir_escrita(dono)
     c = exigir(session, Commitment, commitment_id, dono, "Compromisso")
     mudancas = dados.model_dump(exclude_unset=True)
+    natureza_antes = c.nature
     baixas = _baixas(session, dono, c)
     numeros_pagos = sorted(t.commitment_no for t in baixas if t.commitment_no)
 
@@ -288,6 +291,11 @@ def atualizar_compromisso(
         categoria = buscar(session, Category, c.category_id, dono)
         if categoria is not None:
             c.finalidade = _finalidade(categoria, c.finalidade)
+            c.nature = natureza.gravavel(categoria.type, c.nature)
+        # A natureza nova vale pras baixas que ainda tinham a anterior: a
+        # parcela da Hunter já paga vira financeiro junto com o contrato.
+        if "nature" in mudancas and c.nature != natureza_antes:
+            natureza.levar_as_baixas(session, dono, c, natureza_antes)
         _validar_fim(c)
 
         # Nenhuma baixa pode ficar fora do cronograma novo.
@@ -428,6 +436,7 @@ def pagar_ocorrencia(
         category_id=c.category_id,
         payment_method=PaymentMethod.CASH,
         finalidade=_finalidade(categoria, c.finalidade),
+        nature=natureza.gravavel(categoria.type, c.nature),
         commitment_id=c.id,
         commitment_no=numero,
         account_id=conta_valida(session, dono, dados.account_id),
