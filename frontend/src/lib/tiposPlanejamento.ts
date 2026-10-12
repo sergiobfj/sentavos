@@ -5,7 +5,7 @@
 // toda conta vem pronta do servidor — refazê-la aqui seria a segunda cópia da
 // regra, e duas cópias de uma regra de dinheiro discordam um dia.
 
-import type { AssetClass, Finalidade } from "./types";
+import type { AssetClass, Finalidade, Natureza } from "./types";
 
 export type Certeza = "confirmado" | "estimado" | "hipotetico";
 export type OrigemPlano = "cartao" | "parcelado" | "recorrente" | "previsto" | "cenario";
@@ -184,6 +184,7 @@ export interface CommitmentCreate {
   end_date?: string | null;
   confirmed?: boolean;
   finalidade?: Finalidade | null;
+  nature?: Natureza | null;
   institution?: string | null;
   total_amount?: number | null;
   down_payment?: number | null;
@@ -204,6 +205,7 @@ export interface Commitment {
   end_date: string | null;
   confirmed: boolean;
   finalidade: Finalidade | null;
+  nature: Natureza | null;
   institution: string | null;
   total_amount: number | null;
   down_payment: number | null;

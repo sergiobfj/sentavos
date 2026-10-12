@@ -19,6 +19,7 @@ import { currentPeriod, usePeriod } from "../lib/period";
 import { ApiError } from "../lib/api";
 import { formatDiaMes, formatMoney } from "../lib/format";
 import { FRASE_FILTRO, OPCOES_FILTRO, useFiltroFinalidade } from "../lib/finalidade";
+import { useLeituraDoGasto } from "../lib/natureza";
 import { COR_OUTRAS } from "../lib/paleta";
 import type { CardInvoices, Category, Invoice, Transaction } from "../lib/types";
 
@@ -46,6 +47,10 @@ export default function Dashboard() {
   const { period, isCurrent } = usePeriod();
   const [editando, setEditando] = useState<Transaction | null>(null);
   const [filtro, setFiltro] = useFiltroFinalidade();
+  // Gasto total (padrão, o de sempre) ou custo de vida: a mesma rosca e a
+  // mesma linha, sem a entrada da moto e a parcela do financiamento.
+  const [leitura, setLeitura] = useLeituraDoGasto();
+  const vida = leitura === "vida";
   const [janela, setJanela] = useState<"6" | "12">("6");
 
   const { data: transactions, isLoading, error } = useTransactions();
@@ -54,7 +59,7 @@ export default function Dashboard() {
   const { data: saudeDoMes } = useMonthHealth();
   const { data: faturas } = useInvoicesSummary();
   const { data: cards } = useCards();
-  const distribuicao = useCategoryReport(filtro);
+  const distribuicao = useCategoryReport(filtro, vida ? "consumption" : "todas");
   const serie = useMonthlyReport(Number(janela), filtro);
 
   const caixa = resumo?.caixa;
@@ -114,12 +119,19 @@ export default function Dashboard() {
           valor:
             filtro !== "todos" && m.expense === 0 && m.expense_sem_finalidade > 0
               ? null
-              : m.expense,
+              : vida ? m.consumption : m.expense,
           atual: m.year === period.year && m.month === period.month,
         };
       }),
-    [serie.data, period, filtro]
+    [serie.data, period, filtro, vida]
   );
+  // O que o mês tem fora do custo de vida. Com a finalidade escolhida, como a
+  // rosca: vem do ponto do mês na série, já filtrado no servidor.
+  const pontoDoMes = (serie.data?.months ?? []).find((m) => m.year === period.year && m.month === period.month);
+  const foraDoCusto = [
+    pontoDoMes && pontoDoMes.asset_acquisition > 0 ? `${formatMoney(pontoDoMes.asset_acquisition)} de aquisição de bem` : null,
+    pontoDoMes && pontoDoMes.financial > 0 ? `${formatMoney(pontoDoMes.financial)} de financiamento` : null,
+  ].filter(Boolean) as string[];
 
   if (isLoading) return <Esqueleto />;
   if (error) return <div className="error-box">{(error as ApiError).message}</div>;
@@ -241,8 +253,24 @@ export default function Dashboard() {
 
           <div className="total-filtro">
             <div className="v tnum">{formatMoney(d?.total ?? 0)}</div>
-            <div className="r">{FRASE_FILTRO[filtro]} em {nomeDoMes}</div>
+            <div className="r">
+              {vida ? `custo de vida${filtro === "todos" ? "" : ` (${FRASE_FILTRO[filtro]})`}` : FRASE_FILTRO[filtro]} em {nomeDoMes}
+            </div>
           </div>
+          {/* Só a exceção ganha frase: mês sem aquisição nem financiamento não
+              diz nada (custo de vida = gasto total). */}
+          {(foraDoCusto.length > 0 || vida) && (
+            <div className="nota">
+              {foraDoCusto.length === 0
+                ? "Sem aquisição nem financiamento neste mês. "
+                : vida
+                  ? `Fora: ${foraDoCusto.join(" e ")}. `
+                  : `Inclui ${foraDoCusto.join(" e ")}. `}
+              <button type="button" className="link-inline" onClick={() => setLeitura(vida ? "total" : "vida")}>
+                {vida ? "Ver gasto total" : "Ver custo de vida"}
+              </button>
+            </div>
+          )}
 
           {distribuicao.isLoading ? (
             <div className="skel" style={{ height: 184 }} />
@@ -273,7 +301,7 @@ export default function Dashboard() {
 
           {/* ---------- Evolução ---------- */}
           <div className="sec-title">
-            <h2>Evolução dos gastos</h2>
+            <h2>{vida ? "Evolução do custo de vida" : "Evolução dos gastos"}</h2>
           </div>
           <div className="cabeca-grafico">
             <Segmentado

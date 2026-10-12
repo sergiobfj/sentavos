@@ -8,6 +8,7 @@ import Segmentado from "./Segmentado";
 import ContaPicker from "./ContaPicker";
 import { instanteSeHoje, lembrarConta, ultimaConta } from "../lib/tiposContas";
 import { OPCOES_FINALIDADE } from "../lib/finalidade";
+import { NATUREZA_DICA, NATUREZA_LABEL, OPCOES_NATUREZA } from "../lib/natureza";
 import {
   useCards,
   useCreatePurchase,
@@ -30,6 +31,7 @@ import {
   ehParcela,
   type Category,
   type Finalidade,
+  type Natureza,
   type CategoryType,
   type PaymentMethod,
   type Transaction,
@@ -105,6 +107,10 @@ function Lancamento({
     isEdit ? transaction!.finalidade ?? null : "pessoal"
   );
   const [escolheuFinalidade, setEscolheuFinalidade] = useState(isEdit);
+  // Natureza: nula = a da categoria (quase sempre consumo). Fica recolhida
+  // numa linha; abre quando alguém quer dizer "isto foi a entrada da moto".
+  const [natureza, setNatureza] = useState<Natureza | null>(isEdit ? transaction!.nature ?? null : null);
+  const [mudandoNatureza, setMudandoNatureza] = useState(false);
   // A conta: editando, a do lançamento; novo, a última usada (o caso comum é
   // pagar sempre da mesma). Compra no cartão não tem conta — sai na fatura.
   const [contaId, setContaId] = useState<number | null>(
@@ -206,6 +212,7 @@ function Lancamento({
       payment_method: (tipo === "expense" ? forma : "cash") as PaymentMethod | null,
       // Só despesa tem finalidade; o servidor também garante isso.
       finalidade: tipo === "expense" ? finalidade : null,
+      nature: tipo === "expense" ? natureza : null,
       account_id: noCartao ? null : contaId,
       // Lançamento de hoje leva o instante: fica claro se veio antes ou depois
       // de um saldo lido no mesmo dia. Editando, o instante original fica.
@@ -404,6 +411,28 @@ function Lancamento({
             )}
           </div>
         )}
+
+        {/* ---------- Natureza ----------
+            Só despesa à vista: a compra no cartão herda a da categoria. */}
+        {tipo === "expense" && !noCartao && (() => {
+          const daCategoria =
+            categories.find((c) => c.id === Number(form.category_id))?.default_nature ?? "consumption";
+          const efetiva = natureza ?? daCategoria;
+          return mudandoNatureza ? (
+            <div className="field">
+              <span className="label">Natureza</span>
+              <Segmentado rotulo="Natureza" opcoes={OPCOES_NATUREZA} valor={efetiva}
+                aoEscolher={(n) => setNatureza(n === daCategoria ? null : n)} largo />
+              <div className="hint">{NATUREZA_DICA[efetiva]}</div>
+            </div>
+          ) : (
+            <div className="field">
+              <button type="button" className="link-seta" onClick={() => setMudandoNatureza(true)}>
+                Natureza: {NATUREZA_LABEL[efetiva]}
+              </button>
+            </div>
+          );
+        })()}
 
         {/* No cartão, "Previsto" sai em vez de ficar cinza: compra já
             aconteceu, e um campo desabilitado ao lado do valor faz procurar o

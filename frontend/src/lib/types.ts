@@ -11,7 +11,12 @@ export interface Category {
   // Arquivada some do formulário de lançamento mas continua no banco: os
   // lançamentos antigos apontam pra ela.
   archived: boolean;
+  // Só despesa. Nula = consumo; o lançamento pode sobrescrever.
+  default_nature?: Natureza | null;
 }
+
+// Natureza do gasto (ver lib/natureza.ts). Só em despesa.
+export type Natureza = "consumption" | "asset_acquisition" | "financial";
 
 // Com `incluir_uso=1`: quanto a categoria já foi usada. É o que trava a troca
 // de tipo — a API recusa, e a tela nem oferece.
@@ -93,6 +98,12 @@ export interface Transaction {
   // Instante, quando se sabe (lançamento de hoje): separa "antes" e "depois"
   // de um saldo observado no mesmo dia.
   occurred_at?: string | null;
+
+  // ---------- Natureza ----------
+  // A escolhida neste lançamento (nula = herda da categoria) e a que vale,
+  // pronta do servidor. Nulas fora da despesa.
+  nature?: Natureza | null;
+  effective_nature?: Natureza | null;
 }
 
 export type TransactionCreate = Omit<
@@ -100,7 +111,7 @@ export type TransactionCreate = Omit<
   | "id" | "purchase_id" | "installment_no" | "invoice_id" | "installments"
   | "purchase_total" | "purchase_date" | "card_id" | "card_name" | "card_finalidade"
   | "commitment_id" | "commitment_no" | "commitment_description" | "commitment_installments"
-  | "account_name"
+  | "account_name" | "effective_nature"
 >;
 export type TransactionUpdate = Partial<TransactionCreate>;
 
@@ -164,6 +175,10 @@ export interface Caixa {
   // O que foi consumido — é o número das metas
   gasto_total: number;
   no_cartao: number;
+  // O gasto total pelas três naturezas (somam gasto_total).
+  custo_de_vida: number;
+  aquisicoes: number;
+  financeiro: number;
   // Transição: despesa anterior ao cartão, ainda sem forma de pagamento
   sem_forma_definida: number;
   sem_forma_definida_qtd: number;
@@ -328,6 +343,10 @@ export interface MonthlyPoint {
   expense: number;
   expense_total: number;
   expense_sem_finalidade: number;
+  // O mesmo gasto (com o filtro) pelas naturezas; somam `expense`.
+  consumption: number;
+  asset_acquisition: number;
+  financial: number;
   // Caixa — sempre da conta inteira.
   income: number;
   investment: number;
@@ -355,6 +374,7 @@ export interface CategoryReport {
   year: number;
   month: number;
   finalidade: Finalidade | null;
+  natureza: Natureza | null;
   total: number;
   categories: CategorySlice[];
   others: { value: number; pct: number; count: number } | null;

@@ -46,6 +46,7 @@ import type {
   PurchaseUpdate,
   TransactionCreate,
   TransactionUpdate,
+  Natureza,
 } from "./types";
 
 const keys = {
@@ -240,11 +241,11 @@ export function useDeleteAssetSnapshot() {
 // Finalidade e janela entram na chave: sem elas, trocar de "Pessoal" pra
 // "Família" serviria do cache o número do filtro anterior.
 
-export function useCategoryReport(finalidade: FiltroFinalidade) {
+export function useCategoryReport(finalidade: FiltroFinalidade, natureza: Natureza | "todas" = "todas") {
   const { period, ym } = usePeriod();
   return useQuery({
-    queryKey: [...keys.reports, "categories", ym, finalidade],
-    queryFn: () => reportsApi.categories(period, finalidade),
+    queryKey: [...keys.reports, "categories", ym, finalidade, natureza],
+    queryFn: () => reportsApi.categories(period, finalidade, natureza),
   });
 }
 

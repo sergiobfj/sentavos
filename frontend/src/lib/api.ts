@@ -45,6 +45,7 @@ import type {
   Transaction,
   TransactionCreate,
   TransactionUpdate,
+  Natureza,
 } from "./types";
 import type {
   Commitment,
@@ -312,9 +313,9 @@ export const reportsApi = {
     request<MonthlyReport>(
       `/reports/monthly?from=${ym(de)}&to=${ym(ate)}&finalidade=${finalidade}`
     ),
-  categories: ({ year, month }: Period, finalidade: FiltroFinalidade, top = 5) =>
+  categories: ({ year, month }: Period, finalidade: FiltroFinalidade, natureza: Natureza | "todas" = "todas", top = 5) =>
     request<CategoryReport>(
-      `/reports/categories?year=${year}&month=${month}&finalidade=${finalidade}&top=${top}`
+      `/reports/categories?year=${year}&month=${month}&finalidade=${finalidade}&natureza=${natureza}&top=${top}`
     ),
 };
 

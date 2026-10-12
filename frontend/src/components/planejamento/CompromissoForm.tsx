@@ -4,6 +4,7 @@ import ConfirmDialog from "../ConfirmDialog";
 import CategoryPicker from "../CategoryPicker";
 import Segmentado from "../Segmentado";
 import { OPCOES_FINALIDADE } from "../../lib/finalidade";
+import { NATUREZA_DICA, OPCOES_NATUREZA } from "../../lib/natureza";
 import {
   useCategories,
   useCreateCommitment,
@@ -12,7 +13,7 @@ import {
 } from "../../lib/queries";
 import { ApiError } from "../../lib/api";
 import { formatMesPorExtenso, formatMoney, parseMoney, todayIso } from "../../lib/format";
-import type { Finalidade } from "../../lib/types";
+import type { Finalidade, Natureza } from "../../lib/types";
 import type { CommitmentCreate, CommitmentDetail } from "../../lib/tiposPlanejamento";
 
 const PERIODOS = [
@@ -69,6 +70,8 @@ export default function CompromissoForm({
   const [intervalo, setIntervalo] = useState(String(base.interval_months ?? 1));
   const [confirmado, setConfirmado] = useState<"sim" | "nao">(base.confirmed === false ? "nao" : "sim");
   const [finalidade, setFinalidade] = useState<Finalidade>((base.finalidade as Finalidade) ?? "pessoal");
+  // Nula = a da categoria. Financiamento é financeiro: fica fora do custo de vida.
+  const [natureza, setNatureza] = useState<Natureza | null>((base.nature as Natureza | null) ?? null);
   const [instituicao, setInstituicao] = useState(base.institution ?? "");
   const [total, setTotal] = useState(base.total_amount != null ? String(base.total_amount).replace(".", ",") : "");
   const [entrada, setEntrada] = useState(base.down_payment != null ? String(base.down_payment).replace(".", ",") : "");
@@ -106,6 +109,7 @@ export default function CompromissoForm({
       end_date: repeticao === "recorrente" && fim ? fim : null,
       confirmed: confirmado === "sim",
       finalidade: tipo === "expense" ? finalidade : null,
+      nature: tipo === "expense" ? natureza : null,
       institution: instituicao.trim() || null,
       total_amount: parseMoney(total),
       down_payment: parseMoney(entrada),
@@ -255,6 +259,19 @@ export default function CompromissoForm({
             <Segmentado rotulo="Finalidade" opcoes={OPCOES_FINALIDADE} valor={finalidade} aoEscolher={setFinalidade} largo />
           </div>
         )}
+
+        {tipo === "expense" && (() => {
+          const daCategoria = categorias?.find((c) => c.id === categoria)?.default_nature ?? "consumption";
+          const efetiva = natureza ?? daCategoria;
+          return (
+            <div className="field">
+              <label>Natureza</label>
+              <Segmentado rotulo="Natureza" opcoes={OPCOES_NATUREZA} valor={efetiva}
+                aoEscolher={(n) => setNatureza(n === daCategoria ? null : n)} largo />
+              <span className="hint">{NATUREZA_DICA[efetiva]}</span>
+            </div>
+          );
+        })()}
 
         <details className="field">
           <summary style={{ cursor: "pointer", color: "var(--text-dim)", fontSize: "var(--fs-small)" }}>
