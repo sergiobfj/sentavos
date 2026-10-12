@@ -1,19 +1,5 @@
 import { EVENTO_SESSAO_EXPIRADA } from "./auth";
 import { carregarSessao, limparSessao } from "./session";
-import type { SaudeDoMes } from "./tiposPlanejamento";
-import type {
-  AccountCreate,
-  AccountMovement,
-  AccountSnapshot,
-  AccountsSummary,
-  AccountUpdate,
-  FinancialAccount,
-  InvestmentMovement,
-  InvestmentMovementCreate,
-  InvestmentSummary,
-  Transfer,
-  TransferCreate,
-} from "./tiposContas";
 import type { Period } from "./period";
 import type {
   Asset,
@@ -45,7 +31,6 @@ import type {
   Transaction,
   TransactionCreate,
   TransactionUpdate,
-  Natureza,
 } from "./types";
 import type {
   Commitment,
@@ -244,7 +229,7 @@ export const invoicesApi = {
   list: (cardId?: number) =>
     request<Invoice[]>(`/invoices${cardId != null ? `?card_id=${cardId}` : ""}`),
   get: (id: number) => request<InvoiceDetail>(`/invoices/${id}`),
-  pay: (id: number, data: { amount: number; date: string; account_id?: number | null; occurred_at?: string | null }) =>
+  pay: (id: number, data: { amount: number; date: string }) =>
     request<Invoice>(`/invoices/${id}/payments`, {
       method: "POST",
       body: JSON.stringify(data),
@@ -313,9 +298,9 @@ export const reportsApi = {
     request<MonthlyReport>(
       `/reports/monthly?from=${ym(de)}&to=${ym(ate)}&finalidade=${finalidade}`
     ),
-  categories: ({ year, month }: Period, finalidade: FiltroFinalidade, natureza: Natureza | "todas" = "todas", top = 5) =>
+  categories: ({ year, month }: Period, finalidade: FiltroFinalidade, top = 5) =>
     request<CategoryReport>(
-      `/reports/categories?year=${year}&month=${month}&finalidade=${finalidade}&natureza=${natureza}&top=${top}`
+      `/reports/categories?year=${year}&month=${month}&finalidade=${finalidade}&top=${top}`
     ),
 };
 
@@ -351,9 +336,7 @@ export const commitmentsApi = {
   remove: (id: number) =>
     request<{ message: string; reservas_soltas: number }>(`/commitments/${id}`, { method: "DELETE" }),
   // A baixa num toque: cria o lançamento realizado já vinculado à ocorrência.
-  pay: (id: number, numero: number, data: {
-    date?: string; amount?: number; note?: string | null; account_id?: number | null; occurred_at?: string | null;
-  }) =>
+  pay: (id: number, numero: number, data: { date?: string; amount?: number; note?: string | null }) =>
     request<CommitmentDetail>(`/commitments/${id}/ocorrencias/${numero}/pagar`, {
       method: "POST",
       body: JSON.stringify(data),
@@ -436,54 +419,4 @@ export const reconciliationApi = {
       method: "POST",
       body: JSON.stringify(data),
     }),
-};
-
-// ---------- Contas, saldos observados e transferências ----------
-// Saldo e qualidade vêm calculados (app/dominio/contas.py); a tela só formata.
-
-export const accountsApi = {
-  list: (incluirArquivadas = false) =>
-    request<FinancialAccount[]>(`/accounts${incluirArquivadas ? "?incluir_arquivadas=1" : ""}`),
-  summary: () => request<AccountsSummary>("/accounts/summary"),
-  get: (id: number) => request<FinancialAccount>(`/accounts/${id}`),
-  create: (data: AccountCreate) =>
-    request<FinancialAccount>("/accounts", { method: "POST", body: JSON.stringify(data) }),
-  update: (id: number, data: AccountUpdate) =>
-    request<FinancialAccount>(`/accounts/${id}`, { method: "PATCH", body: JSON.stringify(data) }),
-  remove: (id: number) => request<{ message: string }>(`/accounts/${id}`, { method: "DELETE" }),
-  snapshots: (id: number) => request<AccountSnapshot[]>(`/accounts/${id}/snapshots`),
-  informarSaldo: (id: number, data: { balance: number; note?: string | null }) =>
-    request<{ snapshot: AccountSnapshot; account: FinancialAccount }>(`/accounts/${id}/snapshots`, {
-      method: "POST",
-      body: JSON.stringify(data),
-    }),
-  aceitarDiferenca: (id: number, snapshotId: number) =>
-    request<AccountSnapshot>(`/accounts/${id}/snapshots/${snapshotId}/aceitar`, { method: "POST" }),
-  movimentos: (id: number) => request<AccountMovement[]>(`/accounts/${id}/movimentos`),
-  distribuir: (id: number, destinos: { account_id: number; amount: number }[]) =>
-    request<AccountsSummary>(`/accounts/${id}/distribuir`, {
-      method: "POST",
-      body: JSON.stringify({ destinos }),
-    }),
-};
-
-export const transfersApi = {
-  list: (period?: Period) =>
-    request<Transfer[]>(`/transfers${period ? `?year=${period.year}&month=${period.month}` : ""}`),
-  create: (data: TransferCreate) =>
-    request<Transfer>("/transfers", { method: "POST", body: JSON.stringify(data) }),
-  remove: (id: number) => request<{ message: string }>(`/transfers/${id}`, { method: "DELETE" }),
-};
-
-export const investmentsApi = {
-  summary: ({ year, month }: Period) => request<InvestmentSummary>(`/investments/summary?year=${year}&month=${month}`),
-  movements: ({ year, month }: Period) => request<InvestmentMovement[]>(`/investments/movements?year=${year}&month=${month}`),
-  createMovement: (data: InvestmentMovementCreate) =>
-    request<InvestmentMovement>("/investments/movements", { method: "POST", body: JSON.stringify(data) }),
-  removeMovement: (id: number) => request<{ message: string }>(`/investments/movements/${id}`, { method: "DELETE" }),
-};
-
-export const healthApi = {
-  month: ({ year, month }: Period) =>
-    request<SaudeDoMes>(`/months/${year}-${String(month).padStart(2, "0")}/health`),
 };

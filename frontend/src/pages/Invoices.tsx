@@ -1,5 +1,3 @@
-import ContaPicker from "../components/ContaPicker";
-import { instanteSeHoje, lembrarConta, ultimaConta } from "../lib/tiposContas";
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import Modal from "../components/Modal";
@@ -364,8 +362,6 @@ function PagarFatura({
   // fazer a pessoa digitar de novo um número que o app já sabe é pedágio.
   const [valor, setValor] = useState(String(fatura.remaining).replace(".", ","));
   const [data, setData] = useState(todayIso());
-  // É aqui que o dinheiro do cartão sai de uma conta.
-  const [contaId, setContaId] = useState<number | null>(ultimaConta());
   const pagar = usePayInvoice();
 
   const numero = parseMoney(valor) ?? 0;
@@ -396,9 +392,8 @@ function PagarFatura({
         className="m-body"
         onSubmit={(e) => {
           e.preventDefault();
-          lembrarConta(contaId);
           pagar.mutate(
-            { id: fatura.id, amount: numero, date: data, account_id: contaId, occurred_at: instanteSeHoje(data) },
+            { id: fatura.id, amount: numero, date: data },
             { onSuccess: onClose }
           );
         }}
@@ -428,8 +423,6 @@ function PagarFatura({
             onChange={(e) => setValor(e.target.value)}
           />
         </div>
-
-        <ContaPicker rotulo="Pago com" valor={contaId} aoEscolher={setContaId} />
 
         <div className="field">
           <label htmlFor="p-data">Data do pagamento</label>

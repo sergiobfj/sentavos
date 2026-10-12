@@ -4,8 +4,6 @@ import { useQuery } from "@tanstack/react-query";
 import Modal from "../Modal";
 import CompromissoForm from "./CompromissoForm";
 import ReservaForm from "./ReservaForm";
-import ContaPicker from "../ContaPicker";
-import { instanteSeHoje, lembrarConta, ultimaConta } from "../../lib/tiposContas";
 import { Cabecalho, Linha } from "./comum";
 import {
   useCategories,
@@ -372,7 +370,6 @@ function OcorrenciaSheet({
   const [valor, setValor] = useState(String(o.amount).replace(".", ","));
   const [data, setData] = useState(o.due_date <= todayIso() ? o.due_date : todayIso());
   const [nota, setNota] = useState("");
-  const [contaId, setContaId] = useState<number | null>(ultimaConta());
   const pagar = usePagarOcorrencia();
   const vincular = useVincularOcorrencia();
   const desvincular = useDesvincularOcorrencia();
@@ -433,11 +430,7 @@ function OcorrenciaSheet({
         {acao === "pagar" && (
           <form onSubmit={(e) => {
             e.preventDefault();
-            lembrarConta(contaId);
-            pagar.mutate({
-              id: c.id, numero: o.number, date: data, amount: parseMoney(valor) ?? undefined,
-              account_id: contaId, occurred_at: instanteSeHoje(data),
-            }, { onSuccess: onClose });
+            pagar.mutate({ id: c.id, numero: o.number, date: data, amount: parseMoney(valor) ?? undefined }, { onSuccess: onClose });
           }}>
             <div className="row2">
               <div className="field">
@@ -449,7 +442,6 @@ function OcorrenciaSheet({
                 <input id="o-data" type="date" value={data} onChange={(e) => setData(e.target.value)} />
               </div>
             </div>
-            <ContaPicker rotulo={entrada ? "Entrou em" : "Saiu de"} valor={contaId} aoEscolher={setContaId} />
             <p className="hint" style={{ marginTop: 0 }}>
               Vira um lançamento {entrada ? "de entrada" : "à vista"} em {c.category_name}, com o previsto e o pago.
             </p>

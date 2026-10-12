@@ -1,4 +1,3 @@
-import { Linha } from "../components/planejamento/comum";
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { parseMoney } from "../lib/format";
@@ -22,7 +21,6 @@ import {
 import { ApiError } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import { OPCOES_FINALIDADE } from "../lib/finalidade";
-import { NATUREZA_DICA, OPCOES_NATUREZA } from "../lib/natureza";
 import {
   EMOJIS,
   PALETA_CATEGORIAS,
@@ -38,7 +36,6 @@ import {
   type CategoryComUso,
   type CategoryType,
   type Finalidade,
-  type Natureza,
 } from "../lib/types";
 
 // A ordem das seções segue o uso: despesa é o que se cria e ajusta com mais
@@ -54,13 +51,7 @@ const OPCOES_TIPO = GRUPOS.map((g) => ({ valor: g.tipo, rotulo: CATEGORY_TYPE_LA
 export default function Settings() {
   return (
     <>
-      {/* Onde o dinheiro está: primeiro, porque é o que se atualiza com mais
-          frequência (o saldo de cada conta). */}
-      <ul className="lista-compacta" style={{ marginTop: "var(--s2)" }}>
-        <Linha rotulo="Contas e saldos" legenda="onde o dinheiro está, transferências" to="/contas" />
-      </ul>
-
-      <div className="sec-title">
+      <div className="sec-title" style={{ marginTop: "var(--s2)" }}>
         <h2>Cartões</h2>
       </div>
       <Cartoes />
@@ -484,8 +475,6 @@ function CategoryForm({
     color: category?.color ?? proximaCorLivre(todas.map((c) => c.color)),
     icon: category?.icon ?? "🛒",
   });
-  // Natureza padrão dos gastos desta categoria (nula = consumo).
-  const [natureza, setNatureza] = useState<Natureza | null>(category?.default_nature ?? null);
   const [outroEmoji, setOutroEmoji] = useState(false);
   const [excluindo, setExcluindo] = useState(false);
 
@@ -530,7 +519,6 @@ function CategoryForm({
       type: form.type,
       color: form.color,
       icon: form.icon.trim() || "•",
-      default_nature: form.type === "expense" ? natureza : null,
     };
     if (isEdit) update.mutate({ id: category!.id, data: payload }, { onSuccess: onClose });
     else create.mutate(payload, { onSuccess: onClose });
@@ -606,17 +594,6 @@ function CategoryForm({
             />
           )}
         </div>
-
-        {form.type === "expense" && (
-          <div className="field">
-            <span className="label">Natureza dos gastos</span>
-            <Segmentado rotulo="Natureza padrão" opcoes={OPCOES_NATUREZA} valor={natureza ?? "consumption"}
-              aoEscolher={(n) => setNatureza(n === "consumption" ? null : n)} largo />
-            <div className="hint">
-              {NATUREZA_DICA[natureza ?? "consumption"]} Cada lançamento pode mudar a sua.
-            </div>
-          </div>
-        )}
 
         <div className="field">
           <span className="label">Cor</span>

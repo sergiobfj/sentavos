@@ -12,7 +12,7 @@ import {
   useComparacao,
   usePlanningHorizon,
   usePlanningMonth,
-  useMonthHealth,
+  useReconciliation,
   useScenarios,
 } from "../lib/queries";
 import { currentPeriod, usePeriod, type Period } from "../lib/period";
@@ -129,26 +129,16 @@ function Inicio({ period }: { period: Period }) {
 /** Até três linhas: de onde a conta parte, o que já tem destino e o que
  *  venceu. "Comprometido" e "livre" não se repetem aqui: já estão no herói. */
 function EsteMes({ resposta, mes, onFolha }: { resposta: PlanoResposta; mes: PlanoMes; onFolha: (f: Folha) => void }) {
-  // Com contas: "sem saldo" fica fora; "desatualizada" entra, marcada (o
-  // saldo dela tem os movimentos aplicados). Sem contas (ativos): saldo de mês
-  // anterior fica fora — a regra antiga.
+  // Só conta com saldo deste mês entra; a de saldo antigo fica fora e é dita.
   const contas = resposta.accounts.filter((c) => c.included && !c.stale);
   const aviso = resposta.balance_warning;
-  const comContas = resposta.accounts.some((c) => c.account_id != null);
-  const desatualizadas = aviso.contas_desatualizadas ?? [];
-  const semSaldo = aviso.contas_sem_saldo;
-  const desatualizado =
-    mes.is_current && (desatualizadas.length > 0 || aviso.sem_contas || semSaldo.length > 0);
+  const fora = aviso.contas_desatualizadas ?? [];
+  const desatualizado = mes.is_current && (fora.length > 0 || aviso.sem_contas || aviso.contas_sem_saldo.length > 0);
   const legendaSaldo = aviso.sem_contas
     ? "nenhuma conta escolhida"
     : [
         contas.length ? `${contas.length} ${contas.length === 1 ? "conta" : "contas"}` : "sem saldo deste mês",
-        comContas
-          ? semSaldo.length ? `${semSaldo.length} sem saldo, fora` : ""
-          : desatualizadas.length ? `${desatualizadas.length} sem saldo de ${nomeDoMes(mes.year, mes.month)}, fora` : "",
-        comContas && desatualizadas.length
-          ? `${desatualizadas.length} ${desatualizadas.length === 1 ? "desatualizada" : "desatualizadas"}`
-          : "",
+        fora.length ? `${fora.length} sem saldo de ${nomeDoMes(mes.year, mes.month)}, fora` : "",
       ].filter(Boolean).join(" · ");
 
   return (
@@ -254,13 +244,14 @@ function ProximosMeses() {
 }
 
 function Mais({ period }: { period: Period }) {
-  const { data } = useMonthHealth(period);
-  const pendencias = data ? data.issues.length : 0;
+  const { data } = useReconciliation(period);
+  const abertos = data ? data.counts.pendente + data.counts.confirmar : 0;
   return (
     <ul className="lista-compacta plano-mais">
-      <Linha rotulo={`Conferir ${nomeDoMes(period.year, period.month)}`}
-        legenda={!data ? undefined : pendencias === 0 ? "conciliado" : `${pendencias} ${pendencias === 1 ? "pendência" : "pendências"}`}
-        tom={data?.state === "precisa_revisar" ? "neg" : undefined} to="/organizar" />
+      {abertos > 0 && (
+        <Linha rotulo={`Organizar ${nomeDoMes(period.year, period.month)}`}
+          legenda={`${abertos} ${abertos === 1 ? "item" : "itens"} pra revisar`} to="/organizar" />
+      )}
       <Linha rotulo="Compromissos e reservas" legenda="financiamentos, contas recorrentes, dinheiro separado"
         to="/planejamento/compromissos" />
     </ul>

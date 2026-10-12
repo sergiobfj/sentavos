@@ -15,12 +15,7 @@ import {
   provisionsApi,
   scenariosApi,
   reconciliationApi,
-  accountsApi,
-  transfersApi,
-  investmentsApi,
-  healthApi,
 } from "./api";
-import type { AccountCreate, AccountUpdate, InvestmentMovementCreate, TransferCreate } from "./tiposContas";
 import type {
   CommitmentCreate,
   CommitmentUpdate,
@@ -46,7 +41,6 @@ import type {
   PurchaseUpdate,
   TransactionCreate,
   TransactionUpdate,
-  Natureza,
 } from "./types";
 
 const keys = {
@@ -63,19 +57,12 @@ const keys = {
   provisions: ["provisions"] as const,
   scenarios: ["scenarios"] as const,
   reconciliation: ["reconciliation"] as const,
-  // Contas: o saldo calculado depende de lançamento, fatura paga e transferência.
-  accounts: ["accounts"] as const,
-  transfers: ["transfers"] as const,
-  investments: ["investments"] as const,
-  // A saúde do mês lê tudo: qualquer mudança financeira a deixa velha.
-  health: ["health"] as const,
 };
 
 // O planejamento lê tudo: lançamento previsto, fatura, saldo, compromisso,
 // reserva. E a conferência sugere correspondências entre lançamentos. Mexer em
 // qualquer um desses deixa os três velhos.
 function invalidatePlanning(qc: QueryClient) {
-  qc.invalidateQueries({ queryKey: keys.health });
   qc.invalidateQueries({ queryKey: keys.planning });
   qc.invalidateQueries({ queryKey: keys.commitments });
   qc.invalidateQueries({ queryKey: keys.provisions });
@@ -90,9 +77,6 @@ function invalidatePlanning(qc: QueryClient) {
 // desconta pagamento de fatura. Esquecer um dos três deixaria a tela com dois
 // números do mesmo mês discordando — que é o defeito mais caro de depurar aqui.
 function invalidateMovement(qc: QueryClient) {
-  qc.invalidateQueries({ queryKey: keys.health });
-  qc.invalidateQueries({ queryKey: keys.investments });
-  qc.invalidateQueries({ queryKey: keys.transfers });
   qc.invalidateQueries({ queryKey: keys.transactions });
   qc.invalidateQueries({ queryKey: keys.budgets });
   qc.invalidateQueries({ queryKey: keys.invoices });
@@ -100,9 +84,6 @@ function invalidateMovement(qc: QueryClient) {
   qc.invalidateQueries({ queryKey: keys.reports });
   // Apagar um lançamento pode desfazer a baixa de um compromisso.
   invalidatePlanning(qc);
-  // Lançamento com conta mexe no saldo dela — e o patrimônio soma contas.
-  qc.invalidateQueries({ queryKey: keys.accounts });
-  qc.invalidateQueries({ queryKey: keys.assets });
 }
 
 // ---------- Transações ----------
@@ -241,11 +222,11 @@ export function useDeleteAssetSnapshot() {
 // Finalidade e janela entram na chave: sem elas, trocar de "Pessoal" pra
 // "Família" serviria do cache o número do filtro anterior.
 
-export function useCategoryReport(finalidade: FiltroFinalidade, natureza: Natureza | "todas" = "todas") {
+export function useCategoryReport(finalidade: FiltroFinalidade) {
   const { period, ym } = usePeriod();
   return useQuery({
-    queryKey: [...keys.reports, "categories", ym, finalidade, natureza],
-    queryFn: () => reportsApi.categories(period, finalidade, natureza),
+    queryKey: [...keys.reports, "categories", ym, finalidade],
+    queryFn: () => reportsApi.categories(period, finalidade),
   });
 }
 
@@ -385,9 +366,8 @@ export function useInvoice(id: number | null) {
 export function usePayInvoice() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({ id, ...data }: {
-      id: number; amount: number; date: string; account_id?: number | null; occurred_at?: string | null;
-    }) => invoicesApi.pay(id, data),
+    mutationFn: ({ id, amount, date }: { id: number; amount: number; date: string }) =>
+      invoicesApi.pay(id, { amount, date }),
     // Pagar fatura é saída de caixa: muda a Carteira, que vem do resumo de
     // orçamento. Por isso invalida tudo, não só a fatura.
     onSuccess: () => invalidateMovement(qc),
@@ -568,9 +548,8 @@ export const useDeleteCommitment = () =>
   useMutacaoDeCompromisso((id: number) => commitmentsApi.remove(id));
 export const usePagarOcorrencia = () =>
   useMutacaoDeCompromisso(
-    ({ id, numero, ...data }: {
-      id: number; numero: number; date?: string; amount?: number; account_id?: number | null; occurred_at?: string | null;
-    }) => commitmentsApi.pay(id, numero, data)
+    ({ id, numero, date, amount }: { id: number; numero: number; date?: string; amount?: number }) =>
+      commitmentsApi.pay(id, numero, { date, amount })
   );
 export const useVincularOcorrencia = () =>
   useMutacaoDeCompromisso(
@@ -688,79 +667,3 @@ export const useReconProvision = () =>
   useMutacaoDePlanejamento(({ id, data }: { id: number; data: ProvisionCreate }) =>
     reconciliationApi.createProvision(id, data)
   );
-
-// ---------- Contas ----------
-
-export function useAccounts(incluirArquivadas = false) {
-  return useQuery({ queryKey: [...keys.accounts, "lista", incluirArquivadas], queryFn: () => accountsApi.list(incluirArquivadas) });
-}
-
-export function useAccountsSummary() {
-  return useQuery({ queryKey: [...keys.accounts, "resumo"], queryFn: accountsApi.summary });
-}
-
-export function useAccountSnapshots(id: number | null) {
-  return useQuery({
-    queryKey: [...keys.accounts, "saldos", id],
-    queryFn: () => accountsApi.snapshots(id!),
-    enabled: id != null,
-  });
-}
-
-export function useAccountMovements(id: number | null) {
-  return useQuery({
-    queryKey: [...keys.accounts, "movimentos", id],
-    queryFn: () => accountsApi.movimentos(id!),
-    enabled: id != null,
-  });
-}
-
-// Mexer em conta muda saldo, patrimônio e o saldo de partida do planejamento.
-function useMutacaoDeConta<T, R>(fn: (v: T) => Promise<R>) {
-  const qc = useQueryClient();
-  return useMutation({ mutationFn: fn, onSuccess: () => invalidateMovement(qc) });
-}
-
-export const useCreateAccount = () => useMutacaoDeConta((data: AccountCreate) => accountsApi.create(data));
-export const useUpdateAccount = () =>
-  useMutacaoDeConta(({ id, data }: { id: number; data: AccountUpdate }) => accountsApi.update(id, data));
-export const useDeleteAccount = () => useMutacaoDeConta((id: number) => accountsApi.remove(id));
-export const useInformarSaldo = () =>
-  useMutacaoDeConta(({ id, balance }: { id: number; balance: number }) => accountsApi.informarSaldo(id, { balance }));
-export const useAceitarDiferenca = () =>
-  useMutacaoDeConta(({ id, snapshotId }: { id: number; snapshotId: number }) => accountsApi.aceitarDiferenca(id, snapshotId));
-export const useDistribuir = () =>
-  useMutacaoDeConta(({ id, destinos }: { id: number; destinos: { account_id: number; amount: number }[] }) =>
-    accountsApi.distribuir(id, destinos)
-  );
-
-export function useTransfers() {
-  const { period, ym } = usePeriod();
-  return useQuery({ queryKey: [...keys.transfers, ym], queryFn: () => transfersApi.list(period) });
-}
-export const useCreateTransfer = () => useMutacaoDeConta((data: TransferCreate) => transfersApi.create(data));
-export const useDeleteTransfer = () => useMutacaoDeConta((id: number) => transfersApi.remove(id));
-
-// ---------- Investimento ----------
-
-export function useInvestmentSummary() {
-  const { period, ym } = usePeriod();
-  return useQuery({ queryKey: [...keys.investments, "resumo", ym], queryFn: () => investmentsApi.summary(period) });
-}
-
-export function useInvestmentMovements() {
-  const { period, ym } = usePeriod();
-  return useQuery({ queryKey: [...keys.investments, "movimentos", ym], queryFn: () => investmentsApi.movements(period) });
-}
-
-export const useCreateMovement = () =>
-  useMutacaoDeConta((data: InvestmentMovementCreate) => investmentsApi.createMovement(data));
-export const useRemoveMovement = () => useMutacaoDeConta((id: number) => investmentsApi.removeMovement(id));
-
-// ---------- Conferir mês ----------
-
-export function useMonthHealth(period?: Period) {
-  const { period: atual } = usePeriod();
-  const p = period ?? atual;
-  return useQuery({ queryKey: [...keys.health, toYm(p)], queryFn: () => healthApi.month(p) });
-}
