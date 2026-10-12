@@ -1,3 +1,6 @@
+import { Link } from "react-router-dom";
+import { Linha } from "../components/planejamento/comum";
+import { estadoDaConta } from "../lib/tiposContas";
 import { useMemo, useState } from "react";
 import Modal from "../components/Modal";
 import ConfirmDialog from "../components/ConfirmDialog";
@@ -120,6 +123,25 @@ export default function Assets() {
           </div>
         )}
       </section>
+
+      {/* Contas: onde o dinheiro líquido está. Se edita em Contas e saldos —
+          aqui é leitura, pra o patrimônio não ter dois lugares de digitar saldo. */}
+      {(data.accounts ?? []).length > 0 && (
+        <>
+          <div className="sec-title">
+            <h2>Contas</h2>
+            <Link to="/contas">Gerenciar</Link>
+          </div>
+          <ul className="lista-compacta">
+            {(data.accounts ?? []).map((c) => (
+              <Linha key={c.account_id} rotulo={c.name} to="/contas"
+                legenda={`${estadoDaConta(c)}${c.restricted ? " · restrita" : ""}`}
+                tom={c.quality === "desatualizado" || c.quality === "sem_saldo" ? "neg" : undefined}
+                valor={c.balance == null ? "—" : formatMoney(c.balance)} />
+            ))}
+          </ul>
+        </>
+      )}
 
       {/* Sem dívida, "Tudo que você tem" era o mesmo número do herói, repetido
           logo embaixo. Os dois só aparecem quando dizem coisas diferentes. */}

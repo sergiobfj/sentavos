@@ -84,6 +84,15 @@ export interface Transaction {
   commitment_no?: number | null;
   commitment_description?: string | null;
   commitment_installments?: number | null;
+
+  // ---------- Conta ----------
+  // De onde saiu / onde entrou. Nula = "conta não informada" (o histórico, a
+  // compra no cartão, o previsto). O nome vem pronto pra lista.
+  account_id?: number | null;
+  account_name?: string | null;
+  // Instante, quando se sabe (lançamento de hoje): separa "antes" e "depois"
+  // de um saldo observado no mesmo dia.
+  occurred_at?: string | null;
 }
 
 export type TransactionCreate = Omit<
@@ -91,6 +100,7 @@ export type TransactionCreate = Omit<
   | "id" | "purchase_id" | "installment_no" | "invoice_id" | "installments"
   | "purchase_total" | "purchase_date" | "card_id" | "card_name" | "card_finalidade"
   | "commitment_id" | "commitment_no" | "commitment_description" | "commitment_installments"
+  | "account_name"
 >;
 export type TransactionUpdate = Partial<TransactionCreate>;
 
@@ -239,6 +249,7 @@ export interface InvoicePayment {
   date: string;
   amount: number;
   note: string | null;
+  account_id?: number | null;
   card_id: number;
   card_name: string;
   invoice_year: number;
@@ -451,6 +462,19 @@ export interface AssetSummary {
   stale_count?: number;
   stale_assets?: number;
   stale_liabilities?: number;
+  // Contas financeiras: entram no patrimônio líquido, não em `assets`.
+  accounts?: {
+    account_id: number;
+    name: string;
+    type: string;
+    restricted: boolean;
+    archived: boolean;
+    balance: number | null;
+    quality: "reconciliado" | "calculado" | "desatualizado" | "sem_saldo";
+    observed_at: string | null;
+  }[];
+  accounts_total?: number;
+  previous_accounts_total?: number;
 }
 
 export const ASSET_CLASS_LABEL: Record<AssetClass, string> = {

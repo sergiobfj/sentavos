@@ -10,6 +10,7 @@ import Planejamento from "./pages/Planejamento";
 import PlanejamentoProximos from "./pages/PlanejamentoProximos";
 import PlanejamentoSimulacoes from "./pages/PlanejamentoSimulacoes";
 import Compromissos from "./components/planejamento/Compromissos";
+import Contas from "./pages/Contas";
 import Organizar from "./pages/Organizar";
 import Login from "./pages/Login";
 import { useAuth } from "./lib/auth";
@@ -65,6 +66,7 @@ export default function App() {
         <Route path="/planejamento/simulacoes" element={<PlanejamentoSimulacoes />} />
         <Route path="/planejamento/compromissos" element={<Compromissos />} />
         <Route path="/organizar" element={<Organizar />} />
+        <Route path="/contas" element={<Contas />} />
         {/* Rotas antigas: Transações virou sub-aba de Orçamento e Categorias
             entrou em Configurações. Redirecionar evita quebrar link salvo. */}
         <Route path="/transacoes" element={<Navigate to="/orcamento?aba=lancamentos" replace />} />

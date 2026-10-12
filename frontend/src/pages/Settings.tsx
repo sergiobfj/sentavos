@@ -1,3 +1,4 @@
+import { Linha } from "../components/planejamento/comum";
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { parseMoney } from "../lib/format";
@@ -51,7 +52,13 @@ const OPCOES_TIPO = GRUPOS.map((g) => ({ valor: g.tipo, rotulo: CATEGORY_TYPE_LA
 export default function Settings() {
   return (
     <>
-      <div className="sec-title" style={{ marginTop: "var(--s2)" }}>
+      {/* Onde o dinheiro está: primeiro, porque é o que se atualiza com mais
+          frequência (o saldo de cada conta). */}
+      <ul className="lista-compacta" style={{ marginTop: "var(--s2)" }}>
+        <Linha rotulo="Contas e saldos" legenda="onde o dinheiro está, transferências" to="/contas" />
+      </ul>
+
+      <div className="sec-title">
         <h2>Cartões</h2>
       </div>
       <Cartoes />

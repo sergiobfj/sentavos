@@ -85,9 +85,17 @@ export interface PlanoMes {
 }
 
 export interface ContaPlanejamento {
-  asset_id: number;
+  // Uma das duas: a conta financeira (quem tem contas) ou o ativo (o jeito
+  // anterior, pra quem ainda não cadastrou contas).
+  asset_id: number | null;
+  account_id?: number | null;
   name: string;
-  asset_class: AssetClass;
+  asset_class: AssetClass | null;
+  account_type?: string | null;
+  restricted?: boolean;
+  quality?: "reconciliado" | "calculado" | "desatualizado" | "sem_saldo" | null;
+  observed_at?: string | null;
+  maybe_incomplete?: boolean;
   included: boolean;
   value: number;
   as_of: string | null;

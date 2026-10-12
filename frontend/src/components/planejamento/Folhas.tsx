@@ -11,7 +11,10 @@ import {
   useSetAssetSnapshot,
   useSimular,
   useUpdateAsset,
+  useUpdateAccount,
+  useInformarSaldo,
 } from "../../lib/queries";
+import { estadoDaConta } from "../../lib/tiposContas";
 import { ApiError } from "../../lib/api";
 import { formatDiaMes, formatMoney, formatYm, parseMoney, todayIso } from "../../lib/format";
 import type { Period } from "../../lib/period";
@@ -239,6 +242,9 @@ export function ContasSheet({
 }) {
   const atualizar = useUpdateAsset();
   const saldo = useSetAssetSnapshot();
+  const atualizarConta = useUpdateAccount();
+  const saldoDaConta = useInformarSaldo();
+  const comContas = contas.some((c) => c.account_id != null);
   const ym = `${period.year}-${String(period.month).padStart(2, "0")}`;
   const total = contas.filter((c) => c.included && !c.stale).reduce((s, c) => s + c.value, 0);
   const erro = (atualizar.error || saldo.error) as ApiError | null;
@@ -248,10 +254,48 @@ export function ContasSheet({
       <div className="m-body">
         <div className="folha-total">
           <b className="tnum">{formatMoney(total)}</b>
-          <span>marque onde está o dinheiro que você usa no mês</span>
+          <span>{comContas ? "as contas livres que entram no mês" : "marque onde está o dinheiro que você usa no mês"}</span>
         </div>
         <ul className="lista-compacta">
-          {contas.map((c) => (
+          {contas.map((c) =>
+            c.account_id != null ? (
+              // Conta financeira: o saldo é o calculado (observado + movimentos).
+              // Digitar registra o saldo observado agora; restrita nunca entra.
+              <li key={`conta-${c.account_id}`}>
+                <div className="com-campo">
+                  <label className="conta-toggle">
+                    <input
+                      type="checkbox"
+                      checked={c.included}
+                      disabled={!podeEscrever || atualizarConta.isPending || c.restricted}
+                      onChange={(e) => atualizarConta.mutate({ id: c.account_id!, data: { include_in_planning: e.target.checked } })}
+                    />
+                    <span className="esq">
+                      <span className="n">{c.name}</span>
+                      <span className="d">
+                        {c.restricted ? "restrita · " : ""}
+                        {estadoDaConta({ quality: c.quality ?? "sem_saldo", observed_at: c.observed_at ?? null })}
+                      </span>
+                    </span>
+                  </label>
+                  <span className="saldo-input">
+                    {podeEscrever ? (
+                      <MoneyCell
+                        saved={c.quality === "reconciliado" ? c.value : null}
+                        placeholder={c.quality !== "sem_saldo" ? formatMoney(c.value) : "0,00"}
+                        ariaLabel={`Saldo de ${c.name} agora`}
+                        pending={saldoDaConta.isPending}
+                        onCommit={(v) => {
+                          if (v != null) saldoDaConta.mutate({ id: c.account_id!, balance: v });
+                        }}
+                      />
+                    ) : (
+                      <b className="tnum">{c.quality === "sem_saldo" ? "—" : formatMoney(c.value)}</b>
+                    )}
+                  </span>
+                </div>
+              </li>
+            ) : (
             <li key={c.asset_id}>
               <div className="com-campo">
                 <label className="conta-toggle">
@@ -259,7 +303,7 @@ export function ContasSheet({
                     type="checkbox"
                     checked={c.included}
                     disabled={!podeEscrever || atualizar.isPending}
-                    onChange={(e) => atualizar.mutate({ id: c.asset_id, data: { include_in_planning: e.target.checked } })}
+                    onChange={(e) => atualizar.mutate({ id: c.asset_id!, data: { include_in_planning: e.target.checked } })}
                   />
                   <span className="esq">
                     <span className="n">{c.name}</span>
@@ -282,7 +326,7 @@ export function ContasSheet({
                       ariaLabel={`Saldo de ${c.name} hoje`}
                       pending={saldo.isPending}
                       onCommit={(v) => {
-                        if (v != null) saldo.mutate({ asset_id: c.asset_id, year: period.year, month: period.month, value: v });
+                        if (v != null) saldo.mutate({ asset_id: c.asset_id!, year: period.year, month: period.month, value: v });
                       }}
                     />
                   ) : (
@@ -293,7 +337,13 @@ export function ContasSheet({
             </li>
           ))}
         </ul>
-        {podeEscrever && <p className="nota">Digitar um valor lança o saldo de hoje em Patrimônio.</p>}
+        {podeEscrever && (
+          <p className="nota">
+            {comContas
+              ? "Digitar um valor registra o saldo observado agora — não vira lançamento."
+              : "Digitar um valor lança o saldo de hoje em Patrimônio."}
+          </p>
+        )}
 
         {aviso.quantidade > 0 && aviso.desde && (
           <details className="detalhe">

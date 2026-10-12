@@ -5,6 +5,8 @@ import CategoryPicker from "./CategoryPicker";
 import CardPicker from "./CardPicker";
 import PurchaseForm from "./PurchaseForm";
 import Segmentado from "./Segmentado";
+import ContaPicker from "./ContaPicker";
+import { instanteSeHoje, lembrarConta, ultimaConta } from "../lib/tiposContas";
 import { OPCOES_FINALIDADE } from "../lib/finalidade";
 import {
   useCards,
@@ -103,6 +105,11 @@ function Lancamento({
     isEdit ? transaction!.finalidade ?? null : "pessoal"
   );
   const [escolheuFinalidade, setEscolheuFinalidade] = useState(isEdit);
+  // A conta: editando, a do lançamento; novo, a última usada (o caso comum é
+  // pagar sempre da mesma). Compra no cartão não tem conta — sai na fatura.
+  const [contaId, setContaId] = useState<number | null>(
+    isEdit ? transaction?.account_id ?? null : ultimaConta()
+  );
 
   const [form, setForm] = useState({
     date: transaction?.date ?? todayIso(),
@@ -199,7 +206,12 @@ function Lancamento({
       payment_method: (tipo === "expense" ? forma : "cash") as PaymentMethod | null,
       // Só despesa tem finalidade; o servidor também garante isso.
       finalidade: tipo === "expense" ? finalidade : null,
+      account_id: noCartao ? null : contaId,
+      // Lançamento de hoje leva o instante: fica claro se veio antes ou depois
+      // de um saldo lido no mesmo dia. Editando, o instante original fica.
+      ...(isEdit ? {} : { occurred_at: instanteSeHoje(form.date) }),
     };
+    if (!noCartao) lembrarConta(contaId);
 
     if (!isEdit) {
       create.mutate(payload, { onSuccess: () => irParaOMesSalvo(payload.date) });
@@ -335,6 +347,11 @@ function Lancamento({
             )}
           </div>
         )}
+
+        {/* ---------- Conta ----------
+            Depois da forma, porque é ela que decide se há conta: no cartão o
+            dinheiro sai na fatura, não aqui. */}
+        {!noCartao && <ContaPicker valor={contaId} aoEscolher={setContaId} />}
 
         {noCartao && (
           <>
