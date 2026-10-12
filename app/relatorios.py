@@ -42,9 +42,9 @@ from app.models import (
     User,
 )
 
-# Chave de uma soma: (tipo de categoria, forma de pagamento, finalidade), com
-# nulo como valor legítimo nas duas últimas — é o estado dos lançamentos antigos.
-Chave = tuple[str, str | None, str | None]
+# A regra do saldo (`somar`, `saldo_do_mes`) mora em app/dominio/caixa.py; o
+# agrupamento continua aqui. Importados de volta pra quem já os usava daqui.
+from app.dominio.caixa import Chave, saldo_do_mes, somar  # noqa: E402,F401
 
 
 def _ano_mes():
@@ -97,48 +97,6 @@ def somas_por_mes(
         bucket = saida.setdefault((int(a), int(m)), {})
         bucket[chave] = bucket.get(chave, 0.0) + float(soma or 0.0)
     return saida
-
-
-def somar(
-    somas: dict[Chave, float],
-    tipo: str,
-    formas: tuple[str | None, ...] | None = None,
-    finalidade: str | None = None,
-) -> float:
-    """Soma o que casa com o filtro. `formas=None` = qualquer forma;
-    `finalidade=None` = qualquer finalidade (inclusive nula)."""
-    return sum(
-        valor
-        for (t, forma, fin), valor in somas.items()
-        if t == tipo
-        and (formas is None or forma in formas)
-        and (finalidade is None or fin == finalidade)
-    )
-
-
-def saldo_do_mes(somas: dict[Chave, float], faturas_pagas: float) -> dict[str, float]:
-    """Os números de caixa de um mês. A regra de sempre, num lugar só:
-
-        saldo = entrou − despesa à vista (inclui forma nula) − investido − faturas pagas
-
-    Compra no cartão não entra: ela sai da conta quando a fatura é paga. A
-    forma nula conta como à vista porque é assim que ela já era contada antes
-    do cartão — tratá-la de outro jeito mudaria o saldo de todo mês passado.
-    """
-    entrou = somar(somas, "income")
-    investido = somar(somas, "investment")
-    sem_forma = somar(somas, "expense", (None,))
-    a_vista = somar(somas, "expense", ("cash",)) + sem_forma
-    no_cartao = somar(somas, "expense", ("credit",))
-    return {
-        "entrou": entrou,
-        "investido": investido,
-        "a_vista": a_vista,
-        "sem_forma": sem_forma,
-        "no_cartao": no_cartao,
-        "gasto_total": a_vista + no_cartao,
-        "saldo": entrou - a_vista - investido - faturas_pagas,
-    }
 
 
 def faturas_pagas_por_mes(

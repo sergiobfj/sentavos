@@ -162,6 +162,16 @@ class TransactionBase(SQLModel):
     # não, e a tela diz quanto ficou de fora.
     finalidade: Finalidade | None = None
 
+    # De qual conta saiu (despesa, aporte) ou em qual entrou (receita, resgate).
+    # Nulo = "conta não informada": todo o histórico anterior às contas, a
+    # compra no cartão (quem diz de onde sai é o pagamento da fatura) e o
+    # previsto. Não se deduz por descrição nem por banco.
+    account_id: int | None = None
+    # O instante, quando se sabe. `date` não tem hora, e o saldo observado
+    # (AccountBalanceSnapshot) tem: sem isto, um Pix das 14h e um saldo lido às
+    # 10h do mesmo dia seriam ambíguos. Nulo = só a data (ver app/dominio/contas.py).
+    occurred_at: dt.datetime | None = Field(default=None, sa_type=sa.DateTime(timezone=True))
+
 
 class Transaction(TransactionBase, table=True):
     __tablename__ = "transactions"
@@ -176,6 +186,14 @@ class Transaction(TransactionBase, table=True):
             "commitment_no",
             unique=True,
         ),
+        # A conta tem de ser do mesmo dono — garantido pelo banco, não só pela rota.
+        sa.ForeignKeyConstraint(
+            ["user_id", "account_id"],
+            ["financial_accounts.user_id", "financial_accounts.id"],
+            name="fk_transactions_account",
+        ),
+        sa.Index("ix_transactions_user_date", "user_id", "date"),
+        sa.Index("ix_transactions_account_date", "account_id", "date"),
     )
     user_id: int = dono()
     id: int | None = Field(default=None, primary_key=True)
@@ -214,6 +232,8 @@ class TransactionUpdate(SQLModel):
     category_id: int | None = None
     payment_method: PaymentMethod | None = None
     finalidade: Finalidade | None = None
+    account_id: int | None = None
+    occurred_at: dt.datetime | None = None
 
 
 class TransactionRead(TransactionBase):
@@ -241,6 +261,8 @@ class TransactionRead(TransactionBase):
     commitment_no: int | None = None
     commitment_description: str | None = None
     commitment_installments: int | None = None
+    # Nome da conta, pra lista não precisar de uma chamada por linha.
+    account_name: str | None = None
 
 
 # ---------- Cartão de crédito ----------
@@ -400,6 +422,10 @@ class InvoicePaymentBase(SQLModel):
     # lançamento antigo de "Fatura do cartão" vira pagamento, o que ele era
     # fica escrito aqui. Sem isso a operação apagaria a origem sem deixar marca.
     note: str | None = None
+    # A compra no cartão não sabe de conta; o pagamento da fatura sabe — é aí
+    # que o dinheiro sai. Nulo = não informada (todo pagamento anterior).
+    account_id: int | None = None
+    occurred_at: dt.datetime | None = Field(default=None, sa_type=sa.DateTime(timezone=True))
 
 
 class InvoicePayment(InvoicePaymentBase, table=True):
@@ -414,6 +440,13 @@ class InvoicePayment(InvoicePaymentBase, table=True):
     """
 
     __tablename__ = "invoice_payments"
+    __table_args__ = (
+        sa.ForeignKeyConstraint(
+            ["user_id", "account_id"],
+            ["financial_accounts.user_id", "financial_accounts.id"],
+            name="fk_invoice_payments_account",
+        ),
+    )
     user_id: int = dono()
     id: int | None = Field(default=None, primary_key=True)
     invoice_id: int = Field(foreign_key="invoices.id", index=True)
@@ -706,6 +739,12 @@ class AssetBase(SQLModel):
     # o mesmo que a tela mostra marcado antes de alguém mexer.
     include_in_planning: bool | None = None
 
+    # A partir de que mês o ativo deixa de contar (o dia é ignorado). O
+    # histórico fica: setembro continua lendo o saldo de setembro. É como um
+    # ativo que na verdade era conta (ou um quebra-galho, como o "Saldo
+    # agregado" de out/2026) sai do patrimônio sem reescrever o passado.
+    archived_on: dt.date | None = None
+
 class Asset(AssetBase, table=True):
     __tablename__ = "assets"
     user_id: int = dono()
@@ -720,6 +759,7 @@ class AssetUpdate(SQLModel):
     note: str | None = None
     cdi_percent: float | None = None
     include_in_planning: bool | None = None
+    archived_on: dt.date | None = None
 
 
 # O saldo de um ativo num mês. Preenchido à mão — sem cotação automática no v1.
@@ -789,6 +829,19 @@ class AssetClassTotal(SQLModel):
     value: float = 0
     previous: float = 0
 
+class AccountPatrimonyItem(SQLModel):
+    """Uma conta no patrimônio do mês (saldo calculado, ver dominio/contas.py)."""
+
+    account_id: int
+    name: str
+    type: str
+    restricted: bool
+    archived: bool = False
+    balance: float | None = None
+    quality: str
+    observed_at: dt.datetime | None = None
+
+
 class AssetSummary(SQLModel):
     year: int
     month: int
@@ -804,6 +857,11 @@ class AssetSummary(SQLModel):
     stale_count: int = 0
     stale_assets: float = 0
     stale_liabilities: float = 0
+    # Contas financeiras: entram no patrimônio líquido (net_worth), não em
+    # `assets` — que continua sendo a soma dos ativos, como sempre foi.
+    accounts: list[AccountPatrimonyItem] = []
+    accounts_total: float = 0
+    previous_accounts_total: float = 0
 
 
 # ===========================================================================
@@ -1005,6 +1063,9 @@ class PagarOcorrencia(SQLModel):
     # Sem valor, o previsto. Pode ser diferente — juros de atraso, desconto.
     amount: float | None = None
     note: str | None = None
+    # De onde saiu ("Paguei") ou onde entrou ("Recebi"). Nulo = não informada.
+    account_id: int | None = None
+    occurred_at: dt.datetime | None = None
 
 
 class VincularLancamento(SQLModel):
@@ -1266,3 +1327,162 @@ class ReconciliationItemUpdate(SQLModel):
     question: str | None = None
     category_hint: str | None = None
     note: str | None = None
+
+
+# ---------------------------------------------------------------------------
+# Contas financeiras (Foundation V3)
+# ---------------------------------------------------------------------------
+#
+# Conta = onde existe dinheiro líquido (Nubank, Mercado Pago, carteira, vale).
+# Ativo = investimento ou patrimônio (caixinha, CDB, ações, moto). Um não finge
+# ser o outro: o saldo da conta é o último saldo observado + os movimentos
+# conhecidos daquela conta depois dele (app/dominio/contas.py).
+
+
+class AccountType(str, Enum):
+    CHECKING = "checking"  # conta corrente
+    PAYMENT = "payment"  # conta de pagamento (carteira digital)
+    CASH = "cash"  # dinheiro em espécie
+    BENEFIT = "benefit"  # benefício de uso restrito (vale-transporte)
+    # Quebra-galho temporário: o total é conhecido, a divisão por conta não.
+    # Existe até alguém distribuir (POST /accounts/{id}/distribuir).
+    RECONCILIATION = "reconciliation"
+
+
+class SnapshotSource(str, Enum):
+    MANUAL = "manual"  # alguém olhou o app do banco e digitou
+    MIGRATION = "migration"  # veio de um dado anterior às contas
+    RECONCILIATION = "reconciliation"  # distribuição do saldo agregado
+
+
+class FinancialAccountBase(SQLModel):
+    name: str
+    institution: str | None = None
+    type: AccountType = Field(sa_type=_enum_texto(AccountType))
+    currency: str = "BRL"
+    # Entra no "quanto tenho agora" do planejamento.
+    include_in_planning: bool = True
+    # Dinheiro com destino fixo (vale-transporte): conta no patrimônio, nunca
+    # no dinheiro livre.
+    restricted: bool = False
+
+
+class FinancialAccount(FinancialAccountBase, table=True):
+    __tablename__ = "financial_accounts"
+    # (user_id, id) único: é o alvo das chaves estrangeiras compostas que
+    # garantem, no banco, que saldo, transferência e lançamento apontam pra uma
+    # conta do MESMO dono.
+    __table_args__ = (sa.UniqueConstraint("user_id", "id", name="uq_financial_accounts_user_id"),)
+    user_id: int = dono()
+    id: int | None = Field(default=None, primary_key=True)
+    archived: bool = False
+    created_at: dt.datetime = Field(default_factory=lambda: dt.datetime.now(dt.timezone.utc))
+
+
+class FinancialAccountCreate(FinancialAccountBase):
+    include_in_planning: bool | None = None  # nulo = padrão do tipo
+    restricted: bool | None = None
+
+
+class FinancialAccountUpdate(SQLModel):
+    name: str | None = None
+    institution: str | None = None
+    type: AccountType | None = None
+    include_in_planning: bool | None = None
+    restricted: bool | None = None
+    archived: bool | None = None
+
+
+class AccountBalanceSnapshot(SQLModel, table=True):
+    """"Observei este saldo neste instante." Não é lançamento.
+
+    Com hora (`observed_at`, com fuso): um Pix das 14h é claramente posterior a
+    um saldo lido às 10h do mesmo dia.
+    """
+
+    __tablename__ = "account_balance_snapshots"
+    __table_args__ = (
+        sa.ForeignKeyConstraint(
+            ["user_id", "account_id"],
+            ["financial_accounts.user_id", "financial_accounts.id"],
+            name="fk_account_balance_snapshots_account",
+            ondelete="CASCADE",
+        ),
+        sa.Index("ix_account_balance_snapshots_account", "account_id", "observed_at"),
+    )
+    user_id: int = dono()
+    id: int | None = Field(default=None, primary_key=True)
+    account_id: int
+    observed_at: dt.datetime = Field(sa_type=sa.DateTime(timezone=True))
+    balance: float
+    source: SnapshotSource = Field(default=SnapshotSource.MANUAL, sa_type=_enum_texto(SnapshotSource))
+    note: str | None = None
+    # A diferença entre o observado e o calculado que alguém ACEITOU como
+    # ajuste de conferência. Nunca vira receita nem despesa; sem aceite, a
+    # diferença é pendência do mês.
+    accepted_difference: float | None = None
+    created_at: dt.datetime = Field(default_factory=lambda: dt.datetime.now(dt.timezone.utc))
+
+
+class Transfer(SQLModel, table=True):
+    """Dinheiro mudando de conta. Não é receita, não é despesa, não mexe no
+    patrimônio — uma linha só, pra ida e volta nunca se perderem uma da outra."""
+
+    __tablename__ = "transfers"
+    __table_args__ = (
+        sa.ForeignKeyConstraint(
+            ["user_id", "from_account_id"],
+            ["financial_accounts.user_id", "financial_accounts.id"],
+            name="fk_transfers_from_account",
+        ),
+        sa.ForeignKeyConstraint(
+            ["user_id", "to_account_id"],
+            ["financial_accounts.user_id", "financial_accounts.id"],
+            name="fk_transfers_to_account",
+        ),
+        sa.CheckConstraint("from_account_id <> to_account_id", name="ck_transfers_contas_diferentes"),
+        sa.CheckConstraint("amount > 0", name="ck_transfers_valor_positivo"),
+        sa.Index("ix_transfers_user_date", "user_id", "date"),
+    )
+    user_id: int = dono()
+    id: int | None = Field(default=None, primary_key=True)
+    from_account_id: int
+    to_account_id: int
+    amount: float
+    date: dt.date
+    occurred_at: dt.datetime | None = Field(default=None, sa_type=sa.DateTime(timezone=True))
+    description: str | None = None
+    note: str | None = None
+    created_at: dt.datetime = Field(default_factory=lambda: dt.datetime.now(dt.timezone.utc))
+
+
+class TransferCreate(SQLModel):
+    from_account_id: int
+    to_account_id: int
+    amount: float
+    date: dt.date
+    occurred_at: dt.datetime | None = None
+    description: str | None = None
+    note: str | None = None
+
+
+class AuditEvent(SQLModel, table=True):
+    """Rastro mínimo do que mexeu em dinheiro fora do fluxo comum.
+
+    Conferência (aceitar diferença, distribuir saldo agregado), transferências,
+    movimentos de investimento, scripts administrativos e migração de dados.
+    Não registra navegação nem edição de texto, e `details` nunca leva senha,
+    token ou segredo (app/dominio/auditoria.py filtra).
+    """
+
+    __tablename__ = "audit_events"
+    __table_args__ = (sa.Index("ix_audit_events_user_created", "user_id", "created_at"),)
+    id: int | None = Field(default=None, primary_key=True)
+    user_id: int | None = Field(default=None, foreign_key="users.id")
+    # "api:<email>", "script:<nome>", "migracao:<revisão>".
+    actor: str
+    action: str
+    entity_type: str | None = None
+    entity_id: int | None = None
+    details: dict[str, Any] | None = Field(default=None, sa_type=sa.JSON)
+    created_at: dt.datetime = Field(default_factory=lambda: dt.datetime.now(dt.timezone.utc))

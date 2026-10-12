@@ -5,30 +5,30 @@ import datetime as dt
 
 from fastapi import APIRouter, Depends, FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
-from sqlmodel import Session, SQLModel, and_, func, or_, select
+from sqlmodel import Session, SQLModel, func, select
 
 from app.auth import ConfiguracaoIncompleta, autenticar, exigir_escrita, require_user
 from app.cartao import limites_do_mes as month_bounds
 from app.escopo import buscar, consulta, exigir
 from app import planejamento
 from app.faturas import enriquecer, resumo_de_caixa
-from app.rendimento import rendimento_do_mes
 from app.rotas_cartao import router_cartao
 from app.rotas_relatorios import router_relatorios
 from app.rotas_planejamento import router_planejamento
 from app.rotas_conferencia import router_conferencia
+from app.rotas_contas import router_contas
+from app.dominio.contas import conta_valida
+from app.dominio import patrimonio
 from app.database import create_db_and_tables, get_session
 from app.security import RateLimitMiddleware, SecurityHeadersMiddleware
 from app.models import (
     Asset,
     AssetClass,
-    AssetClassTotal,
     AssetCreate,
     AssetSnapshot,
     AssetSnapshotCreate,
     AssetSnapshotUpdate,
     AssetSummary,
-    AssetSummaryItem,
     AssetUpdate,
     Budget,
     BudgetCreate,
@@ -49,7 +49,6 @@ from app.models import (
     TransactionCreate,
     TransactionUpdate,
     User,
-    is_liability,
 )
 
 
@@ -115,13 +114,8 @@ app.add_middleware(RateLimitMiddleware)
 router = APIRouter(dependencies=[Depends(require_user)])
 
 
-def month_index(year: int, month: int) -> int:
-    """Mês como número absoluto, pra comparar períodos sem cuidar de virada de ano."""
-    return year * 12 + (month - 1)
 
 
-def previous_month(year: int, month: int) -> tuple[int, int]:
-    return (year - 1, 12) if month == 1 else (year, month - 1)
 
 
 # HEAD junto com GET: é a rota de healthcheck, e quem checa saúde costuma usar
@@ -183,6 +177,7 @@ def create_transaction(transaction: TransactionCreate, session: Session = Depend
         update={
             "user_id": dono.id,
             "finalidade": finalidade_efetiva(category, transaction.finalidade, padrao=True),
+            "account_id": conta_valida(session, dono, transaction.account_id, transaction.payment_method),
         },
     )
     session.add(db_transaction)
@@ -302,6 +297,11 @@ def update_transaction(
                     "categoria, mas não de tipo — desvincule antes."
                 ),
             )
+
+    if "account_id" in update_data:
+        update_data["account_id"] = conta_valida(
+            session, dono, update_data["account_id"], update_data.get("payment_method", transaction.payment_method)
+        )
 
     for key, value in update_data.items():
         setattr(transaction, key, value)
@@ -861,137 +861,8 @@ def get_asset_summary(
     session: Session = Depends(get_session),
     dono: User = Depends(require_user),
 ):
-    """Saldo de cada ativo no mês, com variação e patrimônio líquido.
-
-    Saldo é estoque, não movimento. Num mês PASSADO sem lançamento vale o
-    último saldo lançado — é o retrato histórico, e zerá-lo seria mentira.
-
-    Do mês corrente em diante, não: saldo de mês anterior é só o último
-    conhecido. Ele aparece (com `stale` e a data), mas fica fora dos totais —
-    o patrimônio de hoje soma só o que foi atualizado no mês. Antes, o Nubank
-    de setembro continuava somando em outubro como se o dinheiro estivesse lá.
-    """
-    target = month_index(year, month)
-    prev_target = month_index(*previous_month(year, month))
-    agora = planejamento.hoje()
-
-    snapshots = session.exec(
-        consulta(AssetSnapshot, dono).where(
-            or_(
-                AssetSnapshot.year < year,
-                and_(AssetSnapshot.year == year, AssetSnapshot.month <= month),
-            )
-        )
-    ).all()
-
-    # Último snapshot de cada ativo até o mês pedido, e até o mês anterior.
-    latest: dict[int, AssetSnapshot] = {}
-    latest_prev: dict[int, AssetSnapshot] = {}
-
-    def keep_latest(bucket: dict[int, AssetSnapshot], snap: AssetSnapshot, idx: int):
-        current = bucket.get(snap.asset_id)
-        if current is None or month_index(current.year, current.month) < idx:
-            bucket[snap.asset_id] = snap
-
-    for snap in snapshots:
-        idx = month_index(snap.year, snap.month)
-        if idx <= target:
-            keep_latest(latest, snap, idx)
-        if idx <= prev_target:
-            keep_latest(latest_prev, snap, idx)
-
-    assets = session.exec(consulta(Asset, dono).order_by(Asset.asset_class, Asset.name)).all()
-
-    items: list[AssetSummaryItem] = []
-    by_class = {classe.value: AssetClassTotal() for classe in AssetClass}
-    total_assets = total_liabilities = 0.0
-    prev_assets = prev_liabilities = 0.0
-    stale_count = 0
-    stale_assets = stale_liabilities = 0.0
-
-    def vencido(s: AssetSnapshot | None, alvo: tuple[int, int]) -> bool:
-        return s is not None and planejamento.saldo_desatualizado((s.year, s.month), alvo, agora)
-
-    for asset in assets:
-        snap = latest.get(asset.id)
-        prev_snap = latest_prev.get(asset.id)
-        value = snap.value if snap else 0.0
-        previous = prev_snap.value if prev_snap else 0.0
-        liability = is_liability(asset.asset_class)
-        stale = vencido(snap, (year, month))
-        # O mês anterior segue a mesma regra: olhando novembro, um saldo de
-        # setembro também não vale em outubro.
-        prev_conta = not vencido(prev_snap, previous_month(year, month))
-
-        # O rendimento esperado parte do saldo do mês ANTERIOR: é sobre ele que
-        # os juros do mês incidiram. Usar o saldo atual contaria juros sobre o
-        # aporte que acabou de entrar, inflando o resultado.
-        esperado = None
-        if asset.cdi_percent and dono.cdi_annual and previous > 0:
-            esperado = rendimento_do_mes(
-                previous, dono.cdi_annual, asset.cdi_percent, year, month
-            )
-
-        items.append(
-            AssetSummaryItem(
-                asset_id=asset.id,
-                name=asset.name,
-                asset_class=asset.asset_class,
-                liability=liability,
-                note=asset.note,
-                cdi_percent=asset.cdi_percent,
-                expected_yield=esperado,
-                # Só conta como "deste mês" se o snapshot for do período pedido;
-                # valor herdado de mês anterior não tem id pra editar aqui.
-                snapshot_id=(
-                    snap.id if snap and month_index(snap.year, snap.month) == target else None
-                ),
-                value=value,
-                previous=previous,
-                change=value - previous,
-                as_of=f"{snap.year}-{snap.month:02d}" if snap else None,
-                reconciliation_note=(
-                    snap.reconciliation_note
-                    if snap and month_index(snap.year, snap.month) == target
-                    else None
-                ),
-                stale=stale,
-            )
-        )
-
-        total = by_class[AssetClass(asset.asset_class).value]
-        if stale:
-            stale_count += 1
-            if liability:
-                stale_liabilities += value
-            else:
-                stale_assets += value
-        else:
-            total.value += value
-            if liability:
-                total_liabilities += value
-            else:
-                total_assets += value
-        if prev_conta:
-            total.previous += previous
-            if liability:
-                prev_liabilities += previous
-            else:
-                prev_assets += previous
-
-    return AssetSummary(
-        year=year,
-        month=month,
-        items=items,
-        by_class=by_class,
-        assets=total_assets,
-        liabilities=total_liabilities,
-        net_worth=total_assets - total_liabilities,
-        previous_net_worth=prev_assets - prev_liabilities,
-        stale_count=stale_count,
-        stale_assets=stale_assets,
-        stale_liabilities=stale_liabilities,
-    )
+    """Patrimônio do mês: contas + ativos − dívidas (regra em app/dominio/patrimonio.py)."""
+    return patrimonio.resumo(session, dono, year, month)
 
 
 @router.put("/assets/snapshots")
@@ -1195,3 +1066,6 @@ app.include_router(router_relatorios)
 # (app/rotas_conferencia.py): mesmo arranjo, router próprio que exige token.
 app.include_router(router_planejamento)
 app.include_router(router_conferencia)
+
+# Contas, saldos observados e transferências (app/rotas_contas.py).
+app.include_router(router_contas)

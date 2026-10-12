@@ -30,6 +30,7 @@ from app import planejamento
 from app.auth import exigir_escrita, require_user
 from app.cartao import avancar_meses, limites_do_mes
 from app.database import get_session
+from app.dominio.contas import conta_valida
 from app.escopo import buscar, consulta, exigir
 from app.models import (
     Category,
@@ -429,6 +430,8 @@ def pagar_ocorrencia(
         finalidade=_finalidade(categoria, c.finalidade),
         commitment_id=c.id,
         commitment_no=numero,
+        account_id=conta_valida(session, dono, dados.account_id),
+        occurred_at=dados.occurred_at,
     )
     session.add(lancamento)
     try:

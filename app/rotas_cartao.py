@@ -32,6 +32,7 @@ from sqlmodel import Session, SQLModel, func, select
 from app.auth import exigir_escrita, require_user
 from app.cartao import avancar_meses, dividir_em_parcelas, competencia_da_parcela
 from app.database import get_session
+from app.dominio.contas import conta_valida
 from app.escopo import buscar, consulta, exigir
 from app.faturas import fatura_da_parcela, montar, totais
 from app.models import (
@@ -806,7 +807,9 @@ def pagar_fatura(
         )
 
     pagamento = InvoicePayment.model_validate(dados, update={
-        "user_id": dono.id, "invoice_id": invoice_id
+        "user_id": dono.id, "invoice_id": invoice_id,
+        # De qual conta saiu: é aqui, e não na compra, que o dinheiro sai.
+        "account_id": conta_valida(session, dono, dados.account_id),
     })
     session.add(pagamento)
     session.commit()

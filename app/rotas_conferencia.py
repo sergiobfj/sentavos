@@ -17,6 +17,7 @@ from sqlmodel import Session, SQLModel
 from app.auth import exigir_escrita, require_user
 from app.conferencia import Candidato, candidatos
 from app.database import get_session
+from app.dominio.contas import conta_valida
 from app.escopo import buscar, consulta, exigir
 from app.models import (
     Category,
@@ -263,6 +264,7 @@ def criar_lancamento(
             "description": _texto(dados.description, "A descrição"),
             "finalidade": finalidade,
             "payment_method": dados.payment_method or PaymentMethod.CASH,
+            "account_id": conta_valida(session, dono, dados.account_id),
         },
     )
     session.add(lancamento)

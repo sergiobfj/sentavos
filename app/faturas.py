@@ -38,6 +38,7 @@ from app.models import (
     Category,
     CategoryType,
     Commitment,
+    FinancialAccount,
     Invoice,
     InvoicePayment,
     InvoiceRead,
@@ -176,6 +177,13 @@ def enriquecer(
     """
     ids_de_compra = {t.purchase_id for t in lancamentos if t.purchase_id}
     ids_de_compromisso = {t.commitment_id for t in lancamentos if t.commitment_id}
+    ids_de_conta = {t.account_id for t in lancamentos if t.account_id}
+    nomes_de_conta = {
+        c.id: c.name
+        for c in session.exec(
+            consulta(FinancialAccount, dono).where(FinancialAccount.id.in_(ids_de_conta))
+        ).all()
+    } if ids_de_conta else {}
     compromissos = {
         c.id: c
         for c in session.exec(
@@ -188,6 +196,7 @@ def enriquecer(
         if c is not None:
             linha.commitment_description = c.description
             linha.commitment_installments = c.installments
+        linha.account_name = nomes_de_conta.get(t.account_id) if t.account_id else None
         return linha
 
     if not ids_de_compra:
