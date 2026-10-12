@@ -49,6 +49,7 @@ from sqlmodel import Session, SQLModel
 
 from app.cartao import avancar_meses, dia_do_mes, limites_do_mes
 from app.dominio import tempo
+from app.dominio.caixa import efeito_no_caixa
 from app.escopo import consulta
 from app.faturas import TOLERANCIA, totais
 from app.models import (
@@ -634,8 +635,9 @@ def aviso_do_saldo(
             # Pode ser transferência entre duas contas suas. Fica à parte.
             aviso.investimentos += valor
             movimentos.append(MovimentoDepois(date=t.date, description=t.description, amount=valor, tipo="investimento"))
-        elif t.payment_method != PaymentMethod.CREDIT:
-            # Compra no cartão não sai da conta agora; sai quando a fatura é paga.
+        elif efeito_no_caixa(tipo, t.payment_method, valor) != 0:
+            # A regra do caixa (dominio/caixa.py): compra no cartão não sai da
+            # conta agora; sai quando a fatura é paga.
             aviso.saidas += valor
             movimentos.append(MovimentoDepois(date=t.date, description=t.description, amount=valor, tipo="saida"))
 
