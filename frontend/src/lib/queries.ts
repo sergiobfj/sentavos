@@ -18,6 +18,7 @@ import {
   accountsApi,
   transfersApi,
   investmentsApi,
+  healthApi,
 } from "./api";
 import type { AccountCreate, AccountUpdate, InvestmentMovementCreate, TransferCreate } from "./tiposContas";
 import type {
@@ -65,12 +66,15 @@ const keys = {
   accounts: ["accounts"] as const,
   transfers: ["transfers"] as const,
   investments: ["investments"] as const,
+  // A saúde do mês lê tudo: qualquer mudança financeira a deixa velha.
+  health: ["health"] as const,
 };
 
 // O planejamento lê tudo: lançamento previsto, fatura, saldo, compromisso,
 // reserva. E a conferência sugere correspondências entre lançamentos. Mexer em
 // qualquer um desses deixa os três velhos.
 function invalidatePlanning(qc: QueryClient) {
+  qc.invalidateQueries({ queryKey: keys.health });
   qc.invalidateQueries({ queryKey: keys.planning });
   qc.invalidateQueries({ queryKey: keys.commitments });
   qc.invalidateQueries({ queryKey: keys.provisions });
@@ -85,6 +89,7 @@ function invalidatePlanning(qc: QueryClient) {
 // desconta pagamento de fatura. Esquecer um dos três deixaria a tela com dois
 // números do mesmo mês discordando — que é o defeito mais caro de depurar aqui.
 function invalidateMovement(qc: QueryClient) {
+  qc.invalidateQueries({ queryKey: keys.health });
   qc.invalidateQueries({ queryKey: keys.investments });
   qc.invalidateQueries({ queryKey: keys.transfers });
   qc.invalidateQueries({ queryKey: keys.transactions });
@@ -750,3 +755,11 @@ export function useInvestmentMovements() {
 export const useCreateMovement = () =>
   useMutacaoDeConta((data: InvestmentMovementCreate) => investmentsApi.createMovement(data));
 export const useRemoveMovement = () => useMutacaoDeConta((id: number) => investmentsApi.removeMovement(id));
+
+// ---------- Conferir mês ----------
+
+export function useMonthHealth(period?: Period) {
+  const { period: atual } = usePeriod();
+  const p = period ?? atual;
+  return useQuery({ queryKey: [...keys.health, toYm(p)], queryFn: () => healthApi.month(p) });
+}

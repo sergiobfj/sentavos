@@ -1,5 +1,6 @@
 import { EVENTO_SESSAO_EXPIRADA } from "./auth";
 import { carregarSessao, limparSessao } from "./session";
+import type { SaudeDoMes } from "./tiposPlanejamento";
 import type {
   AccountCreate,
   AccountMovement,
@@ -479,4 +480,9 @@ export const investmentsApi = {
   createMovement: (data: InvestmentMovementCreate) =>
     request<InvestmentMovement>("/investments/movements", { method: "POST", body: JSON.stringify(data) }),
   removeMovement: (id: number) => request<{ message: string }>(`/investments/movements/${id}`, { method: "DELETE" }),
+};
+
+export const healthApi = {
+  month: ({ year, month }: Period) =>
+    request<SaudeDoMes>(`/months/${year}-${String(month).padStart(2, "0")}/health`),
 };

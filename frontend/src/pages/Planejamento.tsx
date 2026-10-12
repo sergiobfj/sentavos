@@ -12,7 +12,7 @@ import {
   useComparacao,
   usePlanningHorizon,
   usePlanningMonth,
-  useReconciliation,
+  useMonthHealth,
   useScenarios,
 } from "../lib/queries";
 import { currentPeriod, usePeriod, type Period } from "../lib/period";
@@ -254,14 +254,13 @@ function ProximosMeses() {
 }
 
 function Mais({ period }: { period: Period }) {
-  const { data } = useReconciliation(period);
-  const abertos = data ? data.counts.pendente + data.counts.confirmar : 0;
+  const { data } = useMonthHealth(period);
+  const pendencias = data ? data.issues.length : 0;
   return (
     <ul className="lista-compacta plano-mais">
-      {abertos > 0 && (
-        <Linha rotulo={`Organizar ${nomeDoMes(period.year, period.month)}`}
-          legenda={`${abertos} ${abertos === 1 ? "item" : "itens"} pra revisar`} to="/organizar" />
-      )}
+      <Linha rotulo={`Conferir ${nomeDoMes(period.year, period.month)}`}
+        legenda={!data ? undefined : pendencias === 0 ? "conciliado" : `${pendencias} ${pendencias === 1 ? "pendência" : "pendências"}`}
+        tom={data?.state === "precisa_revisar" ? "neg" : undefined} to="/organizar" />
       <Linha rotulo="Compromissos e reservas" legenda="financiamentos, contas recorrentes, dinheiro separado"
         to="/planejamento/compromissos" />
     </ul>

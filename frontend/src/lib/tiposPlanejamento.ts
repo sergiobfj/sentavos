@@ -365,3 +365,35 @@ export interface ReconciliationItemCreate {
   kind?: ReconciliationKind;
   question?: string | null;
 }
+
+// ---------- Conferir mês (app/dominio/saude.py) ----------
+// Derivado no servidor: nada é gravado. Pendências agrupadas por tipo.
+
+export type EstadoDoMes = "conciliado" | "parcial" | "precisa_revisar";
+
+export interface Pendencia {
+  code: string;
+  severity: "revisar" | "aviso";
+  title: string;
+  detail: string | null;
+  count: number;
+  amount: number | null;
+  where: string | null;
+  items: { label: string; date: string | null; amount: number | null; ref: number | null }[];
+}
+
+export interface SaudeDoMes {
+  year: number;
+  month: number;
+  state: EstadoDoMes;
+  issues: Pendencia[];
+  to_review: number;
+  warnings: number;
+  trustworthy_balance: boolean;
+}
+
+export const ESTADO_DO_MES_LABEL: Record<EstadoDoMes, string> = {
+  conciliado: "conciliado",
+  parcial: "parcial",
+  precisa_revisar: "precisa revisar",
+};

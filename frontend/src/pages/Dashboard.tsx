@@ -5,7 +5,7 @@ import { LinhaLancamento } from "../components/TransactionList";
 import Segmentado from "../components/Segmentado";
 import { Evolucao, Rosca, type Fatia, type PontoEvolucao } from "../components/Graficos";
 import {
-  useAssetSummary,
+  useMonthHealth,
   useBudgetSummary,
   useCards,
   useCategories,
@@ -20,7 +20,7 @@ import { ApiError } from "../lib/api";
 import { formatDiaMes, formatMoney } from "../lib/format";
 import { FRASE_FILTRO, OPCOES_FILTRO, useFiltroFinalidade } from "../lib/finalidade";
 import { COR_OUTRAS } from "../lib/paleta";
-import { INVESTMENT_CLASSES, type CardInvoices, type Category, type Invoice, type Transaction } from "../lib/types";
+import type { CardInvoices, Category, Invoice, Transaction } from "../lib/types";
 
 /* O Início é relatório, não painel. A ordem responde as perguntas na ordem em
    que elas são feitas ao abrir o app:
@@ -51,7 +51,7 @@ export default function Dashboard() {
   const { data: transactions, isLoading, error } = useTransactions();
   const { data: categories } = useCategories(true);
   const { data: resumo } = useBudgetSummary();
-  const { data: ativos } = useAssetSummary();
+  const { data: saudeDoMes } = useMonthHealth();
   const { data: faturas } = useInvoicesSummary();
   const { data: cards } = useCards();
   const distribuicao = useCategoryReport(filtro);
@@ -131,9 +131,11 @@ export default function Dashboard() {
   // Investimento com saldo lançado por conferência neste mês: houve um resgate
   // (ou movimento) sem valor conciliado, e o saldo do mês não o enxerga. Sem a
   // frase, gasto pago com dinheiro da caixinha parece rombo na conta.
-  const semConciliar = (ativos?.items ?? []).filter(
-    (i) => i.reconciliation_note && INVESTMENT_CLASSES.includes(i.asset_class)
-  );
+  // A saúde do mês (servidor) diz se o saldo do mês é resultado ou só
+  // aproximação: com resgate sem valor conciliado, o gasto pago com o dinheiro
+  // resgatado aparece e o resgate não.
+  const resgateSemValor = (saudeDoMes?.issues ?? []).filter((i) => i.code === "UNMATCHED_REDEMPTION");
+  const semConciliar = saudeDoMes && !saudeDoMes.trustworthy_balance ? resgateSemValor : [];
 
   // Cartão ainda sem finalidade: as compras dele ficam fora de Pessoal/Família/
   // Empresa até alguém dizer pra que ele serve. A tela avisa uma vez, baixo.
@@ -181,7 +183,7 @@ export default function Dashboard() {
         {semConciliar.length > 0 && (
           <div className="nota">
             Falta conciliar{" "}
-            {semConciliar.map((i) => `${i.name}: ${i.reconciliation_note}`).join(" ")} Até lá, este
+            {semConciliar.map((i) => `${i.title.replace("Resgate sem valor conciliado — ", "")}: ${i.detail ?? ""}`).join(" ")} Até lá, este
             número não é o resultado de {nomeDoMes}.
           </div>
         )}
@@ -191,6 +193,18 @@ export default function Dashboard() {
           aparece olhando o saldo do mês, então a resposta mora logo abaixo dele.
           Só no mês corrente — o planejamento olha de hoje pra frente. */}
       {isCurrent && <LinhaDoPlanejamento />}
+
+      {/* O mês ainda não é confiável: uma linha, não um painel. */}
+      {saudeDoMes && saudeDoMes.state !== "conciliado" && (
+        <Link className="aviso-acao" to="/organizar">
+          <div>
+            <b>{nomeDoMes.charAt(0).toUpperCase() + nomeDoMes.slice(1)}</b>{" "}
+            {saudeDoMes.state === "parcial" ? "conciliado em parte" : "ainda não está conciliado"} ·{" "}
+            {saudeDoMes.issues.length} {saudeDoMes.issues.length === 1 ? "pendência" : "pendências"}
+          </div>
+          <span aria-hidden>›</span>
+        </Link>
+      )}
 
       {(caixa?.sem_forma_definida_qtd ?? 0) > 0 && (
         <Link className="aviso-acao" to="/rever">
