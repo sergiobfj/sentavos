@@ -331,7 +331,7 @@ def casar_entradas(session: Session, dono: User, estado: EstadoCompromissos) -> 
 def status_da_ocorrencia(
     c: Commitment, numero: int, venc: dt.date, estado: EstadoCompromissos, agora: dt.date
 ) -> OccurrenceStatus:
-    """Paga → dispensada → cancelada → vencida → pendente.
+    """Paga → abatida/dispensada → cancelada → vencida → pendente.
 
     Paga vence tudo: se o dinheiro saiu, saiu, mesmo que depois alguém tenha
     cancelado o contrato. Vencida é só "passou o dia e não houve baixa" — nunca
@@ -339,8 +339,9 @@ def status_da_ocorrencia(
     """
     if (c.id, numero) in estado.pagos:
         return OccurrenceStatus.PAGA
-    if (c.id, numero) in estado.dispensas:
-        return OccurrenceStatus.DISPENSADA
+    dispensa = estado.dispensas.get((c.id, numero))
+    if dispensa is not None:
+        return OccurrenceStatus.ABATIDA if dispensa.abated_on else OccurrenceStatus.DISPENSADA
     if c.cancelled_on is not None and venc >= c.cancelled_on:
         return OccurrenceStatus.CANCELADA
     if (c.id, numero) in estado.recebidos:
@@ -388,6 +389,7 @@ def ler_compromisso(
                 paid_date=tx.date if tx else (previsto.date if previsto else None),
                 provisioned=round(estado.reservado(c.id, numero), 2) if st in EM_ABERTO else 0.0,
                 skip_note=dispensa.note if dispensa else None,
+                abated_on=dispensa.abated_on if dispensa else None,
                 matched=(c.id, numero) in estado.recebidos or previsto is not None,
             )
         )
@@ -418,6 +420,7 @@ def ler_compromisso(
         status=status,
         paid_count=sum(1 for o in lista if o.status == OccurrenceStatus.PAGA),
         skipped_count=sum(1 for o in lista if o.status == OccurrenceStatus.DISPENSADA),
+        abated_count=sum(1 for o in lista if o.status == OccurrenceStatus.ABATIDA),
         overdue_count=len(vencidas),
         overdue_amount=round(sum(o.amount for o in vencidas), 2),
         total_count=c.installments,
@@ -888,7 +891,7 @@ def planejar(
         for numero, venc in ocorrencias_ate(c, ultimo_dia):
             st = status_da_ocorrencia(c, numero, venc, estado, agora)
             # "Prevista": o lançamento previsto já entra abaixo, como avulso.
-            if st in (OccurrenceStatus.DISPENSADA, OccurrenceStatus.CANCELADA, OccurrenceStatus.PREVISTA):
+            if st in (OccurrenceStatus.DISPENSADA, OccurrenceStatus.ABATIDA, OccurrenceStatus.CANCELADA, OccurrenceStatus.PREVISTA):
                 continue
             if st == OccurrenceStatus.PAGA:
                 if indice(mes_de(venc)) < indice(m0):

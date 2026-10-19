@@ -34,6 +34,7 @@ from app.dominio import natureza, classificacao
 from app.dominio.contas import conta_valida
 from app.escopo import buscar, consulta, exigir
 from app.models import (
+    AbaterOcorrencia,
     Category,
     CategoryType,
     Commitment,
@@ -389,10 +390,10 @@ def _exigir_em_aberto(session: Session, dono: User, c: Commitment, numero: int) 
                 f"{tx.date.strftime('%d/%m/%Y')}. Quando receber, lance o valor recebido nele."
             ),
         )
-    if st == OccurrenceStatus.DISPENSADA:
+    if st in (OccurrenceStatus.DISPENSADA, OccurrenceStatus.ABATIDA):
         raise HTTPException(
             status_code=409,
-            detail=f"{c.description} {rot} está dispensada. Desfaça a dispensa antes.",
+            detail=f"{c.description} {rot} já foi encerrada sem pagamento. Confira o histórico antes.",
         )
     if st == OccurrenceStatus.CANCELADA:
         raise HTTPException(
@@ -552,6 +553,8 @@ def dispensar_ocorrencia(
     estado = planejamento.carregar_estado(session, dono, [c.id])
     if estado.baixa(c.id, numero) is not None:
         raise HTTPException(status_code=409, detail="Esta ocorrência já foi paga; não há o que dispensar.")
+    if (c.id, numero) in estado.dispensas and estado.dispensas[(c.id, numero)].abated_on:
+        raise HTTPException(status_code=409, detail="Esta ocorrência foi abatida pelo credor; não é uma dispensa comum.")
     if (c.id, numero) not in estado.dispensas:
         session.add(
             CommitmentSkip(
@@ -577,8 +580,43 @@ def desfazer_dispensa(
             CommitmentSkip.commitment_id == c.id, CommitmentSkip.number == numero
         )
     ).all():
+        if d.abated_on is not None:
+            raise HTTPException(status_code=409, detail="Abatimento contratual não é uma dispensa comum.")
         session.delete(d)
     session.commit()
+    return _ler(session, dono, c, detalhado=True)
+
+
+@router_planejamento.post("/commitments/{commitment_id}/ocorrencias/{numero}/abater")
+def abater_ocorrencia(
+    commitment_id: int,
+    numero: int,
+    dados: AbaterOcorrencia,
+    session: Session = Depends(get_session),
+    dono: User = Depends(require_user),
+):
+    """Registra crédito/abatimento do credor, sem saída de caixa nem lançamento."""
+    exigir_escrita(dono)
+    c = exigir(session, Commitment, commitment_id, dono, "Compromisso")
+    categoria = _categoria_do_compromisso(session, dono, c.category_id)
+    if CategoryType(categoria.type) != CategoryType.EXPENSE:
+        raise HTTPException(status_code=400, detail="Só uma obrigação pode ser abatida.")
+    _ocorrencia(c, numero)
+    if dados.date > planejamento.hoje():
+        raise HTTPException(status_code=400, detail="A data do abatimento não pode ser futura.")
+    nota = _texto(dados.note, "A origem do abatimento", 200)
+    estado = planejamento.carregar_estado(session, dono, [c.id])
+    if estado.baixa(c.id, numero) is not None or (c.id, numero) in estado.dispensas:
+        raise HTTPException(status_code=409, detail="A ocorrência já foi paga, dispensada ou abatida.")
+    session.add(CommitmentSkip(
+        user_id=dono.id, commitment_id=c.id, number=numero,
+        note=nota, abated_on=dados.date,
+    ))
+    try:
+        session.commit()
+    except IntegrityError:
+        session.rollback()
+        raise HTTPException(status_code=409, detail="Esta ocorrência acabou de receber uma decisão.")
     return _ler(session, dono, c, detalhado=True)
 
 
