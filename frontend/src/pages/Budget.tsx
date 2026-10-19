@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Link, useSearchParams } from "react-router-dom";
+import { Link, Navigate, useSearchParams } from "react-router-dom";
 import MoneyCell from "../components/MoneyCell";
 import TransactionForm from "../components/TransactionForm";
 import TransactionList from "../components/TransactionList";
@@ -32,11 +32,16 @@ type Tab = "metas" | "lancamentos" | "faturas";
 // lançamentos porque é a mesma pergunta — o que aconteceu com meu dinheiro.
 const ABAS: { id: Tab; rotulo: string }[] = [
   { id: "metas", rotulo: "Orçamento" },
-  { id: "lancamentos", rotulo: "Lançamentos" },
   { id: "faturas", rotulo: "Faturas" },
 ];
 
 export default function Budget() {
+  const [params] = useSearchParams();
+  if (params.get("aba") === "lancamentos") return <Navigate to={`/lancamentos${params.get("novo") === "1" ? "?novo=1" : ""}`} replace />;
+  return <BudgetLegacy />;
+}
+
+function BudgetLegacy() {
   // A sub-aba vive na URL pra sobreviver ao F5 e poder ser linkada de fora.
   const [params, setParams] = useSearchParams();
   const aba = params.get("aba");

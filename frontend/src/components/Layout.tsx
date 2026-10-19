@@ -1,30 +1,26 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import MonthSheet from "./MonthSheet";
+import QuickTransaction, { SAVED_EVENT } from "./essencial/QuickTransaction";
+import { useCategories } from "../lib/queries";
 import { usePeriod } from "../lib/period";
 import { useAuth } from "../lib/auth";
 import logo from "../assets/logo.png";
 
-// Cinco abas. Planejar entrou como destino principal: "quanto ainda posso
-// usar este mês" é pergunta de todo dia, e escondida atrás de um link do
-// Início ela não era achada. Configurações continua fora da barra, no ⚙️ do
-// topo — é a tela que se abre uma vez por mês.
-// A ordem segue o uso: Início todo dia, Lançamentos quase todo dia, Planejar
-// junto do que se lança, Investir de vez em quando, Patrimônio uma vez por mês.
-// `curto` é o rótulo da pílula do celular; a barra lateral usa o nome inteiro.
 const ABAS = [
-  { to: "/", label: "Início", end: true, icon: IconCasa },
-  { to: "/orcamento", label: "Lançamentos", icon: IconLista },
-  // Organizar (a conferência do mês) é parte do planejamento: a aba fica acesa.
-  { to: "/planejamento", label: "Planejamento", curto: "Planejar", icon: IconCalendario, tambem: "/organizar" },
-  { to: "/investimentos", label: "Investir", icon: IconGrafico },
-  { to: "/patrimonio", label: "Patrimônio", icon: IconCarteira },
+  { to: "/", label: "Meu mês", end: true, icon: IconCasa },
+  { to: "/lancamentos", label: "Lançamentos", icon: IconLista },
+  { to: "/relatorios", label: "Relatórios", icon: IconGrafico },
+  { to: "/investimentos", label: "Investir", icon: IconCarteira },
 ];
 
 export default function Layout() {
-  const { label, isCurrent } = usePeriod();
+  const { label, isCurrent, shift } = usePeriod();
   const { sessao, sair } = useAuth();
+  const categories = useCategories(true);
   const [escolhendoMes, setEscolhendoMes] = useState(false);
+  const [creating, setCreating] = useState(false);
+  const [saved, setSaved] = useState(false);
   const navigate = useNavigate();
   const { pathname, search } = useLocation();
 
@@ -39,12 +35,22 @@ export default function Layout() {
   // cobria justamente o rodapé de total/pago/restante — visto na tela, não
   // deduzido.
   const emFaturas = new URLSearchParams(search).get("aba") === "faturas";
-  const ativa = (isActive: boolean, tambem?: string) =>
-    isActive || (tambem != null && pathname.startsWith(tambem)) ? "active" : "";
+  const ativa = (isActive: boolean) => isActive ? "active" : "";
   const mostrarFab =
     !sessao?.somenteLeitura &&
-    !emFaturas &&
-    (pathname === "/" || pathname.startsWith("/orcamento"));
+    !emFaturas && ["/","/lancamentos"].includes(pathname);
+  useEffect(() => {
+    if (new URLSearchParams(search).get("novo") === "1") setCreating(true);
+  }, [search]);
+  useEffect(() => {
+    const onSaved = () => { setSaved(true); window.setTimeout(() => setSaved(false), 2800); };
+    window.addEventListener(SAVED_EVENT,onSaved);
+    return () => window.removeEventListener(SAVED_EVENT,onSaved);
+  }, []);
+  function closeCreating() {
+    setCreating(false);
+    if (new URLSearchParams(search).has("novo")) navigate(`${pathname}${search.replace(/([?&])novo=1&?/,"$1").replace(/[?&]$/,"")}`,{replace:true});
+  }
 
   return (
     <div className="app">
@@ -55,11 +61,15 @@ export default function Layout() {
           <span className="name"><b>s</b>entavos</span>
         </div>
         <nav className="nav">
-          {ABAS.map(({ to, label, end, tambem, icon: Icon }) => (
-            <NavLink key={to} to={to} end={end} className={({ isActive }) => ativa(isActive, tambem)}>
+          {ABAS.map(({ to, label, end, icon: Icon }) => (
+            <NavLink key={to} to={to} end={end} className={({ isActive }) => ativa(isActive)}>
               <Icon /> {label}
             </NavLink>
           ))}
+          <div className="e-nav-divider" />
+          <NavLink to="/planejamento">Planejamento detalhado</NavLink>
+          <NavLink to="/orcamento?aba=faturas">Cartões e faturas</NavLink>
+          <NavLink to="/patrimonio">Patrimônio</NavLink>
           <NavLink to="/configuracoes"><IconEngrenagem /> Configurações</NavLink>
         </nav>
         <div className="foot">
@@ -74,16 +84,18 @@ export default function Layout() {
 
           {/* O mês é o título e o controle ao mesmo tempo. Separar os dois
               gastaria uma linha de tela pra dizer duas vezes a mesma coisa. */}
+          <button className="e-month-arrow" onClick={() => shift(-1)} aria-label="Mês anterior">‹</button>
           <button
             className="month-btn"
             onClick={() => setEscolhendoMes(true)}
             aria-expanded={escolhendoMes}
             aria-label={`Mês: ${label}. Tocar para trocar.`}
           >
-            <span style={{ textTransform: "capitalize" }}>{label}</span>
+            <span>{label.charAt(0).toUpperCase() + label.slice(1)}</span>
             <span className="chev" aria-hidden>▼</span>
             {isCurrent && <span className="hoje">hoje</span>}
           </button>
+          <button className="e-month-arrow" onClick={() => shift(1)} aria-label="Próximo mês">›</button>
 
           <button
             className="icon-btn"
@@ -108,7 +120,7 @@ export default function Layout() {
       {mostrarFab && (
         <button
           className="fab"
-          onClick={() => navigate("/orcamento?aba=lancamentos&novo=1")}
+          onClick={() => setCreating(true)}
           aria-label="Novo lançamento"
         >
           <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeLinecap="round">
@@ -118,15 +130,17 @@ export default function Layout() {
       )}
 
       <nav className="tabbar" aria-label="Navegação principal">
-        {ABAS.map(({ to, label, curto, end, tambem, icon: Icon }) => (
-          <NavLink key={to} to={to} end={end} aria-label={label} className={({ isActive }) => ativa(isActive, tambem)}>
+        {ABAS.map(({ to, label, end, icon: Icon }) => (
+          <NavLink key={to} to={to} end={end} aria-label={label} className={({ isActive }) => ativa(isActive)}>
             <Icon />
-            <span>{curto ?? label}</span>
+            <span>{label}</span>
           </NavLink>
         ))}
       </nav>
 
       {escolhendoMes && <MonthSheet onFechar={() => setEscolhendoMes(false)} />}
+      {creating && <QuickTransaction categories={categories.data ?? []} onClose={closeCreating}/>}
+      {saved && <div className="e-toast" role="status">Lançamento salvo</div>}
     </div>
   );
 }
@@ -167,14 +181,6 @@ function IconGrafico() {
     <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
       <path d="M3 17.5 9 11l4 4 8-8.5" />
       <path d="M15 6.5h6v6" />
-    </svg>
-  );
-}
-function IconCalendario() {
-  return (
-    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
-      <rect x="3.5" y="5" width="17" height="15.5" rx="2.5" />
-      <path d="M3.5 10h17M8 3v4M16 3v4" />
     </svg>
   );
 }

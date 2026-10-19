@@ -39,6 +39,7 @@ export default function PurchaseForm({
     category_id: 0,
     note: "",
     finalidade: null as Finalidade | null,
+    expense_class: null as "fixed" | "variable" | null,
   });
 
   // O formulário só pode nascer depois que a compra chega. Sem isto, os campos
@@ -50,6 +51,7 @@ export default function PurchaseForm({
         category_id: compra.category_id,
         note: compra.note ?? "",
         finalidade: compra.finalidade,
+        expense_class: compra.expense_class ?? null,
       });
     }
   }, [compra]);
@@ -104,6 +106,7 @@ export default function PurchaseForm({
                 note: form.note.trim() || null,
                 // Todas as parcelas recebem a mesma — o servidor reescreve as N.
                 ...(form.finalidade ? { finalidade: form.finalidade } : {}),
+                expense_class: form.expense_class,
               },
             },
             { onSuccess: onClose }
@@ -190,6 +193,8 @@ export default function PurchaseForm({
             <div className="hint">Vale para as {compra.installments} parcelas.</div>
           )}
         </div>
+
+        <div className="field"><label htmlFor="c-classe">Despesa</label><select id="c-classe" value={form.expense_class ?? ""} onChange={e=>setForm({...form,expense_class:e.target.value ? e.target.value as "fixed"|"variable" : null})}><option value="">A confirmar</option><option value="fixed">Fixa</option><option value="variable">Variável</option></select><div className="hint">Vale para todas as parcelas.</div></div>
 
         <div className="field">
           <label htmlFor="c-note">Observação</label>
