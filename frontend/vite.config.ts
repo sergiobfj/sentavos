@@ -2,7 +2,7 @@ import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 
 // https://vite.dev/config/
-export default defineConfig(({ mode }) => ({
+export default defineConfig({
   plugins: [react()],
   server: {
     port: 5173,
@@ -11,12 +11,9 @@ export default defineConfig(({ mode }) => ({
         "**/dist-essencial/**",
         "**/test-results-essencial/**",
         "**/playwright-report-essencial/**",
+        "**/test-results-integrated/**",
+        "**/playwright-report-integrated/**",
       ],
     },
   },
-  // A demonstração só entra no artefato específico de revisão.
-  // O build normal continua publicando exclusivamente a aplicação atual.
-  ...(mode === "essencial"
-    ? { build: { rollupOptions: { input: "essencial.html" } } }
-    : {}),
-}));
+});

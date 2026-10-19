@@ -8,8 +8,8 @@
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
     "lint": "tsc --noEmit",
-    "build:essencial": "tsc --noEmit && vite build --mode essencial --outDir dist-essencial",
-    "test:essencial": "playwright test --config playwright.essencial.config.ts"
+    "test:essencial": "playwright test --config playwright.essencial.config.ts",
+    "test:integrated": "playwright test --config playwright.integrated.config.ts"
   },
   "dependencies": {
     "@tanstack/react-query": "^5.62.0",

@@ -9,7 +9,7 @@ import {
   createQuickEntries,
   parseAmount,
   type QuickInput,
-} from "../../src/essencial/model";
+} from "./prototypeModel";
 
 const input: QuickInput = {
   amount: 2500,

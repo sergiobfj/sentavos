@@ -20,11 +20,4 @@ export default defineConfig({
     viewport: { width: 400, height: 860 },
     trace: "retain-on-failure",
   },
-  webServer: {
-    command:
-      "node node_modules/vite/bin/vite.js --host 127.0.0.1 --port 5178 --strictPort",
-    url: "http://127.0.0.1:5178/essencial.html",
-    reuseExistingServer: !process.env.CI,
-    timeout: 30000,
-  },
 });
