@@ -110,6 +110,7 @@ function Lancamento({
   // Natureza: nula = a da categoria (quase sempre consumo). Fica recolhida
   // numa linha; abre quando alguém quer dizer "isto foi a entrada da moto".
   const [natureza, setNatureza] = useState<Natureza | null>(isEdit ? transaction!.nature ?? null : null);
+  const [classeDespesa, setClasseDespesa] = useState<"fixed" | "variable" | null>(isEdit ? transaction!.expense_class ?? null : "variable");
   const [mudandoNatureza, setMudandoNatureza] = useState(false);
   // A conta: editando, a do lançamento; novo, a última usada (o caso comum é
   // pagar sempre da mesma). Compra no cartão não tem conta — sai na fatura.
@@ -194,6 +195,7 @@ function Lancamento({
           note: form.note.trim() || null,
           // Nula = a do cartão, decidido no servidor.
           finalidade,
+          expense_class: classeDespesa,
         },
         { onSuccess: () => irParaOMesSalvo(form.date) }
       );
@@ -213,6 +215,7 @@ function Lancamento({
       // Só despesa tem finalidade; o servidor também garante isso.
       finalidade: tipo === "expense" ? finalidade : null,
       nature: tipo === "expense" ? natureza : null,
+      expense_class: tipo === "expense" ? classeDespesa : null,
       account_id: noCartao ? null : contaId,
       // Lançamento de hoje leva o instante: fica claro se veio antes ou depois
       // de um saldo lido no mesmo dia. Editando, o instante original fica.
@@ -354,6 +357,8 @@ function Lancamento({
             )}
           </div>
         )}
+
+        {tipo === "expense" && <div className="field"><label htmlFor="t-classe">Despesa</label><select id="t-classe" value={classeDespesa ?? ""} onChange={e=>setClasseDespesa(e.target.value ? e.target.value as "fixed"|"variable" : null)}><option value="">A confirmar</option><option value="fixed">Fixa</option><option value="variable">Variável</option></select><div className="hint">Pode ser diferente de outras despesas da mesma categoria.</div></div>}
 
         {/* ---------- Conta ----------
             Depois da forma, porque é ela que decide se há conta: no cartão o

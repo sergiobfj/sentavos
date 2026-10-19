@@ -6,5 +6,14 @@ export default defineConfig({
   plugins: [react()],
   server: {
     port: 5173,
+    watch: {
+      ignored: [
+        "**/dist-essencial/**",
+        "**/test-results-essencial/**",
+        "**/playwright-report-essencial/**",
+        "**/test-results-integrated/**",
+        "**/playwright-report-integrated/**",
+      ],
+    },
   },
 });

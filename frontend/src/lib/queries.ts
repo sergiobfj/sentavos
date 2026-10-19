@@ -743,8 +743,10 @@ export const useDeleteTransfer = () => useMutacaoDeConta((id: number) => transfe
 
 // ---------- Investimento ----------
 
-export function useInvestmentSummary() {
-  const { period, ym } = usePeriod();
+export function useInvestmentSummary(override?: Period) {
+  const selected = usePeriod();
+  const period = override ?? selected.period;
+  const ym = toYm(period);
   return useQuery({ queryKey: [...keys.investments, "resumo", ym], queryFn: () => investmentsApi.summary(period) });
 }
 

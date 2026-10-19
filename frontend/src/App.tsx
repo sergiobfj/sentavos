@@ -1,6 +1,8 @@
 import { Navigate, Route, Routes } from "react-router-dom";
 import Layout from "./components/Layout";
-import Dashboard from "./pages/Dashboard";
+import MeuMes from "./pages/MeuMes";
+import Lancamentos from "./pages/Lancamentos";
+import Relatorios from "./pages/Relatorios";
 import Budget from "./pages/Budget";
 import Investments from "./pages/Investments";
 import Assets from "./pages/Assets";
@@ -51,7 +53,9 @@ export default function App() {
   return (
     <Routes>
       <Route element={<Layout />}>
-        <Route path="/" element={<Dashboard />} />
+        <Route path="/" element={<MeuMes />} />
+        <Route path="/lancamentos" element={<Lancamentos />} />
+        <Route path="/relatorios" element={<Relatorios />} />
         <Route path="/orcamento" element={<Budget />} />
         <Route path="/investimentos" element={<Investments />} />
         <Route path="/patrimonio" element={<Assets />} />
@@ -69,8 +73,9 @@ export default function App() {
         <Route path="/contas" element={<Contas />} />
         {/* Rotas antigas: Transações virou sub-aba de Orçamento e Categorias
             entrou em Configurações. Redirecionar evita quebrar link salvo. */}
-        <Route path="/transacoes" element={<Navigate to="/orcamento?aba=lancamentos" replace />} />
-        <Route path="/categorias" element={<Navigate to="/configuracoes" replace />} />
+        <Route path="/transacoes" element={<Navigate to="/lancamentos" replace />} />
+        <Route path="/investir" element={<Navigate to="/investimentos" replace />} />
+        <Route path="/categorias" element={<Navigate to="/configuracoes?secao=categorias" replace />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Route>
     </Routes>

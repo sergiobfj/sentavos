@@ -38,3 +38,19 @@ src/
 - Variável: `VITE_API_URL` apontando pra API em produção, sem barra no final.
 
 Veja o README da raiz pro passo a passo completo.
+
+## Sentavos Essencial — protótipo local
+
+Com o Vite em execução, abra `/essencial.html#/`. Esta entrada independente não
+precisa do backend: usa somente dados fictícios e alterações em memória,
+restauradas ao recarregar. A data demonstrativa é 18/10/2026.
+
+- `npm run build:essencial`: compila a demonstração em `dist-essencial/`.
+- `npm run test:essencial`: executa 23 verificações de modelo, tarefas e layout
+  com Playwright (Edge instalado no Windows), incluindo 320, 360, 400, 768 e
+  1440px. Capturas ficam em `test-results-essencial/` e o relatório HTML em
+  `playwright-report-essencial/`.
+- O build normal continua gerando apenas a aplicação atual em `dist/`.
+
+Auditoria, proposta de navegação, limites do protótipo e plano de integração:
+[`docs/sentavos-essencial.md`](../docs/sentavos-essencial.md).

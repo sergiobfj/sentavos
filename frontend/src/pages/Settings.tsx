@@ -1,6 +1,6 @@
 import { Linha } from "../components/planejamento/comum";
 import { useEffect, useMemo, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { parseMoney } from "../lib/format";
 import Modal from "../components/Modal";
 import ConfirmDialog from "../components/ConfirmDialog";
@@ -52,31 +52,21 @@ const GRUPOS: { tipo: CategoryType; titulo: string }[] = [
 const OPCOES_TIPO = GRUPOS.map((g) => ({ valor: g.tipo, rotulo: CATEGORY_TYPE_LABEL[g.tipo] }));
 
 export default function Settings() {
+  const [params] = useSearchParams();
+  const section = params.get("secao");
   return (
-    <>
-      {/* Onde o dinheiro está: primeiro, porque é o que se atualiza com mais
-          frequência (o saldo de cada conta). */}
-      <ul className="lista-compacta" style={{ marginTop: "var(--s2)" }}>
-        <Linha rotulo="Contas e saldos" legenda="onde o dinheiro está, transferências" to="/contas" />
-      </ul>
-
-      <div className="sec-title">
-        <h2>Cartões</h2>
-      </div>
-      <Cartoes />
-
-      <Categorias />
-
-      <div className="sec-title">
-        <h2>Rendimento</h2>
-      </div>
-      <CdiCard />
-
-      <div className="sec-title">
-        <h2>Conta</h2>
-      </div>
+    <div className="e-settings">
+      <h1 className="pagina-titulo">Configurações</h1>
+      <div className="sec-title"><h2>Financeiro</h2></div>
+      <ul className="lista-compacta"><Linha rotulo="Contas e saldos" legenda="saldos observados e transferências" to="/contas"/><Linha rotulo="Compromissos e recorrências" legenda="parcelas, contas fixas e previsões" to="/planejamento/compromissos"/></ul>
+      <details open={section==="cartoes"} className="e-settings-detail"><summary>Cartões</summary><Cartoes/></details>
+      <details open={section==="categorias"} className="e-settings-detail"><summary>Categorias</summary><Categorias/></details>
+      <div className="sec-title"><h2>Dados</h2></div>
+      <ul className="lista-compacta"><Linha rotulo="Conferir mês" to="/organizar"/><Linha rotulo="Histórico e reconciliação" to="/rever"/><Linha rotulo="Simulações salvas" to="/planejamento/simulacoes"/><Linha rotulo="Patrimônio completo" to="/patrimonio"/></ul>
+      <details className="e-settings-detail"><summary>Rendimento e CDI</summary><CdiCard/></details>
+      <div className="sec-title"><h2>Conta</h2></div>
       <Conta />
-    </>
+    </div>
   );
 }
 

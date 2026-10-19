@@ -72,6 +72,7 @@ export default function CompromissoForm({
   const [finalidade, setFinalidade] = useState<Finalidade>((base.finalidade as Finalidade) ?? "pessoal");
   // Nula = a da categoria. Financiamento é financeiro: fica fora do custo de vida.
   const [natureza, setNatureza] = useState<Natureza | null>((base.nature as Natureza | null) ?? null);
+  const [classeDespesa, setClasseDespesa] = useState<"fixed" | "variable" | null>(base.expense_class ?? null);
   const [instituicao, setInstituicao] = useState(base.institution ?? "");
   const [total, setTotal] = useState(base.total_amount != null ? String(base.total_amount).replace(".", ",") : "");
   const [entrada, setEntrada] = useState(base.down_payment != null ? String(base.down_payment).replace(".", ",") : "");
@@ -110,6 +111,7 @@ export default function CompromissoForm({
       confirmed: confirmado === "sim",
       finalidade: tipo === "expense" ? finalidade : null,
       nature: tipo === "expense" ? natureza : null,
+      expense_class: tipo === "expense" ? classeDespesa : null,
       institution: instituicao.trim() || null,
       total_amount: parseMoney(total),
       down_payment: parseMoney(entrada),
@@ -272,6 +274,8 @@ export default function CompromissoForm({
             </div>
           );
         })()}
+
+        {tipo === "expense" && <div className="field"><label htmlFor="comp-classe">Despesa</label><select id="comp-classe" value={classeDespesa ?? ""} onChange={e=>setClasseDespesa(e.target.value ? e.target.value as "fixed"|"variable" : null)}><option value="">Fixa (padrão do compromisso)</option><option value="fixed">Fixa</option><option value="variable">Variável</option></select></div>}
 
         <details className="field">
           <summary style={{ cursor: "pointer", color: "var(--text-dim)", fontSize: "var(--fs-small)" }}>

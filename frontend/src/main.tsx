@@ -6,6 +6,7 @@ import App from "./App";
 import { AuthProvider } from "./lib/auth";
 import { PeriodProvider } from "./lib/period";
 import "./index.css";
+import "./essencial/product.css";
 
 const queryClient = new QueryClient({
   defaultOptions: {

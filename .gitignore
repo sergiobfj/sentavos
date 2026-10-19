@@ -29,3 +29,10 @@ backups/
 
 # Postgres de desenvolvimento (scripts/postgres_local.py)
 .local/
+
+# Artefato isolado do protótipo de revisão.
+frontend/dist-essencial/
+frontend/test-results-essencial/
+frontend/playwright-report-essencial/
+frontend/test-results-integrated/
+frontend/playwright-report-integrated/

@@ -4,21 +4,18 @@ import Modal from "../components/Modal";
 import TransactionForm from "../components/TransactionForm";
 import ContaPicker from "../components/ContaPicker";
 import { MarcaEditavel } from "../components/TransactionList";
-import { Rosca } from "../components/Graficos";
 import {
   useCategories,
   useCreateMovement,
   useInvestmentMovements,
   useInvestmentSummary,
-  usePerfil,
   useRemoveMovement,
   useTransactions,
 } from "../lib/queries";
 import { useAuth } from "../lib/auth";
-import { usePeriod } from "../lib/period";
+import { currentPeriod, formatPeriod, usePeriod } from "../lib/period";
 import { ApiError } from "../lib/api";
 import { formatDiaMes, formatMoney, formatYm, parseMoney, todayIso } from "../lib/format";
-import { PALETA_CATEGORIAS, fundoDaCor } from "../lib/paleta";
 import { ASSET_CLASS_LABEL, type Transaction } from "../lib/types";
 import {
   instanteSeHoje,
@@ -33,17 +30,11 @@ import {
 // total atualizado, variação, aportado, resgatado e o rendimento — com o motivo
 // quando ele não é apurável. A tela formata; não recalcula nada.
 
-/** A cor de cada aplicação segue o ATIVO, não a posição no ranking. */
-function corDoAtivo(itens: InvestmentAssetItem[], id: number): string {
-  const ids = itens.map((i) => i.asset_id).sort((a, b) => a - b);
-  return PALETA_CATEGORIAS[ids.indexOf(id) % PALETA_CATEGORIAS.length].cor;
-}
-
 export default function Investments() {
   const { label } = usePeriod();
-  const resumo = useInvestmentSummary();
+  const resumo = useInvestmentSummary(currentPeriod());
+  const fluxo = useInvestmentSummary();
   const movimentos = useInvestmentMovements();
-  const perfil = usePerfil();
   const transactions = useTransactions();
   const categories = useCategories();
   const { sessao } = useAuth();
@@ -70,8 +61,8 @@ export default function Investments() {
   if (resumo.error) return <div className="error-box">{(resumo.error as ApiError).message}</div>;
   const r = resumo.data!;
   const itens = r.items;
-  const comValor = itens.filter((i) => !i.stale && i.value > 0);
   const conciliacaoPendente = itens.some((i) => i.reconciliation_note);
+  const doMes = fluxo.data;
 
   if (itens.length === 0) {
     return (
@@ -80,8 +71,8 @@ export default function Investments() {
         <div className="tit">Nada investido ainda</div>
         <div>
           Esta aba lê os ativos de renda fixa, renda variável e cripto do Patrimônio.
-          {r.contributed > 0 && (
-            <> Você já aportou <b>{formatMoney(r.contributed)}</b> em {label} — cadastre onde esse dinheiro está.</>
+          {(fluxo.data?.contributed ?? 0) > 0 && (
+            <> Você já aportou <b>{formatMoney(fluxo.data!.contributed)}</b> em {label} — cadastre onde esse dinheiro está.</>
           )}
         </div>
         <div style={{ marginTop: "var(--s4)" }}>
@@ -94,85 +85,23 @@ export default function Investments() {
   return (
     <>
       <section className="hero">
-        <div className="rot">Total investido</div>
-        <div className="big tnum">{formatMoney(r.total)}</div>
-        {r.variation != null && r.previous_total > 0 && Math.abs(r.variation) >= 0.01 && (
-          <div className={`delta ${r.variation > 0 ? "pos" : "neg"}`}>
-            <span className="seta" aria-hidden>{r.variation > 0 ? "↑" : "↓"}</span>
-            {formatMoney(Math.abs(r.variation))} no mês
-          </div>
-        )}
+        <div className="rot">{r.stale_names.length ? "Saldo conhecido em investimentos" : "Total guardado agora"}</div>
+        <div className="big tnum">{r.total===0 && r.stale_names.length ? "—" : formatMoney(r.total)}</div>
         {r.stale_names.length > 0 && (
           <div className="nota">
-            Não entra no total: {r.stale_names.join(", ")} ({formatMoney(r.stale_total)} no último saldo) — sem saldo de {label}.
+            Não entra no total: {r.stale_names.join(", ")} ({formatMoney(r.stale_total)} no último saldo) — sem saldo de {formatPeriod(currentPeriod())}.
           </div>
         )}
       </section>
-
-      {/* Dois números em linha. O resgate é linha do aporte, não terceira
-          coluna: três valores em dinheiro não cabem lado a lado em 360px. */}
-      <div className="metricas">
-        <div className="metrica">
-          <div className="rot">Aportado</div>
-          <div className="val tnum">{formatMoney(r.contributed)}</div>
-          {r.redeemed > 0 ? (
-            <div className="s">resgatado <span className="tnum">{formatMoney(r.redeemed)}</span></div>
-          ) : (
-            conciliacaoPendente && <div className="s">resgate não conciliado</div>
-          )}
-        </div>
-        <div className="metrica">
-          <div className="rot">Rendeu</div>
-          {r.yield_status === "apurado" && r.yield_amount != null ? (
-            <div className="val tnum">{r.yield_amount > 0 ? "+" : ""}{formatMoney(r.yield_amount)}</div>
-          ) : (
-            <>
-              <div className="val fraco">—</div>
-              <div className="s">{r.yield_status === "sem_base" ? "sem mês anterior" : "não apurado"}</div>
-            </>
-          )}
-          {r.expected_yield != null && (
-            <div className="s">esperado <span className="tnum">{formatMoney(r.expected_yield)}</span></div>
-          )}
-        </div>
-      </div>
-      {/* O motivo "falta o saldo de X" vem por último; quando há outro motivo,
-          ele já está dito embaixo do total e não se repete aqui. */}
-      {r.yield_status === "nao_apurado" && r.reasons.length > 0 && (
-        <p className="nota">
-          Rendimento de {label} não apurado:{" "}
-          {(r.stale_names.length && r.reasons.length > 1 ? r.reasons.slice(0, -1) : r.reasons).join(" ")}
-        </p>
-      )}
-
-      {perfil.data && perfil.data.cdi_annual == null && itens.some((i) => i.cdi_percent != null) && (
-        <div className="aviso-box" style={{ marginTop: "var(--s4)" }}>
-          Você marcou a taxa das aplicações, mas falta informar o <b>CDI atual</b> para calcular o rendimento.{" "}
-          <Link to="/configuracoes">Informar agora</Link>
-        </div>
-      )}
 
       <div className="sec-title">
         <h2>Onde está</h2>
         <Link to="/patrimonio">Editar</Link>
       </div>
 
-      {comValor.length >= 2 && (
-        <div style={{ marginBottom: "var(--s4)" }}>
-          <Rosca semLegenda total={r.total} rotuloCentro="investido"
-            fatias={comValor.map((i) => ({
-              id: String(i.asset_id), nome: i.name, cor: corDoAtivo(itens, i.asset_id), valor: i.value,
-              pct: (i.share ?? 0) * 100,
-            }))} />
-        </div>
-      )}
-
       <div className="list">
         {itens.map((item) => (
           <Link className={`row${item.stale ? " desatualizado" : ""}`} key={item.asset_id} to="/patrimonio">
-            <div className="avatar" style={{ background: fundoDaCor(corDoAtivo(itens, item.asset_id), 26) }} aria-hidden>
-              {item.asset_class === "crypto" ? "₿" : item.asset_class === "equity" ? "📊" : "🏦"}
-            </div>
             <div className="mid">
               <div className="t">{item.name}</div>
               <div className="s">
@@ -180,29 +109,25 @@ export default function Investments() {
                   <span className="aviso-txt">não atualizado · {item.as_of ? formatYm(item.as_of) : ""}</span>
                 ) : item.reconciliation_note ? (
                   "ajuste de conferência"
-                ) : item.yield_status === "apurado" && item.yield_amount != null ? (
-                  <>rendeu {item.yield_amount >= 0 ? "+" : ""}{formatMoney(item.yield_amount)}</>
-                ) : (
-                  <>
-                    {ASSET_CLASS_LABEL[item.asset_class]}
-                    {item.cdi_percent != null && <> · {item.cdi_percent}% do CDI</>}
-                  </>
-                )}
+                ) : ASSET_CLASS_LABEL[item.asset_class]}
               </div>
             </div>
             <div className="amt tnum">
               {formatMoney(item.value)}
-              {item.share != null && <span className="sub">{Math.round(item.share * 100)}%</span>}
             </div>
             <MarcaEditavel />
           </Link>
         ))}
       </div>
 
+      <div className="e-investment-flow"><div><span>Aportado em {label}</span><b className="tnum">{doMes ? formatMoney(doMes.contributed) : "—"}</b></div><div><span>Resgatado</span><b className="tnum">{doMes ? formatMoney(doMes.redeemed) : "—"}</b></div><div><span>Rendimento</span><b className="tnum">{doMes?.yield_status === "apurado" && doMes.yield_amount != null ? formatMoney(doMes.yield_amount) : "Não apurado"}</b></div></div>
+      {conciliacaoPendente && <p className="nota">Há movimento a conferir; redução de saldo não é prejuízo.</p>}
+      {doMes?.yield_status === "nao_apurado" && doMes.reasons.length > 0 && <p className="nota">{doMes.reasons.join(" ")}</p>}
+
       <div className="sec-title">
         {/* Sem o mês no título: ele já está no topo, e com as duas ações ao
             lado o título longo quebrava em 360px. */}
-        <h2>{r.redeemed > 0 ? "Aportes e resgates" : "Aportes"}</h2>
+        <h2>{(doMes?.redeemed ?? 0) > 0 ? "Aportes e resgates" : "Aportes"}</h2>
         {podeEscrever && (
           <span className="titulo-acoes">
             <button className="link" onClick={() => setNovo("redemption")}>Resgate</button>
@@ -218,7 +143,6 @@ export default function Investments() {
             const mv = porLancamento.get(t.id);
             return (
               <button className="row" key={t.id} onClick={() => setAberto(t)}>
-                <div className="avatar" style={{ background: fundoDaCor("#93a6dc", 18) }} aria-hidden>🏦</div>
                 <div className="mid">
                   <div className="t">{t.description}</div>
                   <div className="s">

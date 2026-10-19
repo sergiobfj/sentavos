@@ -20,7 +20,7 @@ from app.rotas_contas import router_contas
 from app.rotas_investimentos import router_investimentos
 from app.dominio import investimentos
 from app.dominio.contas import conta_valida
-from app.dominio import natureza, patrimonio
+from app.dominio import natureza, patrimonio, classificacao
 from app.database import create_db_and_tables, get_session
 from app.security import RateLimitMiddleware, SecurityHeadersMiddleware
 from app.models import (
@@ -180,6 +180,7 @@ def create_transaction(transaction: TransactionCreate, session: Session = Depend
             "user_id": dono.id,
             "finalidade": finalidade_efetiva(category, transaction.finalidade, padrao=True),
             "nature": natureza.gravavel(category.type, transaction.nature),
+            "expense_class": classificacao.gravavel(category.type, transaction.expense_class),
             "account_id": conta_valida(session, dono, transaction.account_id, transaction.payment_method),
         },
     )
@@ -327,6 +328,7 @@ def update_transaction(
     )
     # Natureza, idem: só despesa. Nula = herda da categoria.
     transaction.nature = natureza.gravavel(categoria.type if categoria else None, transaction.nature)
+    transaction.expense_class = classificacao.gravavel(categoria.type if categoria else None, transaction.expense_class)
 
     # Lançamento que é aporte/resgate de um ativo: o movimento acompanha (valor,
     # data, conta) ou a edição é recusada (virar despesa, trocar o sinal).

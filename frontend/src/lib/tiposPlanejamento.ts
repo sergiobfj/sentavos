@@ -5,7 +5,7 @@
 // toda conta vem pronta do servidor — refazê-la aqui seria a segunda cópia da
 // regra, e duas cópias de uma regra de dinheiro discordam um dia.
 
-import type { AssetClass, Finalidade, Natureza } from "./types";
+import type { AssetClass, Finalidade, Natureza, CategoryType, ExpenseClass } from "./types";
 
 export type Certeza = "confirmado" | "estimado" | "hipotetico";
 export type OrigemPlano = "cartao" | "parcelado" | "recorrente" | "previsto" | "cenario";
@@ -25,6 +25,8 @@ export const ORIGEM_LABEL: Record<OrigemPlano, string> = {
 };
 
 export interface PlanoItem {
+  category_type?: CategoryType | null;
+  expense_class?: ExpenseClass | null;
   key: string;
   source: OrigemPlano;
   direction: "entrada" | "saida";
@@ -65,6 +67,7 @@ export interface PlanoReserva {
 }
 
 export interface PlanoMes {
+  expense_groups?: { fixed: number; variable: number; unclassified: number; invoices: number };
   year: number;
   month: number;
   is_current: boolean;
@@ -175,6 +178,7 @@ export interface Ocorrencia {
 }
 
 export interface CommitmentCreate {
+  expense_class?: ExpenseClass | null;
   description: string;
   category_id: number;
   amount: number;
@@ -195,6 +199,7 @@ export interface CommitmentCreate {
 export type CommitmentUpdate = Partial<CommitmentCreate> & { cancelled_on?: string | null };
 
 export interface Commitment {
+  expense_class?: ExpenseClass | null;
   id: number;
   description: string;
   category_id: number;

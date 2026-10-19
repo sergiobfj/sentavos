@@ -1,6 +1,7 @@
 // Espelha os modelos do backend (app/models.py)
 
 export type CategoryType = "expense" | "income" | "investment";
+export type ExpenseClass = "fixed" | "variable";
 
 export interface Category {
   id: number;
@@ -59,6 +60,8 @@ export const FINALIDADE_LABEL: Record<Finalidade, string> = {
 };
 
 export interface Transaction {
+  expense_class?: ExpenseClass | null;
+  effective_expense_class?: ExpenseClass | null;
   id: number;
   date: string; // ISO date (YYYY-MM-DD) — a competência: o mês em que isto conta
   description: string;
@@ -298,6 +301,7 @@ export interface InvoicesSummary {
 }
 
 export interface Purchase {
+  expense_class?: ExpenseClass | null;
   id: number;
   card_id: number;
   card_name: string;
@@ -319,6 +323,7 @@ export interface Purchase {
 }
 
 export interface PurchaseCreate {
+  expense_class?: ExpenseClass | null;
   card_id: number;
   category_id: number;
   description: string;

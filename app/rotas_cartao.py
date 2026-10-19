@@ -327,6 +327,7 @@ def _gerar_parcelas(session: Session, dono: User, compra: Purchase, cartao: Card
                 amount_paid=valor,
                 note=compra.note,
                 category_id=compra.category_id,
+                expense_class=compra.expense_class,
                 finalidade=compra.finalidade,
                 payment_method=PaymentMethod.CREDIT,
                 purchase_id=compra.id,
@@ -497,6 +498,7 @@ def atualizar_compra(
             # Finalidade é rótulo, como a categoria: muda mesmo com fatura
             # paga, porque não mexe em quanto nenhuma fatura cobra.
             parcela.finalidade = compra.finalidade
+            parcela.expense_class = compra.expense_class
             session.add(parcela)
 
     session.commit()
@@ -1066,6 +1068,7 @@ def _classificar(
         installments=max(1, pedido.installments),
         purchase_date=lancamento.date,
         note=lancamento.note,
+        expense_class=lancamento.expense_class,
         # O que o lançamento já dizia vale; sem nada, a do cartão.
         finalidade=lancamento.finalidade or cartao.finalidade,
     )

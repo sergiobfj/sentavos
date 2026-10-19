@@ -30,7 +30,7 @@ from app import planejamento
 from app.auth import exigir_escrita, require_user
 from app.cartao import avancar_meses, limites_do_mes
 from app.database import get_session
-from app.dominio import natureza
+from app.dominio import natureza, classificacao
 from app.dominio.contas import conta_valida
 from app.escopo import buscar, consulta, exigir
 from app.models import (
@@ -182,6 +182,7 @@ def novo_compromisso(session: Session, dono: User, dados: CommitmentCreate) -> C
             "description": _texto(dados.description, "A descrição"),
             "finalidade": _finalidade(categoria, dados.finalidade),
             "nature": natureza.gravavel(categoria.type, dados.nature),
+            "expense_class": classificacao.gravavel(categoria.type, dados.expense_class),
             "institution": _opcional(dados.institution, 80),
             "payment_hint": _opcional(dados.payment_hint, 40),
             "note": _opcional(dados.note, 500),
@@ -292,6 +293,7 @@ def atualizar_compromisso(
         if categoria is not None:
             c.finalidade = _finalidade(categoria, c.finalidade)
             c.nature = natureza.gravavel(categoria.type, c.nature)
+            c.expense_class = classificacao.gravavel(categoria.type, c.expense_class)
         # A natureza nova vale pras baixas que ainda tinham a anterior: a
         # parcela da Hunter já paga vira financeiro junto com o contrato.
         if "nature" in mudancas and c.nature != natureza_antes:
@@ -437,6 +439,7 @@ def pagar_ocorrencia(
         payment_method=PaymentMethod.CASH,
         finalidade=_finalidade(categoria, c.finalidade),
         nature=natureza.gravavel(categoria.type, c.nature),
+        expense_class=None,  # herda do compromisso na leitura; exceção manual permanece possível
         commitment_id=c.id,
         commitment_no=numero,
         account_id=conta_valida(session, dono, dados.account_id),

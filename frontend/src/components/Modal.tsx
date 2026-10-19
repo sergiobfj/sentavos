@@ -1,4 +1,4 @@
-import { useEffect, type ReactNode } from "react";
+import { useEffect, useRef, type ReactNode } from "react";
 
 interface ModalProps {
   title: string;
@@ -8,21 +8,37 @@ interface ModalProps {
 }
 
 export default function Modal({ title, onClose, children, footer }: ModalProps) {
+  const dialog = useRef<HTMLDivElement>(null);
+  const closeRef = useRef(onClose);
+  closeRef.current = onClose;
   useEffect(() => {
+    const previous = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const oldOverflow = document.body.style.overflow;
+    if (dialog.current && !dialog.current.contains(document.activeElement)) dialog.current.querySelector<HTMLElement>("input,select,button,[tabindex]")?.focus();
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
+      const current = dialog.current;
+      const dialogs = document.querySelectorAll('[role="dialog"]');
+      if (!current || dialogs[dialogs.length - 1] !== current) return;
+      if (e.key === "Escape") closeRef.current();
+      if (e.key !== "Tab") return;
+      const focusable = [...current.querySelectorAll<HTMLElement>('button:not([disabled]),input:not([disabled]),select:not([disabled]),textarea:not([disabled]),a[href],[tabindex]:not([tabindex="-1"])')].filter(el=>el.getClientRects().length>0);
+      if (!focusable.length) return;
+      const first = focusable[0], last = focusable[focusable.length-1];
+      if (e.shiftKey && document.activeElement===first) { e.preventDefault(); last.focus(); }
+      else if (!e.shiftKey && document.activeElement===last) { e.preventDefault(); first.focus(); }
     };
     document.addEventListener("keydown", onKey);
     document.body.style.overflow = "hidden";
     return () => {
       document.removeEventListener("keydown", onKey);
-      document.body.style.overflow = "";
+      document.body.style.overflow = oldOverflow;
+      previous?.focus();
     };
-  }, [onClose]);
+  }, []);
 
   return (
     <div className="overlay" onMouseDown={onClose}>
-      <div className="modal" onMouseDown={(e) => e.stopPropagation()} role="dialog" aria-modal="true" aria-label={title}>
+      <div ref={dialog} className="modal" onMouseDown={(e) => e.stopPropagation()} role="dialog" aria-modal="true" aria-label={title}>
         <div className="m-head">
           <h3>{title}</h3>
           <button className="btn btn-ghost btn-sm" onClick={onClose} aria-label="Fechar">✕</button>
