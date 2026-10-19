@@ -58,6 +58,8 @@ Abrir `http://127.0.0.1:5173/`. Para os testes locais: `python -m pytest -q -p n
 
 As capturas das quatro telas com a cópia local ficam em `.local/essencial-review/`, fora do Git por conter dados financeiros. A revisão cobriu 320, 360, 400, 768 e 1440 px. O navegador automatizado verifica os caminhos, mas não comprova uma leitura humana em três segundos nem um lançamento humano em dez; esses tempos pedem uso observado no aparelho antes do rollout.
 
+Resultado nesta branch: 514 testes de backend, sete verificações do modelo preservado e dez cenários E2E integrados passaram; TypeScript, build de produção e revisão de overflow nas cinco larguras também passaram. A regressão financeira da cópia local apontou zero divergências para o corte de outubro de 2026.
+
 ## Pendências para publicação
 
 Revisar a experiência em aparelho físico e com saldos atuais após conferir os dados da conta. A cópia disponível é de 12/10/2026 e contém uma caixinha sem saldo atualizado/rendimento apurado; a interface mostra essas limitações. Publicação, push para `main` e qualquer escrita em produção dependem de revisão posterior.
