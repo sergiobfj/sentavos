@@ -296,6 +296,8 @@ function Detalhe({ id, podeEscrever, onVoltar }: { id: number; podeEscrever: boo
             legenda={
               o.status === "paga" && o.paid_date
                 ? `${entrada ? "recebida" : "paga"} em ${formatDiaMes(o.paid_date)}`
+                : o.status === "abatida"
+                  ? `abatida pelo credor${o.abated_on ? ` em ${formatDiaMes(o.abated_on)}` : ""}`
                 : o.status === "prevista" && o.paid_date
                   ? `já prevista em ${formatDiaMes(o.paid_date)}`
                   : o.status === "dispensada" && o.skip_note === PAUSA
@@ -408,6 +410,8 @@ function OcorrenciaSheet({
             {o.provisioned > 0 && aberta && ` · ${formatMoney(o.provisioned)} reservado`}
           </span>
         </div>
+
+        {o.status === "abatida" && <p className="hint">Abatida pelo credor em {o.abated_on ? formatDate(o.abated_on) : "data não informada"}. Nenhum dinheiro saiu da conta.{o.skip_note ? ` ${o.skip_note}` : ""}</p>}
 
         {!podeEscrever && <p className="hint">Modo demonstração: dá pra ver, não alterar.</p>}
 

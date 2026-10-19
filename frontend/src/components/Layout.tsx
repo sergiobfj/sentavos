@@ -10,6 +10,7 @@ import logo from "../assets/logo.png";
 const ABAS = [
   { to: "/", label: "Meu mês", end: true, icon: IconCasa },
   { to: "/lancamentos", label: "Lançamentos", icon: IconLista },
+  { to: "/contas-a-pagar", label: "Contas", icon: IconContas },
   { to: "/relatorios", label: "Relatórios", icon: IconGrafico },
   { to: "/investimentos", label: "Investir", icon: IconCarteira },
 ];
@@ -183,6 +184,9 @@ function IconGrafico() {
       <path d="M15 6.5h6v6" />
     </svg>
   );
+}
+function IconContas() {
+  return <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><rect x="4" y="3" width="16" height="18" rx="2"/><path d="M8 8h8M8 12h8M8 16h5"/></svg>;
 }
 function IconEngrenagem() {
   return (

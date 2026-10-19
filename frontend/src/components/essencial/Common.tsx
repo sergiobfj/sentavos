@@ -35,7 +35,7 @@ export function EntryEditor({ transaction, categories, onClose }: { transaction:
   if (!sessao?.somenteLeitura) return <TransactionForm transaction={transaction} categories={categories} onClose={onClose}/>;
   return <Modal title={transaction.description} onClose={onClose}><div className="m-body"><FinancialRow line={transactionLine(transaction,categories.find(c=>c.id===transaction.category_id))}/><p className="hint">Consulta da demonstração. Os dados não podem ser alterados.</p></div></Modal>;
 }
-export function MonthGroup({ title, summary, lines, note }: { title: string; summary: string; lines: FinancialLine[]; note?: string }) {
+export function MonthGroup({ title, value, summary, lines, note, mark = "·" }: { title: string; value: string; summary: string; lines: FinancialLine[]; note?: string; mark?: string }) {
   const [expanded, setExpanded] = useState(false);
-  return <section className="e-group"><header><h3>{title}</h3><p>{summary}</p></header>{(expanded ? lines : lines.slice(0,3)).map(l=><FinancialRow key={l.key} line={l}/>)}{!lines.length && <p className="e-empty">Nenhum lançamento conhecido neste mês.</p>}{note && <p className="e-note">{note}</p>}{lines.length>3 && <button className="e-expand" aria-expanded={expanded} onClick={()=>setExpanded(!expanded)}>{expanded ? "Recolher" : `Ver todos (${lines.length})`} ›</button>}</section>;
+  return <section className="e-group e-group-compact"><button className="e-group-trigger" aria-expanded={expanded} onClick={()=>setExpanded(!expanded)}><span className="e-group-mark" aria-hidden="true">{mark}</span><strong>{title}</strong><b className="tnum">{value}</b><span className="e-group-chevron" aria-hidden="true">{expanded?"⌄":"›"}</span></button>{expanded&&<div className="e-group-detail"><p>{summary}</p>{lines.map(l=><FinancialRow key={l.key} line={l}/>)}{!lines.length&&<p className="e-empty">Nenhum lançamento conhecido neste mês.</p>}{note&&<p className="e-note">{note}</p>}</div>}</section>;
 }

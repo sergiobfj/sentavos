@@ -3,6 +3,7 @@ import Layout from "./components/Layout";
 import MeuMes from "./pages/MeuMes";
 import Lancamentos from "./pages/Lancamentos";
 import Relatorios from "./pages/Relatorios";
+import ContasAPagar from "./pages/ContasAPagar";
 import Budget from "./pages/Budget";
 import Investments from "./pages/Investments";
 import Assets from "./pages/Assets";
@@ -55,6 +56,7 @@ export default function App() {
       <Route element={<Layout />}>
         <Route path="/" element={<MeuMes />} />
         <Route path="/lancamentos" element={<Lancamentos />} />
+        <Route path="/contas-a-pagar" element={<ContasAPagar />} />
         <Route path="/relatorios" element={<Relatorios />} />
         <Route path="/orcamento" element={<Budget />} />
         <Route path="/investimentos" element={<Investments />} />

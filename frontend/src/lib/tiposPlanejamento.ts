@@ -146,12 +146,13 @@ export interface Comparacao {
   diff: { projected: number; expense: number; income: number; reserved: number; available: number };
 }
 
-export type OccurrenceStatus = "pendente" | "vencida" | "paga" | "dispensada" | "cancelada" | "prevista";
+export type OccurrenceStatus = "pendente" | "vencida" | "paga" | "abatida" | "dispensada" | "cancelada" | "prevista";
 
 export const OCORRENCIA_LABEL: Record<OccurrenceStatus, string> = {
   pendente: "a pagar",
   vencida: "vencida",
   paga: "paga",
+  abatida: "abatida pelo credor",
   dispensada: "dispensada",
   cancelada: "cancelada",
   // Entrada que já está num lançamento só previsto: conta uma vez, por ele.
@@ -172,6 +173,7 @@ export interface Ocorrencia {
   paid_date: string | null;
   provisioned: number;
   skip_note: string | null;
+  abated_on?: string | null;
   // Reconhecida num lançamento da mesma categoria perto do vencimento (não
   // vinculada à mão).
   matched?: boolean;
@@ -225,6 +227,7 @@ export interface Commitment {
   status: "ativo" | "quitado" | "encerrado" | "cancelado";
   paid_count: number;
   skipped_count: number;
+  abated_count?: number;
   overdue_count: number;
   overdue_amount: number;
   total_count: number | null;
