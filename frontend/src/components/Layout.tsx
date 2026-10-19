@@ -16,7 +16,7 @@ const ABAS = [
 ];
 
 export default function Layout() {
-  const { label, isCurrent, shift } = usePeriod();
+  const { label, period, isCurrent, shift } = usePeriod();
   const { sessao, sair } = useAuth();
   const categories = useCategories(true);
   const [escolhendoMes, setEscolhendoMes] = useState(false);
@@ -92,7 +92,8 @@ export default function Layout() {
             aria-expanded={escolhendoMes}
             aria-label={`Mês: ${label}. Tocar para trocar.`}
           >
-            <span>{label.charAt(0).toUpperCase() + label.slice(1)}</span>
+            <span className="e-month-full">{label.charAt(0).toUpperCase() + label.slice(1)}</span>
+            <span className="e-month-short">{label.charAt(0).toUpperCase() + label.slice(1,3)} {period.year}</span>
             <span className="chev" aria-hidden>▼</span>
             {isCurrent && <span className="hoje">hoje</span>}
           </button>
