@@ -205,6 +205,8 @@ def enriquecer(
         linha.account_name = nomes_de_conta.get(t.account_id) if t.account_id else None
         cat = categorias.get(t.category_id)
         linha.effective_nature = natureza.efetiva(cat.type, t.nature, cat.default_nature) if cat else None
+        from app.dominio import classificacao
+        linha.effective_expense_class = classificacao.efetiva(t, c) if cat and cat.type == CategoryType.EXPENSE else None
         return linha
 
     if not ids_de_compra:

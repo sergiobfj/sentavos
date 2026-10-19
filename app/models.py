@@ -51,6 +51,15 @@ class CategoryType(str, Enum):
     INCOME = "income"
     INVESTMENT = "investment"
 
+
+class ExpenseClass(str, Enum):
+    FIXED = "fixed"
+    VARIABLE = "variable"
+
+
+def _classe_despesa():
+    return sa.Enum(ExpenseClass, native_enum=False, length=8)
+
 class TransactionNature(str, Enum):
     """Que evento econômico foi o gasto — não "com o quê" (isso é a categoria).
 
@@ -159,6 +168,7 @@ class TransactionBase(SQLModel):
     amount_paid: float | None = None
     note: str | None = None
     category_id: int = Field(foreign_key="categories.id")
+    expense_class: ExpenseClass | None = Field(default=None, sa_type=_classe_despesa())
 
     # ---------- Gasto x saída de caixa ----------
     # Até aqui o app tratava os dois como o mesmo evento. É verdade pra PIX e
@@ -263,6 +273,7 @@ class TransactionUpdate(SQLModel):
     account_id: int | None = None
     occurred_at: dt.datetime | None = None
     nature: TransactionNature | None = None
+    expense_class: ExpenseClass | None = None
 
 
 class TransactionRead(TransactionBase):
@@ -274,6 +285,7 @@ class TransactionRead(TransactionBase):
     """
 
     id: int
+    effective_expense_class: ExpenseClass | None = None
     purchase_id: int | None = None
     installment_no: int | None = None
     invoice_id: int | None = None
@@ -360,6 +372,7 @@ class PurchaseBase(SQLModel):
     card_id: int = Field(foreign_key="cards.id")
     category_id: int = Field(foreign_key="categories.id")
     description: str
+    expense_class: ExpenseClass | None = Field(default=None, sa_type=_classe_despesa())
     # O valor CHEIO da compra. As parcelas saem daqui divididas em centavos
     # inteiros, e não o contrário: guardar o valor da parcela faria o total ser
     # uma multiplicação que não fecha (33,33 × 3 = 99,99).
@@ -412,6 +425,7 @@ class PurchaseUpdate(SQLModel):
     """
 
     description: str | None = None
+    expense_class: ExpenseClass | None = None
     category_id: int | None = None
     note: str | None = None
     total_amount: float | None = None
@@ -933,6 +947,7 @@ MAX_OCORRENCIAS = 480
 
 
 class CommitmentBase(SQLModel):
+    expense_class: ExpenseClass | None = Field(default=None, sa_type=_classe_despesa())
     """O que define um compromisso. O cronograma sai daqui, calculado."""
 
     description: str
@@ -1005,6 +1020,7 @@ class CommitmentCreate(CommitmentBase):
 
 
 class CommitmentUpdate(SQLModel):
+    expense_class: ExpenseClass | None = None
     description: str | None = None
     category_id: int | None = None
     amount: float | None = None

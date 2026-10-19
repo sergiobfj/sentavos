@@ -48,7 +48,8 @@ from typing import Iterable, Protocol
 from sqlmodel import Session, SQLModel
 
 from app.cartao import avancar_meses, dia_do_mes, limites_do_mes
-from app.dominio import tempo
+from app.dominio import tempo, classificacao
+from app.models import ExpenseClass
 from app.dominio.caixa import efeito_no_caixa
 from app.escopo import consulta
 from app.faturas import TOLERANCIA, totais
@@ -703,6 +704,8 @@ def _aviso_das_contas(
 
 
 class PlanoItem(SQLModel):
+    category_type: CategoryType | None = None
+    expense_class: ExpenseClass | None = None
     """Uma linha do mês: algo que ainda vai entrar ou sair (ou que já foi)."""
 
     key: str
@@ -747,6 +750,7 @@ class PlanoReserva(SQLModel):
 
 
 class PlanoMes(SQLModel):
+    expense_groups: dict[str, float] = {}
     year: int
     month: int
     is_current: bool
@@ -901,6 +905,8 @@ def planejar(
                 PlanoItem(
                     key=f"compromisso:{c.id}:{numero}",
                     source="parcelado" if c.installments is not None else "recorrente",
+                    category_type=cat.type,
+                    expense_class=classificacao.do_compromisso(c, cat.type),
                     direction=direcao,
                     description=c.description,
                     detail=c.institution,
@@ -959,6 +965,8 @@ def planejar(
             PlanoItem(
                 key=f"lancamento:{t.id}",
                 source="previsto",
+                category_type=tipo,
+                expense_class=classificacao.efetiva(t) if tipo == CategoryType.EXPENSE else None,
                 direction=direcao,
                 description=t.description,
                 date=t.date,
@@ -1047,6 +1055,10 @@ def planejar(
         entradas = sum(i.remaining for i in do_mes if i.direction == "entrada")
         saidas_itens = [i for i in do_mes if i.direction == "saida"]
         saidas = sum(i.remaining for i in saidas_itens)
+        grupos = {"fixed": 0.0, "variable": 0.0, "unclassified": 0.0, "invoices": 0.0}
+        for item in saidas_itens:
+            chave = "invoices" if item.source == "cartao" else (item.expense_class.value if item.expense_class else "unclassified")
+            grupos[chave] += item.remaining
 
         por_certeza = {"confirmado": 0.0, "estimado": 0.0, "hipotetico": 0.0}
         por_origem = {"cartao": 0.0, "parcelado": 0.0, "recorrente": 0.0, "previsto": 0.0, "cenario": 0.0}
@@ -1073,6 +1085,7 @@ def planejar(
                 opening=round(saldo, 2),
                 income=round(entradas, 2),
                 expense=round(saidas, 2),
+                expense_groups={k: round(v, 2) for k, v in grupos.items()},
                 projected=round(projetado, 2),
                 reserved=round(reservado, 2),
                 available=round(projetado - reservado, 2),
