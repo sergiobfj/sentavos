@@ -267,6 +267,29 @@ def test_dispensar_tira_da_conta_e_impede_a_baixa(m):
     assert m.mes()["months"][0]["expense"] == 120.0
 
 
+def test_abatimento_do_credor_nao_sai_do_caixa_e_preserva_cronograma(m):
+    m.conta("Saldo confirmado", 668.96, dia=HOJE)
+    c = _financiamento(m)
+    url = f"/commitments/{c['id']}/ocorrencias"
+    for numero in (1, 2):
+        r = m.c.post(f"{url}/{numero}/abater", json={
+            "date": HOJE.isoformat(), "note": "Cancelamento do CDC Protegido pelo credor",
+        })
+        assert r.status_code == 200, r.text
+    detalhe = r.json()
+    assert detalhe["abated_count"] == 2 and detalhe["paid_count"] == 0
+    assert detalhe["next"]["label"] == "3/48"
+    assert [o["status"] for o in detalhe["schedule"][:3]] == ["abatida", "abatida", "pendente"]
+    assert all(o["abated_on"] == HOJE.isoformat() for o in detalhe["schedule"][:2])
+    assert m.quantos_lancamentos() == 0
+    assert m.mes(2026, 11)["months"][0]["expense"] == 0
+    assert m.mes(2026, 12)["months"][0]["expense"] == 0
+    assert m.mes(2027, 1)["months"][0]["expense"] == 618.08
+    assert m.c.post(f"{url}/1/pagar", json={}).status_code == 409
+    assert m.c.delete(f"{url}/1/dispensar").status_code == 409
+    assert m.c.post(f"{url}/1/abater", json={"date":HOJE.isoformat(),"note":"duplicado"}).status_code == 409
+
+
 def test_calendario_trava_depois_da_baixa(m):
     c = _financiamento(m)
     m.pagar(c["id"], 3)

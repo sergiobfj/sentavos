@@ -10,12 +10,13 @@ import logo from "../assets/logo.png";
 const ABAS = [
   { to: "/", label: "Meu mês", end: true, icon: IconCasa },
   { to: "/lancamentos", label: "Lançamentos", icon: IconLista },
+  { to: "/contas-a-pagar", label: "Contas", icon: IconContas },
   { to: "/relatorios", label: "Relatórios", icon: IconGrafico },
   { to: "/investimentos", label: "Investir", icon: IconCarteira },
 ];
 
 export default function Layout() {
-  const { label, isCurrent, shift } = usePeriod();
+  const { label, period, isCurrent, shift } = usePeriod();
   const { sessao, sair } = useAuth();
   const categories = useCategories(true);
   const [escolhendoMes, setEscolhendoMes] = useState(false);
@@ -91,7 +92,8 @@ export default function Layout() {
             aria-expanded={escolhendoMes}
             aria-label={`Mês: ${label}. Tocar para trocar.`}
           >
-            <span>{label.charAt(0).toUpperCase() + label.slice(1)}</span>
+            <span className="e-month-full">{label.charAt(0).toUpperCase() + label.slice(1)}</span>
+            <span className="e-month-short">{label.charAt(0).toUpperCase() + label.slice(1,3)} {period.year}</span>
             <span className="chev" aria-hidden>▼</span>
             {isCurrent && <span className="hoje">hoje</span>}
           </button>
@@ -183,6 +185,9 @@ function IconGrafico() {
       <path d="M15 6.5h6v6" />
     </svg>
   );
+}
+function IconContas() {
+  return <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><rect x="4" y="3" width="16" height="18" rx="2"/><path d="M8 8h8M8 12h8M8 16h5"/></svg>;
 }
 function IconEngrenagem() {
   return (

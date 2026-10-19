@@ -1057,6 +1057,9 @@ class CommitmentSkip(SQLModel, table=True):
     commitment_id: int = Field(foreign_key="commitments.id", index=True)
     number: int = Field(ge=1)
     note: str | None = None
+    # Abatimento contratual encerra a obrigação sem dinheiro sair da conta.
+    # Nulo nas dispensas comuns e pausas antigas; não cria Transaction.
+    abated_on: dt.date | None = None
 
 
 class OccurrenceStatus(str, Enum):
@@ -1066,6 +1069,7 @@ class OccurrenceStatus(str, Enum):
     VENCIDA = "vencida"
     PAGA = "paga"
     DISPENSADA = "dispensada"
+    ABATIDA = "abatida"
     CANCELADA = "cancelada"
     # Entrada recorrente que já está num lançamento só PREVISTO (o "720 em
     # 15/10" lançado à mão): não conta de novo — quem conta é o lançamento.
@@ -1085,6 +1089,7 @@ class OccurrenceRead(SQLModel):
     # Quanto das reservas está apontado pra esta ocorrência.
     provisioned: float = 0
     skip_note: str | None = None
+    abated_on: dt.date | None = None
     # O lançamento foi reconhecido (entrada da mesma categoria perto do
     # vencimento), não vinculado à mão. Ver `planejamento.casar_entradas`.
     matched: bool = False
@@ -1101,6 +1106,7 @@ class CommitmentRead(CommitmentBase):
     status: str  # "ativo" | "quitado" | "encerrado" | "cancelado"
     paid_count: int = 0
     skipped_count: int = 0
+    abated_count: int = 0
     overdue_count: int = 0
     overdue_amount: float = 0
     # Nulos em recorrência sem fim: não existe "faltam" pra o que não acaba.
@@ -1135,6 +1141,11 @@ class VincularLancamento(SQLModel):
 
 
 class DispensarOcorrencia(SQLModel):
+    note: str | None = None
+
+
+class AbaterOcorrencia(SQLModel):
+    date: dt.date
     note: str | None = None
 
 

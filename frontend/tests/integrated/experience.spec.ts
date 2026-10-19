@@ -41,11 +41,12 @@ test.describe.serial("Sentavos Essencial com PostgreSQL local e APIs reais",()=>
 
   test("1–3: saldo, contas pendentes e previsão aparecem no primeiro olhar",async ({page})=>{
     await login(page);
-    await expect(page.locator(".e-primary strong")).toContainText("R$");
+    await expect(page.locator(".e-primary strong")).toContainText("R$ 668,96");
     await expect(page.locator(".e-projection-value")).toContainText("R$");
     await expect(page.locator(".e-summary")).toContainText("A receber");
     await expect(page.locator(".e-summary")).toContainText("A pagar");
-    await expect(page.getByRole("navigation",{name:"Navegação principal"}).getByRole("link")).toHaveCount(4);
+    await expect(page.locator(".e-summary")).toContainText("R$ 1.970,00");
+    await expect(page.getByRole("navigation",{name:"Navegação principal"}).getByRole("link")).toHaveCount(5);
     const bounds=await page.locator(".e-primary strong").boundingBox();
     expect(bounds && bounds.y<350).toBeTruthy();
     await page.locator(".e-projection-value").click();
@@ -62,7 +63,8 @@ test.describe.serial("Sentavos Essencial com PostgreSQL local e APIs reais",()=>
     await expect(page.locator("#quick-value")).toBeFocused();
     await page.locator("#quick-value").fill("25");
     await page.locator("#quick-category").selectOption({index:1});
-    await expect(page.locator("#quick-origin")).not.toHaveValue("");
+    // A cópia só conhece o saldo agregado. O teste não inventa um banco para o Pix.
+    await page.locator("#quick-origin").selectOption("unassigned");
     await page.getByRole("button",{name:"Salvar",exact:true}).click();
     await expect(page.getByRole("status")).toContainText("Lançamento salvo");
     const after=await(await request.get(`${apiBase}/transactions${ym}`,{headers})).json();
@@ -88,10 +90,25 @@ test.describe.serial("Sentavos Essencial com PostgreSQL local e APIs reais",()=>
   test("5: encontra faturas e compromissos do próximo mês",async ({page})=>{
     await login(page);
     await page.getByRole("button",{name:"Próximo mês"}).click();
-    await page.getByRole("navigation",{name:"Navegação principal"}).getByRole("link",{name:"Meu mês"}).click();
+    await page.getByRole("navigation",{name:"Navegação principal"}).getByRole("link",{name:"Contas"}).click();
+    await expect(page.locator(".e-bills")).toContainText("Fatura de novembro");
     await expect(page.locator(".e-summary")).toContainText("A pagar");
-    await page.getByRole("link",{name:"Faturas",exact:true}).click();
+    await page.getByRole("link",{name:"Ver faturas"}).click();
     await expect(page).toHaveURL(/orcamento\?aba=faturas/);
+  });
+
+  test("Contas distingue abatimento da Hunter de pagamento em novembro e dezembro",async ({page})=>{
+    await login(page);
+    for (const month of ["Novembro", "Dezembro"]) {
+      await page.getByRole("button",{name:"Próximo mês"}).click();
+      await page.getByRole("navigation",{name:"Navegação principal"}).getByRole("link",{name:"Contas"}).click();
+      await expect(page.locator(".e-bills")).toContainText("abatida pelo credor");
+      await expect(page.locator(".e-bills")).toContainText(month.toLowerCase());
+      await expect(page.locator(".e-bills")).not.toContainText("Hunter 350 · 3/48");
+    }
+    await page.getByRole("button",{name:"Próximo mês"}).click();
+    await expect(page.locator(".e-bills")).toContainText("3/48");
+    await expect(page.locator(".e-bills")).toContainText("R$ 618,08");
   });
 
   test("cartão parcelado e aporte passam pelos fluxos financeiros existentes",async ({page,request})=>{
@@ -117,6 +134,7 @@ test.describe.serial("Sentavos Essencial com PostgreSQL local e APIs reais",()=>
     await page.getByRole("button",{name:"Novo lançamento"}).click();
     await page.getByRole("group",{name:"Tipo do lançamento"}).getByRole("button",{name:"Aporte"}).click();
     await page.locator("#quick-value").fill("20");
+    await page.locator("#quick-origin").selectOption("unassigned");
     await page.locator("#quick-category").selectOption({index:1});
     await page.locator("#quick-asset").selectOption({index:1});
     const movementPromise=page.waitForResponse(r=>r.url().endsWith("/investments/movements")&&r.request().method()==="POST");
@@ -125,9 +143,12 @@ test.describe.serial("Sentavos Essencial com PostgreSQL local e APIs reais",()=>
     expect(movementResponse.ok()).toBeTruthy();
     const movement=await movementResponse.json();
     expect(movement.type).toBe("contribution");
+    expect(movement.transaction_id).toBeTruthy();
     await expect(page.getByRole("dialog")).toHaveCount(0);
-    const movementDelete=await request.delete(`${apiBase}/investments/movements/${movement.id}`,{headers});
-    expect(movementDelete.ok()).toBeTruthy();
+    // Remover o lançamento apaga também o movimento. DELETE /movements só
+    // desvincula o ativo e deixa o caixa registrado de propósito.
+    const transactionDelete=await request.delete(`${apiBase}/transactions/${movement.transaction_id}`,{headers});
+    expect(transactionDelete.ok()).toBeTruthy();
   });
 
   test("6 e 7: investimentos e comparação de três meses",async ({page})=>{
@@ -150,6 +171,22 @@ test.describe.serial("Sentavos Essencial com PostgreSQL local e APIs reais",()=>
     await expect(page.getByRole("dialog")).toContainText("Depois da simulação");
     await page.getByRole("dialog").getByRole("button",{name:"Fechar"}).click();
     const after=(await(await request.get(`${apiBase}/transactions${ym}`,{headers})).json()).length;
+    expect(after).toBe(before);
+  });
+
+  test("antecipação da Hunter mostra etapas sem criar pagamento",async ({page,request})=>{
+    await login(page);
+    const headers=await apiLogin(request);
+    const before=(await(await request.get(`${apiBase}/transactions?year=2026&month=10`,{headers})).json()).length;
+    await page.getByRole("navigation",{name:"Navegação principal"}).getByRole("link",{name:"Contas"}).click();
+    await page.getByText("Simular antecipação da Hunter").click();
+    await expect(page.locator(".e-advance-stages")).toContainText("R$ 668,96");
+    await expect(page.locator(".e-advance-stages")).toContainText("R$ 2.088,96");
+    await expect(page.locator(".e-advance-stages")).toContainText("R$ 2.638,96");
+    await page.getByRole("group",{name:"Etapa da simulação"}).getByRole("button",{name:/Após todas entradas/}).click();
+    await page.getByRole("button",{name:"R$ 800,00"}).click();
+    await expect(page.locator(".e-advance-result")).toContainText("R$ 1.838,96");
+    const after=(await(await request.get(`${apiBase}/transactions?year=2026&month=10`,{headers})).json()).length;
     expect(after).toBe(before);
   });
 
@@ -182,12 +219,12 @@ test.describe.serial("Sentavos Essencial com PostgreSQL local e APIs reais",()=>
     await expect(page.locator(".e-settings-detail").filter({hasText:"Categorias"})).toHaveAttribute("open","");
   });
 
-  test("quatro telas cabem em 320, 360, 400, tablet e desktop",async ({page})=>{
+  test("cinco telas cabem em 320, 360, 400, tablet e desktop",async ({page})=>{
     test.setTimeout(180000);
     await login(page);
     for (const width of [320,360,400,768,1440]) {
       await page.setViewportSize({width,height:860});
-      for (const route of ["/","/lancamentos","/relatorios","/investimentos"]) {
+      for (const route of ["/","/lancamentos","/contas-a-pagar","/relatorios","/investimentos"]) {
         await page.goto(route);
         await expect(page.locator(".appbar")).toBeVisible();
         expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBeTruthy();
