@@ -9,12 +9,16 @@ import datetime as dt
 import hashlib
 import json
 import os
+import sys
 from pathlib import Path
 
 import sqlalchemy as sa
 from dotenv import load_dotenv
 
 from app.ambiente import banco_local, verificar_banco
+
+if sys.flags.optimize:
+    raise RuntimeError("Esta rotina exige Python sem -O para manter todas as pré-condições ativas.")
 
 ROOT = Path(__file__).resolve().parent.parent
 OBSERVED_AT = dt.datetime(2026, 10, 19, 11, 44, 15, tzinfo=dt.timezone.utc)
@@ -34,7 +38,9 @@ def inventory_matches(conn, baseline):
         if "schema" in baseline:
             columns = [{"name": c["name"], "type": str(c["type"]), "nullable": c["nullable"]}
                        for c in sa.inspect(conn).get_columns(table)]
-            assert columns == baseline["schema"][table], f"Schema de {table} mudou desde o backup."
+            assert sorted(columns, key=lambda c: c["name"]) == sorted(baseline["schema"][table], key=lambda c: c["name"]), (
+                f"Schema de {table} mudou desde o backup."
+            )
         now = [dict(r) for r in conn.execute(sa.text(f'SELECT * FROM "{table}"')).mappings()]
         assert canonical(now) == canonical(tables[table]), f"{table} mudou desde o backup."
 
