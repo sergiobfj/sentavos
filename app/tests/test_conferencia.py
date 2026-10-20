@@ -100,6 +100,18 @@ def test_entrada_de_7000_criada_uma_vez(m, outubro):
     assert "mesmo valor" in sugestao["reasons"] and sugestao["used"] is True
 
 
+def test_segundo_toque_na_conferencia_nao_cria_outra_saida(m, outubro):
+    item = _item(m, "Internet", 60.0, "obrigacao")
+    dados = {"date": "2026-10-19", "description": "Internet", "amount_paid": 60.0,
+             "category_id": outubro["moto"]}
+    primeiro = m.c.post(f"/reconciliation/{item['id']}/lancamento", json=dados)
+    assert primeiro.status_code == 200, primeiro.text
+    quantidade = m.quantos_lancamentos()
+    segundo = m.c.post(f"/reconciliation/{item['id']}/lancamento", json=dados)
+    assert segundo.status_code == 409
+    assert m.quantos_lancamentos() == quantidade
+
+
 def test_entrada_de_7000_que_ja_existe_e_vinculada_sem_duplicar(m, outubro):
     existente = m.lancar(outubro["moto"], D(2026, 10, 9), pago=7000.0, descricao="Entrada moto")
     item = _item(m, "Entrada da moto", 7000.0, "saida")
@@ -135,13 +147,13 @@ def test_reserva_de_688_31_nao_vira_despesa(m, outubro):
     gasto = m.c.get("/budgets/summary?year=2026&month=10").json()["caixa"]["gasto_total"]
     disponivel = m.mes()["months"][0]["available"]
 
-    r = m.c.post(
-        f"/reconciliation/{item['id']}/reserva",
-        json={"amount": 688.31, "description": "Reserva", "created_on": "2026-10-10"},
-    )
+    dados = {"amount": 688.31, "description": "Reserva", "created_on": "2026-10-10"}
+    r = m.c.post(f"/reconciliation/{item['id']}/reserva", json=dados)
     assert r.status_code == 200, r.text
     assert r.json()["linked"]["kind"] == "reserva"
     assert m.c.get("/budgets/summary?year=2026&month=10").json()["caixa"]["gasto_total"] == gasto
+    assert m.mes()["months"][0]["available"] == round(disponivel - 688.31, 2)
+    assert m.c.post(f"/reconciliation/{item['id']}/reserva", json=dados).status_code == 409
     assert m.mes()["months"][0]["available"] == round(disponivel - 688.31, 2)
 
 
@@ -189,13 +201,13 @@ def test_obrigacao_criada_pela_conferencia(m, outubro):
     item = _item(m, "Financiamento da moto", 618.08, "obrigacao",
                  prefill={"installments": 48, "first_due": "2026-11-09"})
     assert item["prefill"]["installments"] == 48
-    r = m.c.post(
-        f"/reconciliation/{item['id']}/compromisso",
-        json={"description": "Financiamento da moto", "category_id": outubro["moto"],
-              "amount": 618.08, "first_due": "2026-11-09", "installments": 48},
-    )
+    dados = {"description": "Financiamento da moto", "category_id": outubro["moto"],
+             "amount": 618.08, "first_due": "2026-11-09", "installments": 48}
+    r = m.c.post(f"/reconciliation/{item['id']}/compromisso", json=dados)
     assert r.status_code == 200, r.text
     assert r.json()["linked"]["kind"] == "compromisso"
+    assert len(m.c.get("/commitments").json()) == 1
+    assert m.c.post(f"/reconciliation/{item['id']}/compromisso", json=dados).status_code == 409
     assert len(m.c.get("/commitments").json()) == 1
 
     # O mesmo contrato citado de novo sugere o compromisso já cadastrado.
@@ -221,6 +233,13 @@ def test_vinculo_perdido_volta_a_ser_pendencia(m, outubro):
     lista = _lista(m)
     assert lista["items"][0]["link_missing"] is True
     assert lista["counts"]["pendente"] == 1 and lista["counts"]["resolvido"] == 0
+
+    dados = {"date": "2026-10-19", "description": "Trava", "amount_paid": 50.0,
+             "category_id": outubro["moto"]}
+    assert m.c.post(f"/reconciliation/{item['id']}/lancamento", json=dados).status_code == 409
+    reaberto = m.c.patch(f"/reconciliation/{item['id']}", json={"status": "pendente"})
+    assert reaberto.status_code == 200 and reaberto.json()["transaction_id"] is None
+    assert m.c.post(f"/reconciliation/{item['id']}/lancamento", json=dados).status_code == 200
 
 
 def test_conferencia_nao_cria_compra_no_cartao(m, outubro):

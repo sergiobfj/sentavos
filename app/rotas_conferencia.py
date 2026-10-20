@@ -198,6 +198,14 @@ class PedidoDeVinculo(SQLModel):
     note: str | None = None
 
 
+def _exigir_sem_vinculo(item: ReconciliationItem) -> None:
+    """Uma decisão já aplicada não pode criar outra movimentação por segundo toque."""
+    if (item.status in (ReconciliationStatus.RESOLVIDO, ReconciliationStatus.IGNORADO)
+            or item.transaction_id is not None or item.commitment_id is not None
+            or item.provision_id is not None):
+        raise HTTPException(status_code=409, detail="Este item já recebeu uma decisão. Confira o vínculo antes de criar outro registro.")
+
+
 @router_conferencia.post("/reconciliation/{item_id}/vincular")
 def ja_existe(
     item_id: int,
@@ -242,6 +250,7 @@ def criar_lancamento(
     """
     exigir_escrita(dono)
     item = exigir(session, ReconciliationItem, item_id, dono, "Item")
+    _exigir_sem_vinculo(item)
     categoria = buscar(session, Category, dados.category_id, dono)
     if categoria is None:
         raise HTTPException(status_code=400, detail="Category not found")
@@ -289,6 +298,7 @@ def criar_compromisso(
     """Cria o compromisso (a Hunter, o emplacamento) e resolve o item."""
     exigir_escrita(dono)
     item = exigir(session, ReconciliationItem, item_id, dono, "Item")
+    _exigir_sem_vinculo(item)
     c = novo_compromisso(session, dono, dados)
     item.commitment_id = c.id
     item.transaction_id = item.provision_id = None
@@ -309,6 +319,7 @@ def criar_reserva(
     """Planejamento que não é gasto ("R$ 688,31 pra reserva") vira reserva."""
     exigir_escrita(dono)
     item = exigir(session, ReconciliationItem, item_id, dono, "Item")
+    _exigir_sem_vinculo(item)
     p = nova_reserva(session, dono, dados)
     item.provision_id = p.id
     item.transaction_id = item.commitment_id = None
