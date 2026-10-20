@@ -102,7 +102,7 @@ def totais(session: Session, dono: User) -> dict[int, tuple[float, float, int]]:
         for invoice_id, soma, qtd in session.exec(
             select(
                 Transaction.invoice_id,
-                func.coalesce(func.sum(Transaction.amount_paid), 0.0),
+                func.coalesce(func.sum(func.coalesce(Transaction.amount_paid, Transaction.amount_planned)), 0.0),
                 func.count(Transaction.id),
             )
             .where(Transaction.user_id == dono.id, Transaction.invoice_id.is_not(None))

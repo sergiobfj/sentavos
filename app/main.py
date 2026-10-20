@@ -44,6 +44,8 @@ from app.models import (
     CategoryType,
     CategoryUpdate,
     Commitment,
+    InvestmentPlan,
+    InvestmentMovement,
     Finalidade,
     PaymentMethod,
     Purchase,
@@ -537,6 +539,8 @@ def update_category(
         raise HTTPException(status_code=400, detail="O tipo não pode ficar vazio.")
     muda_tipo = novo_tipo is not None and CategoryType(novo_tipo) != CategoryType(category.type)
     if muda_tipo:
+        if session.exec(consulta(InvestmentPlan, dono).where(InvestmentPlan.category_id == category_id)).first():
+            raise HTTPException(409, "A categoria é usada em previsões de investimento. Mantenha o tipo de investimento.")
         lanc, compras, metas, compromissos = _uso_da_categoria(session, dono).get(
             category.id, (0, 0, 0, 0)
         )
@@ -658,7 +662,14 @@ def delete_category(
             compromisso.category_id = mover_para
             session.add(compromisso)
 
+        for plano in session.exec(consulta(InvestmentPlan, dono).where(InvestmentPlan.category_id == category_id)).all():
+            plano.category_id = mover_para
+            session.add(plano)
+
         session.flush()
+
+    elif session.exec(consulta(InvestmentPlan, dono).where(InvestmentPlan.category_id == category_id)).first():
+        raise HTTPException(409, "A categoria é usada em previsões de investimento. Mova para outra categoria antes de excluir.")
 
     elif compromissos_da_categoria(session, dono, category_id):
         # Sem lançamento mas com compromisso: apagar deixaria o financiamento
@@ -936,6 +947,8 @@ def set_asset_snapshot(
             snapshot, update={"user_id": dono.id, "observed_on": observado, "reconciliation_note": nota}
         )
 
+    investimentos.saldo_informado(session, dono, snapshot.asset_id,
+        observado or (month_bounds(snapshot.year, snapshot.month)[1] - dt.timedelta(days=1)))
     session.add(db_snapshot)
     session.commit()
     session.refresh(db_snapshot)
@@ -975,6 +988,8 @@ def update_asset_snapshot(
     for key, value in snapshot_data.model_dump(exclude_unset=True).items():
         setattr(snapshot, key, value)
 
+    investimentos.saldo_informado(session, dono, snapshot.asset_id,
+        snapshot.observed_on or (month_bounds(snapshot.year, snapshot.month)[1] - dt.timedelta(days=1)))
     session.add(snapshot)
     session.commit()
     session.refresh(snapshot)
@@ -1056,6 +1071,10 @@ def delete_asset(asset_id: int, session: Session = Depends(get_session),
     dono: User = Depends(require_user)):
     exigir_escrita(dono)
     asset = exigir(session, Asset, asset_id, dono, "Ativo")
+
+    if (session.exec(consulta(InvestmentPlan, dono).where(InvestmentPlan.asset_id == asset_id)).first()
+            or session.exec(consulta(InvestmentMovement, dono).where(InvestmentMovement.asset_id == asset_id)).first()):
+        raise HTTPException(409, "Este investimento tem movimentos ou previsões. Arquive para preservar o histórico.")
 
     # Os saldos saem junto: sem isso a FK barra o delete e sobraria histórico
     # órfão de um ativo que não existe mais.

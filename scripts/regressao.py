@@ -27,7 +27,7 @@ ORDEM = [
     # lançamento e ativo antes do movimento de investimento.
     "categories", "financial_accounts", "cards", "purchases", "invoices", "commitments", "transactions",
     "invoice_payments", "budgets", "assets", "asset_snapshots", "account_balance_snapshots", "transfers",
-    "investment_movements", "commitment_skips", "provisions", "scenarios", "scenario_items",
+    "investment_movements", "investment_plans", "commitment_skips", "provisions", "scenarios", "scenario_items",
     "reconciliation_items", "audit_events",
 ]
 MESES = [(2025 + (7 + i) // 12, (7 + i) % 12 + 1) for i in range(24)]  # 2025-08 .. 2027-07

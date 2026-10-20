@@ -19,6 +19,7 @@ from app.models import (
     AccountBalanceSnapshot,
     AccountType,
     FinancialAccount,
+    InvestmentPlan,
     FinancialAccountBase,
     FinancialAccountCreate,
     FinancialAccountUpdate,
@@ -155,6 +156,7 @@ def atualizar_conta(
 
 def _tem_movimento(session: Session, dono: User, conta_id: int) -> bool:
     perguntas = (
+        consulta(InvestmentPlan, dono).where(InvestmentPlan.account_id == conta_id),
         consulta(Transaction, dono).where(Transaction.account_id == conta_id),
         consulta(InvoicePayment, dono).where(InvoicePayment.account_id == conta_id),
         consulta(Transfer, dono).where(or_(Transfer.from_account_id == conta_id, Transfer.to_account_id == conta_id)),

@@ -307,7 +307,7 @@ def _limpar_faturas_vazias(session: Session, dono: User, faturas: list[Invoice])
     session.flush()
 
 
-def _gerar_parcelas(session: Session, dono: User, compra: Purchase, cartao: Card) -> None:
+def _gerar_parcelas(session: Session, dono: User, compra: Purchase, cartao: Card, planned: bool = False) -> None:
     """Cria as N parcelas da compra, cada uma na sua competência e na sua fatura.
 
     `amount_paid` recebe o valor da parcela e `amount_planned` fica vazio: a
@@ -323,8 +323,8 @@ def _gerar_parcelas(session: Session, dono: User, compra: Purchase, cartao: Card
                 user_id=dono.id,
                 date=competencia_da_parcela(compra.purchase_date, numero),
                 description=compra.description,
-                amount_planned=None,
-                amount_paid=valor,
+                amount_planned=valor if planned else None,
+                amount_paid=None if planned else valor,
                 note=compra.note,
                 category_id=compra.category_id,
                 expense_class=compra.expense_class,
@@ -354,6 +354,7 @@ def _ler_compra(session: Session, dono: User, compra: Purchase) -> PurchaseRead:
         installment_amounts=dividir_em_parcelas(compra.total_amount, compra.installments),
         paid_installments=pagas,
         locked=pagas > 0,
+        planned=bool(session.exec(consulta(Transaction, dono).where(Transaction.purchase_id == compra.id, Transaction.amount_paid.is_(None))).first()),
     )
 
 
@@ -397,7 +398,7 @@ def criar_compra(
     # Flush pra a compra ter id antes das parcelas apontarem pra ela.
     session.flush()
 
-    _gerar_parcelas(session, dono, compra, cartao)
+    _gerar_parcelas(session, dono, compra, cartao, dados.planned)
     session.commit()
     session.refresh(compra)
 
@@ -430,6 +431,12 @@ def atualizar_compra(
     exigir_escrita(dono)
     compra = exigir(session, Purchase, purchase_id, dono, "Compra")
     mudancas = dados.model_dump(exclude_unset=True)
+    era_prevista = _ler_compra(session, dono, compra).planned
+    prevista = mudancas.pop("planned", era_prevista)
+    if prevista is None:
+        prevista = era_prevista
+    if prevista != era_prevista and _parcelas_pagas(session, dono, compra):
+        raise HTTPException(409, "A fatura já recebeu pagamento; a compra não pode mudar de situação.")
 
     mexe_em_dinheiro = {
         chave
@@ -484,7 +491,7 @@ def atualizar_compra(
         session.flush()
 
         cartao = buscar(session, Card, compra.card_id, dono)
-        _gerar_parcelas(session, dono, compra, cartao)
+        _gerar_parcelas(session, dono, compra, cartao, prevista)
         session.flush()
         _limpar_faturas_vazias(session, dono, antigas)
     else:
@@ -492,6 +499,10 @@ def atualizar_compra(
         for parcela in session.exec(
             consulta(Transaction, dono).where(Transaction.purchase_id == compra.id)
         ).all():
+            if prevista != era_prevista:
+                valor = parcela.amount_planned if era_prevista else parcela.amount_paid
+                parcela.amount_planned = valor if prevista else None
+                parcela.amount_paid = None if prevista else valor
             parcela.description = compra.description
             parcela.category_id = compra.category_id
             parcela.note = compra.note
@@ -746,7 +757,8 @@ def ver_fatura(
                 transaction_id=t.id,
                 date=t.date,
                 description=t.description,
-                amount=t.amount_paid or 0.0,
+                amount=t.amount_paid if t.amount_paid is not None else (t.amount_planned or 0.0),
+                planned=t.amount_paid is None,
                 category_id=t.category_id,
                 category_name=categoria.name if categoria else "?",
                 color=categoria.color if categoria else "#666",
