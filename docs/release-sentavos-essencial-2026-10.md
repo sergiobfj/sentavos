@@ -34,6 +34,9 @@ Antes de qualquer escrita financeira, na conta Neon que hospeda `neondb`:
 2. Abrir a conexão da branch filha e confirmar `alembic_version=0013`, 991
    linhas, as quatro contas, `purchases.id=49` e `transactions.id=1168`
    (Uber R$5,80). Confirmar que ela está isolada da conexão de produção.
+   `scripts/verificar_ponto_neon.py` faz a comparação integral, somente
+   leitura, quando `NEON_RECOVERY_DATABASE_URL` aponta para a branch filha;
+   a URL não deve ser gravada no repositório nem impressa em logs.
 3. Capturar outro inventário lógico somente leitura imediatamente antes de
    aplicar dados. O estado da branch de recuperação e do novo inventário deve
    ser o mesmo; se houver mudança, criar novo ponto e repetir o pré-voo.
