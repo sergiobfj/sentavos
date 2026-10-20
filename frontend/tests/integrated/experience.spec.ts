@@ -44,7 +44,8 @@ test.describe.serial("Sentavos Essencial com PostgreSQL local e APIs reais",()=>
     await expect(page.locator(".e-primary strong")).toContainText("R$ 668,96");
     await expect(page.locator(".e-projection-value")).toContainText("R$");
     await expect(page.locator(".e-summary")).toContainText("A receber");
-    await expect(page.locator(".e-summary")).toContainText("A pagar");
+    await expect(page.locator(".e-summary")).toContainText("Falta pagar");
+    await expect(page.locator(".e-summary")).toContainText("A conferir");
     await expect(page.locator(".e-summary")).toContainText("R$ 1.970,00");
     await expect(page.getByRole("navigation",{name:"Navegação principal"}).getByRole("link")).toHaveCount(5);
     const bounds=await page.locator(".e-primary strong").boundingBox();
@@ -91,9 +92,9 @@ test.describe.serial("Sentavos Essencial com PostgreSQL local e APIs reais",()=>
     await login(page);
     await page.getByRole("button",{name:"Próximo mês"}).click();
     await page.getByRole("navigation",{name:"Navegação principal"}).getByRole("link",{name:"Contas"}).click();
-    await expect(page.locator(".e-bills")).toContainText("Fatura de novembro");
+    await expect(page.locator(".e-bills")).toContainText("Fatura Nubank");
     await expect(page.locator(".e-summary")).toContainText("A pagar");
-    await page.getByRole("link",{name:"Ver faturas"}).click();
+    await page.locator(".e-bill-row").filter({hasText:"Fatura Nubank"}).first().click();
     await expect(page).toHaveURL(/orcamento\?aba=faturas/);
   });
 
@@ -102,13 +103,93 @@ test.describe.serial("Sentavos Essencial com PostgreSQL local e APIs reais",()=>
     for (const month of ["Novembro", "Dezembro"]) {
       await page.getByRole("button",{name:"Próximo mês"}).click();
       await page.getByRole("navigation",{name:"Navegação principal"}).getByRole("link",{name:"Contas"}).click();
-      await expect(page.locator(".e-bills")).toContainText("abatida pelo credor");
+      await expect(page.locator(".e-bills")).toContainText("Abatida");
       await expect(page.locator(".e-bills")).toContainText(month.toLowerCase());
       await expect(page.locator(".e-bills")).not.toContainText("Hunter 350 · 3/48");
     }
     await page.getByRole("button",{name:"Próximo mês"}).click();
     await expect(page.locator(".e-bills")).toContainText("3/48");
     await expect(page.locator(".e-bills")).toContainText("R$ 618,08");
+  });
+
+  test("Contas separa Internet, Academia e emplacamento sem cobrar R$904 em outubro",async ({page})=>{
+    await login(page);
+    await page.getByRole("navigation",{name:"Navegação principal"}).getByRole("link",{name:"Contas"}).click();
+    await expect(page.locator(".e-bills")).toContainText("Internet");
+    await expect(page.locator(".e-bills")).toContainText("Academia");
+    await expect(page.locator(".e-bills")).toContainText("Emplacamento Hunter");
+    await expect(page.locator(".e-bills")).toContainText("4 × R$ 226,00");
+    await expect(page.locator(".e-summary")).toContainText("R$ 180,00");
+    await expect(page.locator(".e-summary")).not.toContainText("R$ 904,00");
+    await page.getByRole("button",{name:/Internet/}).click();
+    await page.getByRole("dialog").getByRole("button",{name:"Ainda vou pagar"}).click();
+    await expect(page.getByRole("dialog")).toContainText("Vencimento, se conhecido");
+    await page.getByRole("dialog").getByRole("button",{name:"Fechar"}).click();
+    await page.getByRole("button",{name:/Emplacamento Hunter/}).click();
+    await expect(page.getByRole("dialog")).toContainText("Nenhum pagamento será criado aqui");
+    await expect(page.getByRole("dialog").getByRole("button",{name:"Já paguei"})).toHaveCount(0);
+    await page.getByRole("dialog").getByRole("button",{name:"Fechar"}).click();
+  });
+
+  test("confirmar Internet cria uma única baixa vinculada e atualiza Contas",async ({page,request})=>{
+    await login(page);
+    const headers = await apiLogin(request);
+    const before = await (await request.get(`${apiBase}/transactions?year=2026&month=10`,{headers})).json() as {id:number}[];
+    let createdId: number | null = null;
+    try {
+      await page.getByRole("navigation",{name:"Navegação principal"}).getByRole("link",{name:"Contas"}).click();
+      await page.getByRole("button",{name:/Internet/}).click();
+      await page.getByRole("dialog").getByRole("button",{name:"Já paguei"}).click();
+      await page.locator("#bill-account").selectOption({index:1});
+      await page.locator("#bill-category").selectOption({index:1});
+      await page.locator("#bill-date").fill("2026-10-19");
+      await page.locator("#bill-timing").selectOption("after");
+      const created = page.waitForResponse(r=>r.url().includes("/reconciliation/14/lancamento") && r.request().method()==="POST");
+      await page.getByRole("dialog").getByRole("button",{name:"Registrar pagamento real"}).click();
+      expect((await created).ok()).toBeTruthy();
+      const after = await (await request.get(`${apiBase}/transactions?year=2026&month=10`,{headers})).json() as {id:number}[];
+      expect(after.length).toBe(before.length+1);
+      createdId = after.find(t=>!before.some(b=>b.id===t.id))?.id ?? null;
+      expect(createdId).toBeTruthy();
+      await expect(page.locator(".e-summary")).toContainText("R$ 120,00");
+      await expect(page.locator(".e-bills")).toContainText("Pago em 19 out");
+      await page.getByRole("navigation",{name:"Navegação principal"}).getByRole("link",{name:"Meu mês"}).click();
+      await expect(page.locator(".e-primary strong")).toContainText("R$ 608,96");
+      await expect(page.locator(".e-projection-value")).toContainText("R$ 2.578,96");
+      const repeated = await request.post(`${apiBase}/reconciliation/14/lancamento`,{headers,data:{date:"2026-10-19",description:"Internet",amount_paid:60,category_id:1}});
+      expect(repeated.status()).toBe(409);
+    } finally {
+      if (createdId) await request.delete(`${apiBase}/transactions/${createdId}`,{headers});
+      await request.patch(`${apiBase}/reconciliation/14`,{headers,data:{status:"pendente",note:null}});
+    }
+  });
+
+  test("vencimento confirmado entra em A pagar e reduz a previsão sem criar gasto",async ({page,request})=>{
+    await login(page);
+    const headers = await apiLogin(request);
+    let commitmentId: number | null = null;
+    const before = (await (await request.get(`${apiBase}/transactions?year=2026&month=10`,{headers})).json() as unknown[]).length;
+    try {
+      await page.getByRole("navigation",{name:"Navegação principal"}).getByRole("link",{name:"Contas"}).click();
+      await page.getByRole("button",{name:/Internet/}).click();
+      await page.getByRole("dialog").getByRole("button",{name:"Ainda vou pagar"}).click();
+      await page.locator("#bill-due").fill("2026-10-27");
+      await page.locator("#bill-due-category").selectOption({index:1});
+      const created = page.waitForResponse(r=>r.url().includes("/reconciliation/14/compromisso") && r.request().method()==="POST");
+      await page.getByRole("dialog").getByRole("button",{name:"Adicionar a A pagar"}).click();
+      const result = await created;
+      expect(result.ok()).toBeTruthy();
+      commitmentId = (await result.json()).commitment_id;
+      await expect(page.locator(".e-bills")).toContainText("vence 27 out");
+      await expect(page.locator(".e-summary")).toContainText("R$ 60,00");
+      const after = (await (await request.get(`${apiBase}/transactions?year=2026&month=10`,{headers})).json() as unknown[]).length;
+      expect(after).toBe(before);
+      await page.getByRole("navigation",{name:"Navegação principal"}).getByRole("link",{name:"Meu mês"}).click();
+      await expect(page.locator(".e-projection-value")).toContainText("R$ 2.578,96");
+    } finally {
+      if (commitmentId) await request.delete(`${apiBase}/commitments/${commitmentId}`,{headers});
+      await request.patch(`${apiBase}/reconciliation/14`,{headers,data:{status:"pendente",note:null}});
+    }
   });
 
   test("cartão parcelado e aporte passam pelos fluxos financeiros existentes",async ({page,request})=>{

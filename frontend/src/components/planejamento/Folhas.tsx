@@ -35,15 +35,18 @@ import type {
 export function CalculoSheet({
   mes,
   contas,
+  confirmedAvailable,
   onContas,
   onClose,
 }: {
   mes: PlanoMes;
   contas: ContaPlanejamento[];
+  confirmedAvailable?: number | null;
   onContas?: () => void;
   onClose: () => void;
 }) {
   const incluidas = contas.filter((c) => c.included && !c.stale).length;
+  const estimatesExcluded = confirmedAvailable == null ? 0 : confirmedAvailable - mes.available;
   return (
     <Modal title={`Cálculo de ${nomeDoMes(mes.year, mes.month)}`} onClose={onClose}>
       <div className="m-body">
@@ -85,9 +88,18 @@ export function CalculoSheet({
           </li>
           <li className="total">
             <span className="op">=</span>
-            <span className="rot">Disponível</span>
+            <span className="rot">{estimatesExcluded > 0.005 ? "Disponível com estimativas" : "Disponível"}</span>
             <b className="v tnum">{formatMoney(mes.available)}</b>
           </li>
+          {estimatesExcluded > 0.005 && <><li>
+            <span className="op">+</span>
+            <span className="rot">Saídas estimadas a conferir</span>
+            <b className="v tnum">{formatMoney(estimatesExcluded)}</b>
+          </li><li className="total">
+            <span className="op">=</span>
+            <span className="rot">Previsão com contas confirmadas</span>
+            <b className="v tnum">{formatMoney(confirmedAvailable!)}</b>
+          </li></>}
         </ul>
         <p className="nota">
           O que já entrou ou saiu está no saldo atual e não é somado de novo. Reservar não é

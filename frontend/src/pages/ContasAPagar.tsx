@@ -1,59 +1,54 @@
+import { useState } from "react";
 import { Link } from "react-router-dom";
-import { FinancialRow, LoadError, SectionTitle, Summary, type FinancialLine } from "../components/essencial/Common";
+import { LoadError, SectionTitle, Summary } from "../components/essencial/Common";
 import HunterAdvance from "../components/essencial/HunterAdvance";
+import BillActions from "../components/essencial/BillActions";
+import { billView } from "../lib/bills";
 import { useCommitment, useCommitments, useInvoicesSummary, usePlanningHorizon, usePlanningMonth, useReconciliation, useTransactions } from "../lib/queries";
 import { currentPeriod, formatPeriod, usePeriod } from "../lib/period";
 import { formatDiaMes, formatMoney } from "../lib/format";
-import type { PlanoItem } from "../lib/tiposPlanejamento";
+import type { PlanoItem, ReconciliationItem } from "../lib/tiposPlanejamento";
 
-const due = (item: PlanoItem) => item.direction === "saida" && item.remaining > 0 &&
-  (item.source === "cartao" || item.source === "parcelado" || item.source === "recorrente" || item.expense_class === "fixed");
+function BillRow({ name, value, detail, status, onClick, to }: { name: string; value: number; detail: string; status: string; onClick?: () => void; to?: string }) {
+  const content = <><span><strong>{name}</strong><small>{detail}</small></span><span className="e-bill-amount"><b className="tnum">{formatMoney(value)}</b><small>{status}</small></span></>;
+  return to ? <Link to={to} className="e-bill-row">{content}</Link> : <button type="button" className="e-bill-row e-bill-button" onClick={onClick}>{content}</button>;
+}
 
 export default function ContasAPagar() {
   const { period } = usePeriod();
+  const [selected, setSelected] = useState<{ due?: PlanoItem; review?: ReconciliationItem } | null>(null);
   const planning = usePlanningMonth(period, null);
-  const invoices = useInvoicesSummary();
-  const commitments = useCommitments();
   const transactions = useTransactions();
+  const invoices = useInvoicesSummary();
   const reconciliation = useReconciliation(period);
+  const commitments = useCommitments();
   const hunter = commitments.data?.find(c => /Hunter 350/i.test(c.description));
   const hunterDetail = useCommitment(hunter?.id ?? null);
   const now = currentPeriod();
-  const distance = Math.max(0, (period.year-now.year)*12 + period.month-now.month);
-  const horizon = usePlanningHorizon(Math.min(distance+4,24));
+  const distance = Math.max(0, (period.year - now.year) * 12 + period.month - now.month);
+  const horizon = usePlanningHorizon(Math.min(distance + 4, 24));
   const month = planning.data?.months.find(m => m.year === period.year && m.month === period.month);
-  const obligations = (month?.items ?? []).filter(due);
-  // O planejamento já deduplica faturas, compromissos e previstos. A lista
-  // abaixo só mostra suas origens; o total nunca soma outra fonte por cima.
-  const toPay = obligations.reduce((n,i)=>n+i.remaining,0);
-  const paidCommitments = (month?.items ?? []).filter(i => i.direction === "saida" && i.status === "pago" && i.commitment_id != null).reduce((n,i)=>n+i.amount,0);
-  const paidStandaloneFixed = (transactions.data ?? []).filter(t=>t.amount_paid != null && t.purchase_id == null && t.commitment_id == null && t.effective_expense_class === "fixed").reduce((n,t)=>n+(t.amount_paid??0),0);
-  const alreadyPaid = (invoices.data?.paid_this_month ?? 0) + paidCommitments + paidStandaloneFixed;
-  const cards = (invoices.data?.cards ?? []).filter(c=>c.current);
-  const otherObligations = obligations.filter(i=>i.source!=="cartao");
+  const view = billView(planning.data, month, reconciliation.data?.items ?? [], transactions.data ?? []);
   const abated = (hunterDetail.data?.schedule ?? []).filter(o=>o.status==="abatida" && o.due_date.slice(0,7)===`${period.year}-${String(period.month).padStart(2,"0")}`);
-  const toCheck = (reconciliation.data?.items ?? []).filter(i=>i.status==="pendente"||i.status==="confirmar").length;
   const preview = (horizon.data?.months ?? []).filter(m=>(m.year-period.year)*12+m.month-period.month>0).slice(0,3);
-  const line = (i:PlanoItem):FinancialLine => ({key:i.key,description:`${i.description}${i.label?` · ${i.label}`:""}`,date:i.date,value:i.remaining,status:i.certainty==="estimado"?"A confirmar":i.status==="vencido"?"Vencido":"A pagar",detail:i.detail??undefined});
+  const invoicePayments = invoices.data?.payments ?? [];
+  const paid = invoicePayments.reduce((n,p)=>n+p.amount,0)+view.paidPlanned.reduce((n,i)=>n+i.amount,0)+view.paidCash.reduce((n,t)=>n+(t.amount_paid??0),0);
   return <div className="e-page e-bills">
     <SectionTitle title="Contas"><Link to="/planejamento/compromissos">Cronogramas ›</Link></SectionTitle>
-    <p className="e-page-sub">Faturas e pagamentos de {formatPeriod(period)}.</p>
-    <LoadError error={planning.error||invoices.error||commitments.error||hunterDetail.error||reconciliation.error}/>
-    <Summary items={[{label:"A pagar",value:month?toPay:null},{label:"Já paguei",value:month?alreadyPaid:null}]} />
-    {toCheck>0&&<p className="e-bills-pending"><Link to="/organizar">{toCheck} informações a conferir neste mês ›</Link></p>}
-    <SectionTitle title="Cartões"><Link to="/orcamento?aba=faturas">Ver faturas ›</Link></SectionTitle>
-    <div className="e-list">{cards.map(c=><Link to="/orcamento?aba=faturas" className="e-bill-row" key={c.card_id}>
-      <span><strong>{c.name}</strong><small>Fatura de {formatPeriod(period)} · vence {formatDiaMes(c.current!.due_date)}</small></span>
-      <span className="e-bill-amount"><b className="tnum">{formatMoney(c.current!.remaining)}</b><small>{c.current!.status === "paga" ? "Paga" : c.current!.status === "atrasada" ? "Vencida" : c.current!.status === "parcial" ? "Parcial" : "A pagar"}</small></span>
-    </Link>)}{!cards.length&&<p className="e-empty">Nenhuma fatura neste mês.</p>}</div>
-    <SectionTitle title="Compromissos"><Link to="/planejamento/compromissos">Ver todos ›</Link></SectionTitle>
-    <div className="e-list">{otherObligations.map(i=><Link to={i.commitment_id!=null?`/planejamento/compromissos?id=${i.commitment_id}`:"/planejamento"} className="e-linked-row" key={i.key}><FinancialRow line={line(i)}/></Link>)}
-      {abated.map(o=><Link to={`/planejamento/compromissos?id=${hunter!.id}`} className="e-bill-row" key={`abatida-${o.number}`}><span><strong>{hunter!.description} · {o.label}</strong><small>Venceria {formatDiaMes(o.due_date)} · abatida pelo credor em {o.abated_on?formatDiaMes(o.abated_on):"data a confirmar"}</small></span><span className="e-bill-amount"><b>Abatida</b><small>{formatMoney(o.amount)} sem saída</small></span></Link>)}
-      {!otherObligations.length&&!abated.length&&<p className="e-empty">Nenhum compromisso pendente neste mês.</p>}
-    </div>
+    <p className="e-page-sub">Faturas e pagamentos · {formatPeriod(period)}</p>
+    <LoadError error={planning.error || transactions.error || invoices.error || reconciliation.error || commitments.error || hunterDetail.error} />
+    <Summary items={[{label:"A pagar",value:month?view.toPay:null},{label:"A conferir",value:month?view.toCheck:null},{label:"Já pagas",value:month?paid:null}]} />
+    {view.review.some(i=>Number(i.prefill?.installments??0)>1 || i.prefill?.bill_visibility==="quote")&&<p className="e-bills-count-note">A conferir: valor deste mês. Parcelas sem data e cotações aparecem abaixo, fora do total.</p>}
+    <SectionTitle title="A pagar" />
+    <div className="e-list">{view.due.map(i=><BillRow key={i.key} name={`${i.description}${i.label?` · ${i.label}`:""}`} value={i.remaining} detail={`${i.source==="cartao"?"Fatura · ":""}vence ${formatDiaMes(i.date)}${i.source==="cartao"&&i.amount>i.remaining?` · pago ${formatMoney(i.amount-i.remaining)}`:""}`} status={i.status==="vencido"?"Vencida":"A pagar"} to={i.invoice_id!=null?"/orcamento?aba=faturas":i.commitment_id==null?"/lancamentos":undefined} onClick={i.commitment_id!=null?()=>setSelected({due:i}):undefined}/>)}{!view.due.length&&<p className="e-empty">Nenhuma obrigação confirmada pendente neste mês.</p>}</div>
+    <SectionTitle title="A conferir"><Link to="/organizar">Conferir mês ›</Link></SectionTitle>
+    <div className="e-list">{view.review.map(i=>{const installments=Number(i.prefill?.installments??1);const parcel=Number(i.prefill?.amount??(i.amount&&installments>1?i.amount/installments:0));return <BillRow key={`review-${i.id}`} name={i.description} value={i.amount??0} detail={installments>1?`${installments} × ${formatMoney(parcel)} · datas a confirmar`:i.prefill?.bill_visibility==="quote"||i.prefill?.confirmed===false?"Cotação · contratação a confirmar":i.date?`Referência ${formatDiaMes(i.date)}`:"Vencimento não informado"} status="A conferir" onClick={()=>setSelected({review:i})}/>;})}{view.estimated.map(i=><BillRow key={i.key} name={i.description} value={i.remaining} detail={`Previsto para ${formatDiaMes(i.date)}`} status="Previsto" to={i.commitment_id!=null?`/planejamento/compromissos?id=${i.commitment_id}`:"/lancamentos"}/>)}{!view.review.length&&!view.estimated.length&&<p className="e-empty">Nada para conferir neste mês.</p>}</div>
+    <SectionTitle title="Já pagas" />
+    <div className="e-list">{invoicePayments.map(p=><BillRow key={`invoice-payment-${p.id}`} name={`Fatura ${p.card_name}`} value={p.amount} detail={`Pago em ${formatDiaMes(p.date)} · fatura ${String(p.invoice_month).padStart(2,"0")}/${p.invoice_year}`} status="Paga" to="/orcamento?aba=faturas"/>)}{view.paidPlanned.map(i=><BillRow key={i.key} name={i.description} value={i.amount} detail={`Vencia ${formatDiaMes(i.date)}`} status="Paga" to={`/planejamento/compromissos?id=${i.commitment_id}`}/>)}{view.paidCash.map(t=><BillRow key={`paid-${t.id}`} name={t.description} value={t.amount_paid??0} detail={`Pago em ${formatDiaMes(t.date)}${t.account_name?` · ${t.account_name}`:""}`} status="Paga" to="/lancamentos"/>)}{abated.map(o=><BillRow key={`abatida-${o.number}`} name={`${hunter!.description} · ${o.label}`} value={o.amount} detail={`Venceria ${formatDiaMes(o.due_date)} · sem saída de caixa`} status="Abatida" to={`/planejamento/compromissos?id=${hunter!.id}`}/>)}{!invoicePayments.length&&!view.paidPlanned.length&&!view.paidCash.length&&!abated.length&&<p className="e-empty">Nenhum pagamento conhecido neste mês.</p>}</div>
     <SectionTitle title="Próximos vencimentos"><Link to="/planejamento/proximos">Comparar meses ›</Link></SectionTitle>
-    <div className="e-preview">{preview.map(m=><Link to="/planejamento/proximos" className="e-preview-month" key={`${m.year}-${m.month}`}><strong>{formatPeriod({year:m.year,month:m.month})}</strong><span>Faturas e compromissos</span><b className="tnum">{formatMoney(m.items.filter(due).reduce((n,i)=>n+i.remaining,0))}</b></Link>)}</div>
+    <div className="e-preview">{preview.map(m=><Link to="/planejamento/proximos" className="e-preview-month" key={`${m.year}-${m.month}`}><strong>{formatPeriod({year:m.year,month:m.month})}</strong><span>Faturas e compromissos confirmados</span><b className="tnum">{formatMoney(billView(horizon.data,m,[],[]).toPay)}</b></Link>)}</div>
     {hunter&&<HunterAdvance/>}
-    <p className="e-bills-footnote">Compras entram no gasto quando acontecem; a fatura entra aqui quando vence. Abatimentos não são pagamentos.</p>
+    <p className="e-bills-footnote">Faturas contam uma vez, no vencimento. Valores a conferir não reduzem a previsão; abatimentos não saem da conta.</p>
+    {selected&&<BillActions due={selected.due} review={selected.review} onClose={()=>setSelected(null)}/>}
   </div>;
 }

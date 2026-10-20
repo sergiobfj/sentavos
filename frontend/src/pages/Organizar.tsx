@@ -163,6 +163,7 @@ function ItemSheet({ item, podeEscrever, onClose }: { item: ReconciliationItem; 
   const criarReserva = useReconProvision();
   const { data: categorias } = useCategories();
   const aberto = item.status === "pendente" || item.status === "confirmar" || item.link_missing;
+  const needsReopen = item.link_missing && item.status === "resolvido";
   const erro = (vincular.error || atualizar.error) as ApiError | null;
 
   function escolherCandidato(c: Candidato) {
@@ -252,6 +253,10 @@ function ItemSheet({ item, podeEscrever, onClose }: { item: ReconciliationItem; 
         {item.link_missing && (
           <div className="aviso-box">O que estava vinculado foi apagado depois. O item voltou a esperar uma decisão.</div>
         )}
+        {podeEscrever && needsReopen && <button className="btn btn-block" disabled={atualizar.isPending}
+          onClick={() => atualizar.mutate({ id: item.id, data: { status: "pendente" } }, { onSuccess: onClose })}>
+          Reabrir para criar novo registro
+        </button>}
 
         {aberto && item.kind === "saldo" && (
           <div className="aviso-box" style={{ marginTop: "var(--s3)" }}>
@@ -282,7 +287,7 @@ function ItemSheet({ item, podeEscrever, onClose }: { item: ReconciliationItem; 
           </>
         )}
 
-        {podeEscrever && aberto && acao === null && (
+        {podeEscrever && aberto && !needsReopen && acao === null && (
           <div className="acoes">
             {podeLancar && (
               <button className="btn" onClick={() => setAcao("realizado")}>
@@ -306,7 +311,7 @@ function ItemSheet({ item, podeEscrever, onClose }: { item: ReconciliationItem; 
             )}
           </div>
         )}
-        {podeEscrever && aberto && acao === null && (
+        {podeEscrever && aberto && !needsReopen && acao === null && (
           <div className="acoes-linha">
             <button className="btn btn-ghost btn-sm" onClick={() => setAcao("confirmar")}>Precisa confirmar</button>
             <button className="btn btn-ghost btn-sm" onClick={() => setAcao("ignorar")}>Ignorar</button>
