@@ -4,6 +4,9 @@ Implementado a partir de `origin/main` (`622c783`), na branch `feat/refinamento-
 Revisão feita no aplicativo React existente, com API e PostgreSQL locais e dados
 sintéticos. As capturas antes/depois usam o mesmo usuário de teste.
 
+O complemento mais recente, descrito ao final, está nas capturas de
+`refinamento-visual-v2/complemento/`. As imagens da primeira rodada foram preservadas.
+
 ## Identidade e componentes
 
 - Fundo `#101319`, superfícies `#1C222D` / `#252C38`, bordas `#343C4B`.
@@ -79,3 +82,33 @@ unido, excluído ou alterado.
 Safe area validada pela implementação CSS e navegação em navegador; validação
 em aparelho Android físico continua como conferência manual. Nenhuma publicação
 ou alteração de produção foi feita.
+
+## Complemento — revisão em 320, 400 e 768px
+
+- Paleta e navegação inferior preservadas. Rótulos dos indicadores e textos
+  secundários/status das linhas usam 12px; espaçamentos e altura mínima de 64px das linhas
+  foram mantidos. Títulos não repetem o período já disponível no cabeçalho.
+- “Já pagas” exibe despesas fixas quitadas e pagamentos vinculados a compromissos
+  ou itens de conferência do tipo obrigação. Compras variáveis cotidianas permanecem
+  em Lançamentos. A lista e seu indicador usam o mesmo recorte de apresentação.
+- Faturas só aparecem como quitadas quando a API informa `paga`; pagamentos
+  parciais continuam disponíveis em Lançamentos/Faturas, e o restante segue em
+  A pagar. Abatimentos permanecem consultáveis em “Abatidas”, fora de Já pagas.
+- Despesas variáveis previstas continuam em A pagar. Nenhum lançamento,
+  classificação, saldo, total canônico ou contrato de API foi alterado.
+- Rolagem por eventos de roda do navegador verificou cada linha nas três
+  larguras: linha inteira entre cabeçalho e barra inferior, com teste de obstrução
+  via `elementFromPoint`. Nenhum conteúdo inacessível: não foi necessário corrigir
+  a barra. Capturas de viewport no fim da rolagem mostram a reserva de espaço.
+- Larguras preservadas: contêiner de 640px no tablet de 768px e conteúdo de 960px
+  em desktop de 1440px.
+- Validação: TypeScript, build, 16 E2E visuais e 7 testes de modelo aprovados.
+  O E2E de Já pagas compara transações e resumo canônico antes/depois da consulta,
+  usando despesas fixas, obrigações variáveis vinculadas, compras cotidianas,
+  previsões e faturas com quitação completa/parcial em dados sintéticos locais.
+
+| Largura | Lançamentos | Contas | Fim da rolagem |
+| --- | --- | --- | --- |
+| 320px | [Tela](refinamento-visual-v2/complemento/lancamentos-320.png) | [Tela](refinamento-visual-v2/complemento/contas-320.png) | [Viewport](refinamento-visual-v2/complemento/contas-fim-rolagem-320.png) |
+| 400px | [Tela](refinamento-visual-v2/complemento/lancamentos-400.png) | [Tela](refinamento-visual-v2/complemento/contas-400.png) | [Viewport](refinamento-visual-v2/complemento/contas-fim-rolagem-400.png) |
+| 768px | [Tela](refinamento-visual-v2/complemento/lancamentos-768.png) | [Tela](refinamento-visual-v2/complemento/contas-768.png) | [Viewport](refinamento-visual-v2/complemento/contas-fim-rolagem-768.png) |

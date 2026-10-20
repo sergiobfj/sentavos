@@ -1,4 +1,4 @@
-import { useMutation, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
+import { useMutation, useQueries, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import {
   assetsApi,
   budgetsApi,
@@ -384,6 +384,15 @@ export function useInvoice(id: number | null) {
     queryFn: () => invoicesApi.get(id!),
     enabled: id != null,
   });
+}
+
+// Consulta somente as faturas com pagamentos no período, inclusive referências antigas.
+// Reutiliza o cache e a invalidação da tela de detalhes; o status vem da API.
+export function useInvoiceDetails(ids: number[]) {
+  return useQueries({ queries: [...new Set(ids)].map(id => ({
+    queryKey: [...keys.invoices, "detalhe", id],
+    queryFn: () => invoicesApi.get(id),
+  })) });
 }
 
 export function usePayInvoice() {

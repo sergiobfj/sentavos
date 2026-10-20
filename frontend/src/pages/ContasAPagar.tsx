@@ -5,8 +5,8 @@ import { EntryEditor } from "../components/essencial/Common";
 import type { Transaction } from "../lib/types";
 import BillActions from "../components/essencial/BillActions";
 
-import { useCommitment, useCommitments, useInvoicesSummary, useMonthSummary, useCategories, useTransactions } from "../lib/queries";
-import { formatPeriod, usePeriod } from "../lib/period";
+import { useCommitment, useCommitments, useInvoicesSummary, useInvoiceDetails, useMonthSummary, useCategories, useReconciliation, useTransactions } from "../lib/queries";
+import { usePeriod } from "../lib/period";
 import { formatDiaMes, formatMoney } from "../lib/format";
 import type { PlanoItem, ReconciliationItem } from "../lib/tiposPlanejamento";
 
@@ -23,24 +23,33 @@ export default function ContasAPagar() {
   const [editing,setEditing] = useState<Transaction|null>(null);
   const transactions = useTransactions();
   const invoices = useInvoicesSummary();
+  const reconciliation = useReconciliation(period);
+  const invoiceDetails = useInvoiceDetails((invoices.data?.payments??[]).map(p=>p.invoice_id));
 
   const commitments = useCommitments();
   const hunter = commitments.data?.find(c => /Hunter 350/i.test(c.description));
   const hunterDetail = useCommitment(hunter?.id ?? null);
   const month = summary.data?.month;
   const r = summary.data;
+  const linkedBills = new Set((reconciliation.data?.items??[])
+    .filter(i=>i.kind==="obrigacao" && !i.link_missing && i.transaction_id!=null)
+    .map(i=>i.transaction_id));
+  // Recorte de apresentação: compras cotidianas continuam em Lançamentos.
+  // A classificação e os vínculos existentes identificam a obrigação, nunca o nome/valor.
   const view = {due:r?.due??[], estimated:r?.estimated??[],review:r?.review??[],toPay:r?.to_pay,toCheck:r?.to_check,
-    paidPlanned:[] as PlanoItem[],
-    paidCash:(transactions.data??[]).filter(t=>r?.paid_cash_ids.includes(t.id))};
+    paidCash:(transactions.data??[]).filter(t=>r?.paid_cash_ids.includes(t.id) &&
+      (t.effective_expense_class==="fixed" || t.commitment_id!=null || linkedBills.has(t.id)))};
   const abated = (hunterDetail.data?.schedule ?? []).filter(o=>o.status==="abatida" && o.due_date.slice(0,7)===`${period.year}-${String(period.month).padStart(2,"0")}`);
-  const invoicePayments = invoices.data?.payments ?? [];
-  const paid = invoicePayments.reduce((n,p)=>n+p.amount,0)+view.paidPlanned.reduce((n,i)=>n+i.amount,0)+view.paidCash.reduce((n,t)=>n+(t.amount_paid??0),0);
+  const settledInvoices = new Set(invoiceDetails.filter(q=>q.data?.status==="paga").map(q=>q.data!.id));
+  const invoicePayments = (invoices.data?.payments??[]).filter(p=>settledInvoices.has(p.invoice_id));
+  const paidLoading = transactions.isPending || invoices.isPending || reconciliation.isPending || invoiceDetails.some(q=>q.isPending);
+  const paidError = reconciliation.error || invoiceDetails.find(q=>q.error)?.error;
+  const paid = invoicePayments.reduce((n,p)=>n+p.amount,0)+view.paidCash.reduce((n,t)=>n+(t.amount_paid??0),0);
   const checkCount = view.review.length + view.estimated.length;
   return <div className="e-page e-bills">
     <SectionTitle title="Contas"><Link to="/faturas">Faturas ›</Link></SectionTitle>
-    <p className="e-page-sub">{formatPeriod(period)}</p>
-    <LoadError error={summary.error || transactions.error || invoices.error || commitments.error || hunterDetail.error} />
-    <Summary items={[{label:"A pagar",value:month?view.toPay:null},{label:"A conferir",value:null,text:month?`${checkCount} ${checkCount===1?"item":"itens"}`:"—",tone:checkCount?"attention":undefined,note:month&&(view.toCheck??0)>0?`${formatMoney(view.toCheck)} neste mês`:undefined},{label:"Já pagas",value:month?paid:null}]} />
+    <LoadError error={summary.error || transactions.error || invoices.error || commitments.error || hunterDetail.error || paidError} />
+    <Summary items={[{label:"A pagar",value:month?view.toPay:null},{label:"A conferir",value:null,text:month?`${checkCount} ${checkCount===1?"item":"itens"}`:"—",tone:checkCount?"attention":undefined,note:month&&(view.toCheck??0)>0?`${formatMoney(view.toCheck)} neste mês`:undefined},{label:"Já pagas",value:month&&!paidLoading&&!paidError?paid:null}]} />
     <section className="e-bill-section" aria-label="A pagar">
     <SectionTitle title="A pagar"><span className="e-section-count">{view.due.length}</span></SectionTitle>
     <div className="e-list">{view.due.map(i=><BillRow key={i.key} name={`${i.description}${i.label?` · ${i.label}`:""}`} value={i.remaining} detail={`${i.source==="cartao"?"Fatura · ":""}vence ${formatDiaMes(i.date)}${i.source==="cartao"&&i.amount>i.remaining?` · pago ${formatMoney(i.amount-i.remaining)}`:""}`} status={i.status==="vencido"?"Vencida":"A pagar"} to={i.invoice_id!=null?"/faturas":undefined} onClick={()=>{const t=transactions.data?.find(t=>t.id===i.transaction_id);if(t)setEditing(t);else setSelected({due:i});}}/>)}{!view.due.length&&<p className="e-empty">Nenhuma obrigação confirmada pendente neste mês.</p>}</div>
@@ -52,8 +61,9 @@ export default function ContasAPagar() {
     </section>
     <section className="e-bill-section e-bill-paid" aria-label="Já pagas">
     <SectionTitle title="Já pagas" />
-    <div className="e-list">{invoicePayments.map(p=><BillRow key={`invoice-payment-${p.id}`} name={`Fatura ${p.card_name}`} value={p.amount} detail={`Pago em ${formatDiaMes(p.date)} · fatura ${String(p.invoice_month).padStart(2,"0")}/${p.invoice_year}`} status="Paga" to="/faturas"/>)}{view.paidPlanned.map(i=><BillRow key={i.key} name={i.description} value={i.amount} detail={`Vencia ${formatDiaMes(i.date)}`} status="Paga" onClick={()=>setSelected({due:i})}/>)}{view.paidCash.map(t=><BillRow key={`paid-${t.id}`} name={t.description} value={t.amount_paid??0} detail={`Pago em ${formatDiaMes(t.date)}${t.account_name?` · ${t.account_name}`:""}`} status="Paga" to="/lancamentos"/>)}{abated.map(o=><BillRow key={`abatida-${o.number}`} name={`${hunter!.description} · ${o.label}`} value={o.amount} detail={`Venceria ${formatDiaMes(o.due_date)} · sem saída de caixa`} status="Abatida" />)}{!invoicePayments.length&&!view.paidPlanned.length&&!view.paidCash.length&&!abated.length&&<p className="e-empty">Nenhum pagamento conhecido neste mês.</p>}</div>
+    <div className="e-list">{invoicePayments.map(p=><BillRow key={`invoice-payment-${p.id}`} name={`Fatura ${p.card_name}`} value={p.amount} detail={`Pago em ${formatDiaMes(p.date)} · fatura ${String(p.invoice_month).padStart(2,"0")}/${p.invoice_year}`} status="Paga" to="/faturas"/>)}{view.paidCash.map(t=><BillRow key={`paid-${t.id}`} name={t.description} value={t.amount_paid??0} detail={`Pago em ${formatDiaMes(t.date)}${t.account_name?` · ${t.account_name}`:""}`} status="Paga" to="/lancamentos"/>)}{paidLoading?<p className="e-empty">Carregando contas quitadas…</p>:!paidError&&!invoicePayments.length&&!view.paidCash.length&&<p className="e-empty">Nenhuma obrigação ou fatura quitada neste mês.</p>}</div>
     </section>
+    {!!abated.length&&<section className="e-bill-section" aria-label="Abatidas"><SectionTitle title="Abatidas"/><div className="e-list">{abated.map(o=><BillRow key={`abatida-${o.number}`} name={`${hunter!.description} · ${o.label}`} value={o.amount} detail={`Venceria ${formatDiaMes(o.due_date)} · sem saída de caixa`} status="Abatida" />)}</div></section>}
     <p className="e-bills-footnote">Faturas contam uma vez, no vencimento. Abatimentos não saem da conta.</p>
     {editing&&<EntryEditor transaction={editing} categories={categories.data??[]} onClose={()=>setEditing(null)}/>}
     {selected&&<BillActions due={selected.due} review={selected.review} onClose={()=>setSelected(null)}/>}

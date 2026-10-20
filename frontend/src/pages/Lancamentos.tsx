@@ -2,7 +2,6 @@ import { useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { EntryEditor, FinancialRow, LoadError, SectionTitle, Summary, transactionLine, type FinancialLine } from "../components/essencial/Common";
 import { useBudgetSummary, useCategories, useInvoicesSummary, useTransactions } from "../lib/queries";
-import { usePeriod } from "../lib/period";
 import type { CategoryType, Transaction } from "../lib/types";
 import { formatDiaMes } from "../lib/format";
 
@@ -10,7 +9,6 @@ type Filter = "todos" | CategoryType;
 const FILTERS: { key:Filter;label:string }[] = [{key:"todos",label:"Todos"},{key:"income",label:"Entradas"},{key:"expense",label:"Despesas"},{key:"investment",label:"Investimentos"}];
 
 export default function Lancamentos() {
-  const { label } = usePeriod();
   const navigate = useNavigate();
   const [filter,setFilter] = useState<Filter>("todos");
   const [editing,setEditing] = useState<Transaction|null>(null);
@@ -36,7 +34,7 @@ export default function Lancamentos() {
   const caixa = budget.data?.caixa;
   const unclassified = (transactions.data??[]).filter(t=>catMap.get(t.category_id)?.type==="expense"&&!t.effective_expense_class).length;
   return <div className="e-page e-journal">
-    <SectionTitle title={<>Lançamentos <span className="e-heading-period">{label.split(" de ")[0]}</span></>}><Link to="/orcamento?aba=faturas">Faturas ›</Link></SectionTitle>
+    <SectionTitle title="Lançamentos"><Link to="/orcamento?aba=faturas">Faturas ›</Link></SectionTitle>
     <span className="sr-only">Resumo</span>
     <Summary items={[{label:"Entrou",value:caixa?.entrou},{label:"Saiu da conta",value:caixa ? caixa.saiu_a_vista+caixa.faturas_pagas : null},{label:"Investiu",value:caixa?.investido}]} />
     <div className="e-filter" role="group" aria-label="Filtrar lançamentos">{FILTERS.map(f=><button key={f.key} className={filter===f.key?"on":""} aria-pressed={filter===f.key} onClick={()=>setFilter(f.key)}>{f.label}</button>)}</div>

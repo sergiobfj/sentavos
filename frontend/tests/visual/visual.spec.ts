@@ -48,6 +48,7 @@ for (const width of [320, 360, 400, 768, 1440]) {
       await page.goto(route);
       await expect(page.locator(ready).first()).toBeVisible();
       await fits(page);
+      if (width === 1440 && ["/lancamentos", "/contas-a-pagar"].includes(route)) expect((await page.locator(".e-journal,.e-bills").boundingBox())!.width).toBe(960);
       if (width < 900) {
         const nav = page.getByRole("navigation", { name: "Navegação principal" });
         await expect(nav.getByRole("link")).toHaveCount(5);
@@ -96,7 +97,8 @@ test("navegação entre abas e seletor de mês preservam contexto", async ({ pag
   await fits(page);
   await dialog.getByRole("button", { name: "jan", exact: true }).click();
   await nav.getByRole("link", { name: "Lançamentos", exact: true }).click();
-  await expect(page.locator(".e-heading-period")).toHaveText("janeiro");
+  await expect(page.getByRole("button", { name: /Mês: janeiro/ })).toBeVisible();
+  await expect(page.locator(".e-journal > .e-section-title h2")).toHaveText("Lançamentos");
   await expect(page.getByText("Nenhum lançamento neste mês.", { exact: true })).toBeVisible();
 });
 
@@ -151,6 +153,94 @@ test("Contas distingue cotação, parcelas, desconhecido e pagamento sem somar p
   await expect(page.locator("main")).toContainText("Cartão principal");
   await fits(page);
   expect(await summary(request)).toEqual(before);
+});
+
+test("Já pagas inclui obrigações e faturas quitadas; compras e pagamentos parciais ficam no contexto correto", async ({ page, request }) => {
+  const initial = await summary(request);
+  const cleanup: string[] = [];
+  const date = `${fixture.year}-${String(fixture.month).padStart(2, "0")}-02`;
+  async function transaction(description: string, amount: number, expense_class: string, planned = false) {
+    const t = await post(request, "/transactions", { description, date, [planned ? "amount_planned" : "amount_paid"]: amount, category_id: fixture.expense, payment_method: "cash", account_id: fixture.account, expense_class });
+    cleanup.push(`/transactions/${t.id}`);
+    return t;
+  }
+  try {
+    await transaction("Obrigação fixa quitada", 120, "fixed");
+    await transaction("Compra cotidiana de validação", 15, "variable");
+    await transaction("Despesa variável prevista preservada", 37, "variable", true);
+    const linked = await transaction("Obrigação variável conferida", 80, "variable");
+    const review = await post(request, "/reconciliation", { year: fixture.year, month: fixture.month, kind: "obrigacao", description: "Obrigação variável conferida", amount: 80 });
+    cleanup.push(`/reconciliation/${review.id}`);
+    await post(request, `/reconciliation/${review.id}/vincular`, { transaction_id: linked.id });
+    const commitment = await post(request, "/commitments", { description: "Parcela variável quitada", category_id: fixture.expense, kind: "installment", amount: 60, first_due: date, installments: 1, expense_class: "variable" });
+    cleanup.push(`/commitments/${commitment.id}`);
+    await post(request, `/commitments/${commitment.id}/ocorrencias/1/pagar`, { date, account_id: fixture.account });
+    const paidCommitment = (await (await request.get(`${api}/transactions?${ym}`, { headers })).json()).find((t: { commitment_id: number })=>t.commitment_id===commitment.id);
+    expect(paidCommitment).toBeTruthy();
+    cleanup.push(`/transactions/${paidCommitment.id}`);
+    for (const [name, paid] of [["Fatura quitada de validação", 50], ["Fatura parcial de validação", 20]] as const) {
+      const card = await post(request, "/cards", { name, closing_day: 5, due_day: 25 });
+      cleanup.push(`/cards/${card.id}`);
+      const purchase = await post(request, "/purchases", { card_id: card.id, category_id: fixture.expense, description: name, purchase_date: date, total_amount: 50, installments: 1, expense_class: "variable" });
+      cleanup.push(`/purchases/${purchase.id}`);
+      const list = await (await request.get(`${api}/invoices?card_id=${card.id}`, { headers })).json();
+      await post(request, `/invoices/${list[0].id}/payments`, { amount: paid, date, account_id: fixture.account });
+      const detail = await (await request.get(`${api}/invoices/${list[0].id}`, { headers })).json();
+      cleanup.push(`/invoice_payments/${detail.payments[0].id}`);
+    }
+    const before = await summary(request);
+    const rawTransactions = await (await request.get(`${api}/transactions?${ym}`, { headers })).json();
+    await page.goto("/contas-a-pagar");
+    const paid = page.getByRole("region", { name: "Já pagas", exact: true });
+    for (const text of ["Obrigação fixa quitada", "Obrigação variável conferida", "Parcela variável quitada", "Fatura quitada de validação"]) await expect(paid).toContainText(text);
+    for (const text of ["Mercado e compras", "Café da tarde", "Compra cotidiana", "Fatura parcial de validação"]) await expect(paid).not.toContainText(text);
+    await expect(page.locator(".e-summary > div").filter({ hasText: "Já pagas" })).toContainText("310,00");
+    const due = page.getByRole("region", { name: "A pagar", exact: true });
+    await expect(due).toContainText("Despesa variável prevista preservada");
+    await expect(due).toContainText("Fatura parcial de validação");
+    expect(await summary(request)).toEqual(before);
+    expect(await (await request.get(`${api}/transactions?${ym}`, { headers })).json()).toEqual(rawTransactions);
+    await page.goto("/lancamentos");
+    await expect(page.locator("main")).toContainText("Compra cotidiana de validação");
+  } finally {
+    for (const route of cleanup.reverse()) expect((await request.delete(api + route, { headers })).ok(), route).toBeTruthy();
+  }
+  expect(await summary(request)).toEqual(initial);
+});
+
+for (const width of [320, 400, 768]) test(`rolagem real torna todas as linhas acessíveis em ${width}px`, async ({ page }) => {
+  await page.setViewportSize({ width, height: 860 });
+  const shots = path.resolve("../docs/refinamento-visual-v2/complemento");
+  fs.mkdirSync(shots, { recursive: true });
+  for (const [route, name, selector] of [["/lancamentos", "lancamentos", ".e-row"], ["/contas-a-pagar", "contas", ".e-bill-row"]]) {
+    await page.goto(route);
+    const rows = page.locator(selector);
+    await expect(rows.first()).toBeVisible();
+    await expect(page.locator(".e-summary dd").last()).not.toHaveText("—");
+    await expect(page.locator(".e-heading-period,.e-page > .e-page-sub")).toHaveCount(0);
+    await fits(page);
+    await page.screenshot({ path: path.join(shots, `${name}-${width}.png`), fullPage: true, animations: "disabled" });
+    const main = await page.locator("main").boundingBox();
+    if (width === 768) expect(main!.width).toBe(640);
+    await page.mouse.move(width / 2, 350);
+    for (let i = 0; i < await rows.count(); i++) {
+      const row = rows.nth(i);
+      const box = await row.boundingBox();
+      const header = await page.locator(".appbar").boundingBox();
+      if (box!.y < header!.y + header!.height || box!.y + box!.height > (await page.locator(".tabbar").boundingBox())!.y) {
+        await page.mouse.wheel(0, box!.y - header!.height - 16);
+      }
+      await expect.poll(() => row.evaluate(el => {
+        const box = el.getBoundingClientRect();
+        const header = document.querySelector(".appbar")!.getBoundingClientRect();
+        const nav = document.querySelector(".tabbar")!.getBoundingClientRect();
+        return box.top >= header.bottom - 1 && box.bottom <= nav.top + 1 && el.contains(document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2));
+      })).toBeTruthy();
+    }
+    await page.mouse.wheel(0, 10000);
+    await expect.poll(() => page.evaluate(() => scrollY + innerHeight >= document.documentElement.scrollHeight - 1)).toBeTruthy();
+    await page.screenshot({ path: path.join(shots, `${name}-fim-rolagem-${width}.png`), animations: "disabled" });
+  }
 });
 
 test("estado vazio nas duas páginas", async ({ page, request }) => {
