@@ -6,11 +6,11 @@ import type { Category, ExpenseClass, Transaction } from "../../lib/types";
 import TransactionForm from "../TransactionForm";
 import Modal from "../Modal";
 
-export function SectionTitle({ title, children }: { title: string; children?: ReactNode }) {
+export function SectionTitle({ title, children }: { title: ReactNode; children?: ReactNode }) {
   return <div className="e-section-title"><h2>{title}</h2>{children}</div>;
 }
-export function Summary({ items }: { items: { label: string; value: number | null | undefined; to?: string; onClick?: () => void; text?: string }[] }) {
-  return <dl className="e-summary">{items.map(i => <div key={i.label}><dt>{i.label}</dt><dd>{i.to ? <Link to={i.to}>{i.value == null ? i.text ?? "—" : formatMoney(i.value)} ›</Link> : i.onClick ? <button onClick={i.onClick}>{i.value == null ? i.text ?? "—" : formatMoney(i.value)} ›</button> : i.value == null ? i.text ?? "—" : formatMoney(i.value)}</dd></div>)}</dl>;
+export function Summary({ items }: { items: { label: string; value: number | null | undefined; to?: string; onClick?: () => void; text?: string; note?: string; tone?: "attention" | "positive" }[] }) {
+  return <dl className="e-summary">{items.map(i => <div key={i.label} data-tone={i.tone}><dt>{i.label}</dt><dd>{i.to ? <Link to={i.to}>{i.value == null ? i.text ?? "—" : formatMoney(i.value)} ›</Link> : i.onClick ? <button onClick={i.onClick}>{i.value == null ? i.text ?? "—" : formatMoney(i.value)} ›</button> : i.value == null ? i.text ?? "—" : formatMoney(i.value)}</dd>{i.note&&<small>{i.note}</small>}</div>)}</dl>;
 }
 export function LoadError({ error, retry }: { error: unknown; retry?: () => void }) {
   if (!error) return null;
@@ -20,8 +20,9 @@ export function ExpenseClassField({ value, onChange, suggested = false }: { valu
   return <div className="field"><label htmlFor="expense-class">Organização da despesa</label><select id="expense-class" value={value ?? ""} onChange={e => onChange(e.target.value ? e.target.value as ExpenseClass : null)}><option value="">{suggested ? "Usar classificação do compromisso" : "A confirmar"}</option><option value="fixed">Fixa</option><option value="variable">Variável</option></select><p className="hint">Independente da categoria e da natureza do gasto.</p></div>;
 }
 export interface FinancialLine { key: string; description: string; date: string; value: number | null; detail?: string; status: string; income?: boolean; onClick?: () => void }
-export function FinancialRow({ line }: { line: FinancialLine }) {
-  const content = <><span className="e-row-text"><strong>{line.description}</strong><small>{line.detail ? `${line.detail} · ` : ""}{formatDiaMes(line.date)}</small></span><span className="e-row-value"><strong className={line.income ? "pos" : ""}>{line.value == null ? "—" : `${line.income ? "+" : "−"}${formatMoney(Math.abs(line.value))}`}</strong><small>{line.status}</small></span></>;
+export function FinancialRow({ line, grouped = false }: { line: FinancialLine; grouped?: boolean }) {
+  const pending = /Previsto|A receber|A pagar|Pendente|A conferir/.test(line.status);
+  const content = <><span className="e-row-text"><strong>{line.description}</strong><small>{line.detail}{!grouped&&<>{line.detail ? " · " : ""}{formatDiaMes(line.date)}</>}</small></span><span className="e-row-value"><strong className={line.income&&!pending ? "pos" : ""}>{line.value == null ? "—" : `${line.income ? "+" : "−"}${formatMoney(Math.abs(line.value))}`}</strong><small data-tone={pending?"attention":/Recebido|Pago|Realizado/.test(line.status)?"positive":undefined}>{line.status}{grouped&&line.onClick&&<span className="e-row-chevron" aria-hidden="true">›</span>}</small></span></>;
   return line.onClick ? <button className="e-row" data-entry-key={line.key} onClick={line.onClick}>{content}</button> : <div className="e-row" data-entry-key={line.key}>{content}</div>;
 }
 export function transactionLine(t: Transaction, cat?: Category, onClick?: () => void): FinancialLine {

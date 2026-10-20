@@ -10,9 +10,9 @@ import { formatPeriod, usePeriod } from "../lib/period";
 import { formatDiaMes, formatMoney } from "../lib/format";
 import type { PlanoItem, ReconciliationItem } from "../lib/tiposPlanejamento";
 
-function BillRow({ name, value, detail, status, onClick, to }: { name: string; value: number; detail: string; status: string; onClick?: () => void; to?: string }) {
-  const content = <><span><strong>{name}</strong><small>{detail}</small></span><span className="e-bill-amount"><b className="tnum">{formatMoney(value)}</b><small>{status}</small></span></>;
-  return to ? <Link to={to} className="e-bill-row">{content}</Link> : <button type="button" className="e-bill-row e-bill-button" onClick={onClick}>{content}</button>;
+function BillRow({ name, value, detail, status, onClick, to }: { name: string; value: number | null; detail: string; status: string; onClick?: () => void; to?: string }) {
+  const content = <><span><strong>{name}</strong><small>{detail}</small></span><span className="e-bill-amount"><b className="tnum">{value==null?"A confirmar":formatMoney(value)}</b><small data-tone={status==="Paga"?"positive":status==="Abatida"?undefined:"attention"}>{status}{(onClick||to)&&<span className="e-row-chevron" aria-hidden="true">›</span>}</small></span></>;
+  return to ? <Link to={to} className="e-bill-row">{content}</Link> : onClick ? <button type="button" className="e-bill-row e-bill-button" onClick={onClick}>{content}</button> : <div className="e-bill-row">{content}</div>;
 }
 
 export default function ContasAPagar() {
@@ -35,19 +35,26 @@ export default function ContasAPagar() {
   const abated = (hunterDetail.data?.schedule ?? []).filter(o=>o.status==="abatida" && o.due_date.slice(0,7)===`${period.year}-${String(period.month).padStart(2,"0")}`);
   const invoicePayments = invoices.data?.payments ?? [];
   const paid = invoicePayments.reduce((n,p)=>n+p.amount,0)+view.paidPlanned.reduce((n,i)=>n+i.amount,0)+view.paidCash.reduce((n,t)=>n+(t.amount_paid??0),0);
+  const checkCount = view.review.length + view.estimated.length;
   return <div className="e-page e-bills">
     <SectionTitle title="Contas"><Link to="/faturas">Faturas ›</Link></SectionTitle>
-    <p className="e-page-sub">Fixas, variáveis e faturas · {formatPeriod(period)}</p>
+    <p className="e-page-sub">{formatPeriod(period)}</p>
     <LoadError error={summary.error || transactions.error || invoices.error || commitments.error || hunterDetail.error} />
-    <Summary items={[{label:"A pagar",value:month?view.toPay:null},{label:"A conferir",value:month?view.toCheck:null},{label:"Já pagas",value:month?paid:null}]} />
-    {view.review.some(i=>Number(i.prefill?.installments??0)>1 || i.prefill?.bill_visibility==="quote")&&<p className="e-bills-count-note">A conferir: valor deste mês. Parcelas sem data e cotações aparecem abaixo, fora do total.</p>}
-    <SectionTitle title="A pagar" />
+    <Summary items={[{label:"A pagar",value:month?view.toPay:null},{label:"A conferir",value:null,text:month?`${checkCount} ${checkCount===1?"item":"itens"}`:"—",tone:checkCount?"attention":undefined,note:month&&(view.toCheck??0)>0?`${formatMoney(view.toCheck)} neste mês`:undefined},{label:"Já pagas",value:month?paid:null}]} />
+    <section className="e-bill-section" aria-label="A pagar">
+    <SectionTitle title="A pagar"><span className="e-section-count">{view.due.length}</span></SectionTitle>
     <div className="e-list">{view.due.map(i=><BillRow key={i.key} name={`${i.description}${i.label?` · ${i.label}`:""}`} value={i.remaining} detail={`${i.source==="cartao"?"Fatura · ":""}vence ${formatDiaMes(i.date)}${i.source==="cartao"&&i.amount>i.remaining?` · pago ${formatMoney(i.amount-i.remaining)}`:""}`} status={i.status==="vencido"?"Vencida":"A pagar"} to={i.invoice_id!=null?"/faturas":undefined} onClick={()=>{const t=transactions.data?.find(t=>t.id===i.transaction_id);if(t)setEditing(t);else setSelected({due:i});}}/>)}{!view.due.length&&<p className="e-empty">Nenhuma obrigação confirmada pendente neste mês.</p>}</div>
-    <SectionTitle title="A conferir"/>
-    <div className="e-list">{view.review.map(i=>{const installments=Number(i.prefill?.installments??1);const parcel=Number(i.prefill?.amount??(i.amount&&installments>1?i.amount/installments:0));return <BillRow key={`review-${i.id}`} name={i.description} value={i.amount??0} detail={installments>1?`${installments} × ${formatMoney(parcel)} · datas a confirmar`:i.prefill?.bill_visibility==="quote"||i.prefill?.confirmed===false?"Cotação · contratação a confirmar":i.date?`Referência ${formatDiaMes(i.date)}`:"Vencimento não informado"} status="A conferir" onClick={()=>setSelected({review:i})}/>;})}{view.estimated.map(i=><BillRow key={i.key} name={i.description} value={i.remaining} detail={`Previsto para ${formatDiaMes(i.date)}`} status="Previsto" onClick={()=>setSelected({due:i})}/>)}{!view.review.length&&!view.estimated.length&&<p className="e-empty">Nada para conferir neste mês.</p>}</div>
+    </section>
+    <section className="e-bill-section e-bill-review" aria-label="A conferir">
+    <SectionTitle title="A conferir"><span className="e-section-count">{checkCount}</span></SectionTitle>
+    <div className="e-list">{view.review.map(i=>{const installments=Number(i.prefill?.installments??1);const parcel=Number(i.prefill?.amount??(i.amount&&installments>1?i.amount/installments:0));const quote=i.prefill?.bill_visibility==="quote"||i.prefill?.confirmed===false;return <BillRow key={`review-${i.id}`} name={i.description} value={i.amount} detail={installments>1?`${installments} × ${formatMoney(parcel)} · datas a confirmar`:quote?"Cotação · contratação a confirmar":i.date?`Referência ${formatDiaMes(i.date)}`:"Vencimento não informado"} status={quote?"Cotação":installments>1?"Datas a confirmar":"A conferir"} onClick={()=>setSelected({review:i})}/>;})}{view.estimated.map(i=><BillRow key={i.key} name={i.description} value={i.remaining} detail={`Previsto para ${formatDiaMes(i.date)}`} status="Previsto" onClick={()=>setSelected({due:i})}/>)}{!view.review.length&&!view.estimated.length&&<p className="e-empty">Nada para conferir neste mês.</p>}</div>
+    {checkCount>0&&<p className="e-bills-count-note">Valores a confirmar, cotações e parcelas sem data ficam fora de A pagar.</p>}
+    </section>
+    <section className="e-bill-section e-bill-paid" aria-label="Já pagas">
     <SectionTitle title="Já pagas" />
     <div className="e-list">{invoicePayments.map(p=><BillRow key={`invoice-payment-${p.id}`} name={`Fatura ${p.card_name}`} value={p.amount} detail={`Pago em ${formatDiaMes(p.date)} · fatura ${String(p.invoice_month).padStart(2,"0")}/${p.invoice_year}`} status="Paga" to="/faturas"/>)}{view.paidPlanned.map(i=><BillRow key={i.key} name={i.description} value={i.amount} detail={`Vencia ${formatDiaMes(i.date)}`} status="Paga" onClick={()=>setSelected({due:i})}/>)}{view.paidCash.map(t=><BillRow key={`paid-${t.id}`} name={t.description} value={t.amount_paid??0} detail={`Pago em ${formatDiaMes(t.date)}${t.account_name?` · ${t.account_name}`:""}`} status="Paga" to="/lancamentos"/>)}{abated.map(o=><BillRow key={`abatida-${o.number}`} name={`${hunter!.description} · ${o.label}`} value={o.amount} detail={`Venceria ${formatDiaMes(o.due_date)} · sem saída de caixa`} status="Abatida" />)}{!invoicePayments.length&&!view.paidPlanned.length&&!view.paidCash.length&&!abated.length&&<p className="e-empty">Nenhum pagamento conhecido neste mês.</p>}</div>
-    <p className="e-bills-footnote">Faturas contam uma vez, no vencimento. Valores a conferir não reduzem a previsão; abatimentos não saem da conta.</p>
+    </section>
+    <p className="e-bills-footnote">Faturas contam uma vez, no vencimento. Abatimentos não saem da conta.</p>
     {editing&&<EntryEditor transaction={editing} categories={categories.data??[]} onClose={()=>setEditing(null)}/>}
     {selected&&<BillActions due={selected.due} review={selected.review} onClose={()=>setSelected(null)}/>}
   </div>;
