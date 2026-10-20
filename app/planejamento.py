@@ -67,6 +67,8 @@ from app.models import (
     FinancialAccount,
     Invoice,
     InvoicePayment,
+    InvestmentPlan,
+    InvestmentMovementType,
     OccurrenceRead,
     OccurrenceStatus,
     PaymentMethod,
@@ -940,6 +942,10 @@ def planejar(
             Transaction.commitment_id.is_(None),
         )
     ).all():
+        if t.payment_method == PaymentMethod.CREDIT:
+            # Crédito só afeta caixa através da fatura. Sem vínculo não
+            # inventamos um vencimento nem uma saída à vista.
+            continue
         valor = float(t.amount_planned or 0.0)
         if abs(valor) <= TOLERANCIA:
             continue
@@ -977,13 +983,31 @@ def planejar(
                 month=t.date.month,
                 amount=round(valor, 2),
                 remaining=round(valor, 2),
-                certainty="estimado",
+                certainty="confirmado",
                 status="vencido" if t.date < agora else "pendente",
                 icon=cat.icon if cat else None,
                 color=cat.color if cat else None,
                 transaction_id=t.id,
             )
         )
+
+    # Planos canônicos: nunca entram em Transaction antes da confirmação.
+    # Aportes ficam reservados desde o mês previsto; resgates são entradas
+    # dependentes de execução explícita. Vencimento não realiza o plano.
+    for p in session.exec(consulta(InvestmentPlan, dono).where(
+        InvestmentPlan.status == "planned", InvestmentPlan.date < fim_ate
+    )).all():
+        m = mes_do_plano(p.date)
+        if p.type == InvestmentMovementType.CONTRIBUTION:
+            reservas.append(_Reserva(chave=f"investimento:{p.id}", origem="aporte",
+                descricao=p.description or "Aporte previsto", valor=p.amount,
+                certeza="confirmado", inicio=m))
+        else:
+            itens.append(PlanoItem(key=f"investimento:{p.id}", source="investimento",
+                category_type=CategoryType.INVESTMENT, direction="entrada",
+                description=p.description or "Resgate previsto", date=p.date, year=m[0], month=m[1],
+                amount=p.amount, remaining=p.amount, certainty="confirmado",
+                status="vencido" if p.date < agora else "pendente"))
 
     # ---------- Reservas ----------
     # Uma reserva pra uma ocorrência deixa de ser "dinheiro separado" no mês em

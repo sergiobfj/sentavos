@@ -237,7 +237,7 @@ function DetalheFatura({ id, onVoltar }: { id: number; onVoltar: () => void }) {
               <div className="mid">
                 <div className="t">{item.description}</div>
                 <div className="s">
-                  {formatDiaMes(item.purchase_date)} · {item.category_name}
+                  {formatDiaMes(item.purchase_date)} · {item.category_name}{item.planned ? " · Compra prevista" : " · Compra no cartão"}
                   {item.installments && (
                     <>
                       {" · "}

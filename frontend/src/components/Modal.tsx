@@ -9,9 +9,22 @@ interface ModalProps {
 
 export default function Modal({ title, onClose, children, footer }: ModalProps) {
   const dialog = useRef<HTMLDivElement>(null);
+  const overlay = useRef<HTMLDivElement>(null);
   const closeRef = useRef(onClose);
   closeRef.current = onClose;
   useEffect(() => {
+    const viewport = window.visualViewport;
+    const resize = () => {
+      if (overlay.current && viewport) {
+        overlay.current.style.height = `${viewport.height}px`;
+        overlay.current.style.top = `${viewport.offsetTop}px`;
+      }
+      if (document.activeElement instanceof HTMLElement && dialog.current?.contains(document.activeElement))
+        document.activeElement.scrollIntoView({block:"nearest"});
+    };
+    resize();
+    viewport?.addEventListener("resize",resize);
+    viewport?.addEventListener("scroll",resize);
     const previous = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     const oldOverflow = document.body.style.overflow;
     if (dialog.current && !dialog.current.contains(document.activeElement)) dialog.current.querySelector<HTMLElement>("input,select,button,[tabindex]")?.focus();
@@ -30,6 +43,8 @@ export default function Modal({ title, onClose, children, footer }: ModalProps) 
     document.addEventListener("keydown", onKey);
     document.body.style.overflow = "hidden";
     return () => {
+      viewport?.removeEventListener("resize",resize);
+      viewport?.removeEventListener("scroll",resize);
       document.removeEventListener("keydown", onKey);
       document.body.style.overflow = oldOverflow;
       previous?.focus();
@@ -37,7 +52,7 @@ export default function Modal({ title, onClose, children, footer }: ModalProps) 
   }, []);
 
   return (
-    <div className="overlay" onMouseDown={onClose}>
+    <div ref={overlay} className="overlay" onMouseDown={onClose}>
       <div ref={dialog} className="modal" onMouseDown={(e) => e.stopPropagation()} role="dialog" aria-modal="true" aria-label={title}>
         <div className="m-head">
           <h3>{title}</h3>

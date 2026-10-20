@@ -39,6 +39,7 @@ from app.models import (
     InvestmentMovement,
     InvestmentMovementCreate,
     InvestmentMovementType,
+    InvestmentPlan,
     PaymentMethod,
     Transaction,
     User,
@@ -52,6 +53,17 @@ SEM_BASE = "sem_base"
 
 def eh_investimento(ativo: Asset) -> bool:
     return AssetClass(ativo.asset_class) in INVESTMENT_CLASSES
+
+
+def saldo_informado(session: Session, dono: User, ativo_id: int, observado_em) -> None:
+    """O saldo observado substitui a pendência, sem inventar posição ou juros."""
+    for p in session.exec(consulta(InvestmentPlan, dono).where(
+        InvestmentPlan.asset_id == ativo_id, InvestmentPlan.balance_pending == True  # noqa: E712
+    ).with_for_update()).all():
+        mov = buscar(session, InvestmentMovement, p.movement_id, dono) if p.movement_id else None
+        if mov and mov.date <= observado_em:
+            p.balance_pending = False
+            session.add(p)
 
 
 # ---------------------------------------------------------------------------
@@ -221,6 +233,10 @@ def resumo(session: Session, dono: User, ano: int, mes: int, nome_do_mes: str | 
     movimentos = list(session.exec(
         consulta(InvestmentMovement, dono).where(InvestmentMovement.date >= inicio, InvestmentMovement.date < fim)
     ).all())
+    movimentos_ids = {m.id for m in movimentos}
+    pendentes_saldo = {p.asset_id for p in session.exec(consulta(InvestmentPlan, dono).where(
+        InvestmentPlan.status == "completed", InvestmentPlan.balance_pending == True  # noqa: E712
+    )).all() if p.movement_id in movimentos_ids}
     ligados = {m.transaction_id for m in movimentos if m.transaction_id}
     sem_ativo = sum(1 for t in lancamentos if t.id not in ligados)
     ajustado = sum(m.amount for m in movimentos if InvestmentMovementType(m.type) == InvestmentMovementType.ADJUSTMENT)
@@ -232,6 +248,7 @@ def resumo(session: Session, dono: User, ano: int, mes: int, nome_do_mes: str | 
 
     mes_txt = nome_do_mes or f"{mes:02d}/{ano}"
     motivos = [f"{i.name} — {i.reconciliation_note}" for i in itens if i.reconciliation_note]
+    motivos.extend(f"Atualize o saldo de {i.name} após o movimento realizado." for i in itens if i.asset_id in pendentes_saldo)
     if desatualizados:
         motivos.append(f"Falta o saldo de {mes_txt} de {', '.join(i.name for i in desatualizados)}.")
     if motivos:
@@ -246,7 +263,7 @@ def resumo(session: Session, dono: User, ano: int, mes: int, nome_do_mes: str | 
     saida_itens = []
     for i in sorted(itens, key=lambda x: (x.stale, -x.value)):
         mv = por_ativo.get(i.asset_id, {"c": 0.0, "r": 0.0, "a": 0.0})
-        if i.stale or i.reconciliation_note or sem_ativo:
+        if i.stale or i.reconciliation_note or sem_ativo or i.asset_id in pendentes_saldo:
             st, r = NAO_APURADO, None
         elif i.previous <= TOLERANCIA:
             st, r = SEM_BASE, None
@@ -254,7 +271,8 @@ def resumo(session: Session, dono: User, ano: int, mes: int, nome_do_mes: str | 
             st, r = APURADO, round(i.value - i.previous - mv["c"] - mv["a"] + mv["r"], 2)
         saida_itens.append(InvestmentAssetItem(
             asset_id=i.asset_id, name=i.name, asset_class=i.asset_class, value=i.value, previous=i.previous,
-            stale=i.stale, as_of=i.as_of, reconciliation_note=i.reconciliation_note, cdi_percent=i.cdi_percent,
+            stale=i.stale, as_of=i.as_of, reconciliation_note=i.reconciliation_note or (
+                "Saldo a atualizar após o movimento" if i.asset_id in pendentes_saldo else None), cdi_percent=i.cdi_percent,
             expected_yield=i.expected_yield,
             share=(i.value / total) if total > TOLERANCIA and not i.stale else None,
             contributed=round(mv["c"], 2), redeemed=round(mv["r"], 2), adjusted=round(mv["a"], 2),

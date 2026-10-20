@@ -4,13 +4,12 @@ import MeuMes from "./pages/MeuMes";
 import Lancamentos from "./pages/Lancamentos";
 import Relatorios from "./pages/Relatorios";
 import ContasAPagar from "./pages/ContasAPagar";
-import Budget from "./pages/Budget";
+import Invoices from "./pages/Invoices";
 import Investments from "./pages/Investments";
 import Assets from "./pages/Assets";
 import Settings from "./pages/Settings";
 import Revisao from "./pages/Revisao";
 import Planejamento from "./pages/Planejamento";
-import PlanejamentoProximos from "./pages/PlanejamentoProximos";
 import PlanejamentoSimulacoes from "./pages/PlanejamentoSimulacoes";
 import Compromissos from "./components/planejamento/Compromissos";
 import Contas from "./pages/Contas";
@@ -58,7 +57,8 @@ export default function App() {
         <Route path="/lancamentos" element={<Lancamentos />} />
         <Route path="/contas-a-pagar" element={<ContasAPagar />} />
         <Route path="/relatorios" element={<Relatorios />} />
-        <Route path="/orcamento" element={<Budget />} />
+        <Route path="/orcamento" element={<Navigate to="/faturas" replace />} />
+        <Route path="/faturas" element={<Invoices />} />
         <Route path="/investimentos" element={<Investments />} />
         <Route path="/patrimonio" element={<Assets />} />
         <Route path="/configuracoes" element={<Settings />} />
@@ -68,7 +68,7 @@ export default function App() {
         {/* Também fora da barra: planejar é semanal, não diário. A porta é a
             linha "Disponível" do Início e a lateral do desktop. */}
         <Route path="/planejamento" element={<Planejamento />} />
-        <Route path="/planejamento/proximos" element={<PlanejamentoProximos />} />
+        <Route path="/planejamento/proximos" element={<Navigate to="/" replace />} />
         <Route path="/planejamento/simulacoes" element={<PlanejamentoSimulacoes />} />
         <Route path="/planejamento/compromissos" element={<Compromissos />} />
         <Route path="/organizar" element={<Organizar />} />

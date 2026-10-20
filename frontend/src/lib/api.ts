@@ -487,3 +487,14 @@ export const healthApi = {
   month: ({ year, month }: Period) =>
     request<SaudeDoMes>(`/months/${year}-${String(month).padStart(2, "0")}/health`),
 };
+
+export const monthApi = {
+  summary: ({year,month}: Period) => request<import("./tiposContas").MonthSummary>(`/months/summary?year=${year}&month=${month}`),
+};
+export const investmentPlansApi = {
+  list: ({year,month}: Period) => request<import("./tiposContas").InvestmentPlan[]>(`/investments/plans?year=${year}&month=${month}`),
+  create: (data: import("./tiposContas").InvestmentPlanData) => request<import("./tiposContas").InvestmentPlan>("/investments/plans",{method:"POST",body:JSON.stringify(data)}),
+  update: (id:number,data:import("./tiposContas").InvestmentPlanData) => request<import("./tiposContas").InvestmentPlan>(`/investments/plans/${id}`,{method:"PATCH",body:JSON.stringify(data)}),
+  cancel: (id:number) => request<import("./tiposContas").InvestmentPlan>(`/investments/plans/${id}/cancel`,{method:"POST"}),
+  confirm: (id:number,date:string) => request<import("./tiposContas").InvestmentPlan>(`/investments/plans/${id}/confirm`,{method:"POST",body:JSON.stringify({date})}),
+};

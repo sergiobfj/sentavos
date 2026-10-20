@@ -413,10 +413,11 @@ class Purchase(PurchaseBase, table=True):
 
 
 class PurchaseCreate(PurchaseBase):
-    pass
+    planned: bool = False
 
 
 class PurchaseUpdate(SQLModel):
+    planned: bool | None = None
     """O que dá pra mudar depois.
 
     Descrição, categoria e observação são rótulo: mudam sem mexer em dinheiro.
@@ -521,6 +522,7 @@ class InvoiceStatus(str, Enum):
 
 
 class InvoiceItem(SQLModel):
+    planned: bool = False
     """Uma linha da fatura: a parcela, com o rastro até a compra que a gerou."""
 
     transaction_id: int
@@ -603,6 +605,7 @@ class InvoicesSummary(SQLModel):
 
 
 class PurchaseRead(PurchaseBase):
+    planned: bool = False
     """A compra com o contexto que a tela mostra ao abrir uma parcela."""
 
     id: int
@@ -1620,3 +1623,46 @@ class InvestmentMovementCreate(InvestmentMovementBase):
     category_id: int | None = None
     description: str | None = None
     occurred_at: dt.datetime | None = None
+
+
+class InvestmentPlanData(SQLModel):
+    type: InvestmentMovementType
+    amount: float = Field(gt=0, le=999999999)
+    date: dt.date
+    asset_id: int | None = None
+    account_id: int | None = None
+    category_id: int | None = None
+    description: str = Field(default="", max_length=120)
+
+
+class InvestmentPlan(SQLModel, table=True):
+    """Intenção sem efeito financeiro. Só confirmar cria movimento real."""
+    __tablename__ = "investment_plans"
+    __table_args__ = (
+        sa.ForeignKeyConstraint(["user_id", "asset_id"], ["assets.user_id", "assets.id"]),
+        sa.ForeignKeyConstraint(["user_id", "account_id"], ["financial_accounts.user_id", "financial_accounts.id"]),
+        sa.ForeignKeyConstraint(["category_id"], ["categories.id"]),
+        sa.CheckConstraint("amount > 0", name="ck_investment_plans_amount"),
+        sa.CheckConstraint("status IN ('planned', 'completed', 'cancelled')", name="ck_investment_plans_status"),
+        sa.CheckConstraint("type IN ('CONTRIBUTION', 'REDEMPTION')", name="ck_investment_plans_type"),
+        sa.Index("ix_investment_plans_user_date", "user_id", "date"),
+        sa.Index("uq_investment_plans_movement", "movement_id", unique=True),
+    )
+    id: int | None = Field(default=None, primary_key=True)
+    user_id: int = dono()
+    type: InvestmentMovementType = Field(sa_type=_enum_texto(InvestmentMovementType))
+    amount: float
+    date: dt.date
+    asset_id: int | None = None
+    account_id: int | None = None
+    category_id: int | None = None
+    description: str = ""
+    status: str = "planned"
+    # Identificador de auditoria preservado mesmo se o lançamento for excluído.
+    movement_id: int | None = None
+    balance_pending: bool = False
+    created_at: dt.datetime = Field(default_factory=lambda: dt.datetime.now(dt.timezone.utc))
+
+
+class InvestmentPlanConfirm(SQLModel):
+    date: dt.date

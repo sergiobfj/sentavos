@@ -40,8 +40,9 @@ def test_saldo_atual_mais_entradas_menos_saidas(m):
     assert mes["available"] == 1460.0
     # O grau de certeza não se mistura: o compromisso é confirmado, o previsto
     # avulso é estimativa.
-    assert mes["by_certainty"]["confirmado"] == 200.0
-    assert mes["by_certainty"]["estimado"] == 60.0
+    # Previsto avulso com valor/data é obrigação, ainda sem pagamento.
+    assert mes["by_certainty"]["confirmado"] == 260.0
+    assert mes["by_certainty"]["estimado"] == 0.0
     assert mes["by_source"]["parcelado"] == 200.0
     assert mes["by_source"]["previsto"] == 60.0
 

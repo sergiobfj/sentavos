@@ -211,5 +211,44 @@ export interface InvestmentMovementCreate {
   transaction_id?: number | null;
   category_id?: number | null;
   description?: string | null;
+  note?: string | null;
   occurred_at?: string | null;
+}
+
+export interface InvestmentPlanData {
+  type: "contribution" | "redemption";
+  amount: number;
+  date: string;
+  asset_id: number | null;
+  account_id: number | null;
+  category_id: number | null;
+  description: string;
+}
+export interface InvestmentPlan extends InvestmentPlanData {
+  id: number;
+  status: "planned" | "completed" | "cancelled";
+  asset_name: string | null;
+  account_name: string | null;
+  movement_id: number | null;
+  overdue: boolean;
+}
+export interface MonthSummary {
+  plan: import("./tiposPlanejamento").PlanoResposta;
+  month: import("./tiposPlanejamento").PlanoMes;
+  money_now: number | null;
+  balance_date: string | null;
+  balance_stale: boolean;
+  to_receive: number;
+  to_pay: number;
+  to_check: number;
+  contributed: number;
+  redeemed: number;
+  to_invest: number;
+  projected: number | null;
+  partial: boolean;
+  reasons: string[];
+  due: import("./tiposPlanejamento").PlanoItem[];
+  estimated: import("./tiposPlanejamento").PlanoItem[];
+  review: import("./tiposPlanejamento").ReconciliationItem[];
+  paid_cash_ids: number[];
 }

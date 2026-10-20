@@ -5,8 +5,8 @@ Finas: a regra está em `app/dominio/investimentos.py`.
 
 import datetime as dt
 
-from fastapi import APIRouter, Depends, Query
-from sqlmodel import Session, SQLModel
+from fastapi import APIRouter, Depends, Query, HTTPException
+from sqlmodel import Session, SQLModel, or_
 
 from app.auth import exigir_escrita, require_user
 from app.database import get_session
@@ -19,13 +19,141 @@ from app.models import (
     InvestmentMovement,
     InvestmentMovementCreate,
     InvestmentMovementType,
+    InvestmentPlan,
+    InvestmentPlanData,
+    InvestmentPlanConfirm,
+    Category,
+    CategoryType,
     User,
 )
 
 router_investimentos = APIRouter(dependencies=[Depends(require_user)])
 
+
+@router_investimentos.get("/months/summary")
+def resumo_do_mes(year: int = Query(ge=1900, le=2999), month: int = Query(ge=1, le=12),
+                  session: Session = Depends(get_session), dono: User = Depends(require_user)):
+    from app.dominio.meu_mes import resumo
+    return resumo(session, dono, year, month)
+
 MESES = ["janeiro", "fevereiro", "março", "abril", "maio", "junho", "julho", "agosto", "setembro",
          "outubro", "novembro", "dezembro"]
+
+
+def _plano(session: Session, dono: User, plan_id: int) -> InvestmentPlan:
+    # Serializa confirmar/editar/cancelar entre clientes no Postgres.
+    p = session.exec(consulta(InvestmentPlan, dono).where(InvestmentPlan.id == plan_id)
+                     .with_for_update().execution_options(populate_existing=True)).first()
+    if p is None:
+        raise HTTPException(404, "Previsão não encontrada.")
+    return p
+
+
+def _validar_plano(session: Session, dono: User, dados: InvestmentPlanData):
+    if dados.type == InvestmentMovementType.ADJUSTMENT:
+        raise HTTPException(400, "Previsão aceita aporte ou resgate.")
+    if dados.asset_id is not None:
+        ativo = exigir(session, Asset, dados.asset_id, dono, "Ativo")
+        if not investimentos.eh_investimento(ativo) or ativo.archived_on is not None:
+            raise HTTPException(400, "Escolha um investimento ativo.")
+    from app.dominio.contas import conta_valida
+    conta_valida(session, dono, dados.account_id)
+    if dados.category_id is not None:
+        cat = exigir(session, Category, dados.category_id, dono, "Categoria")
+        if cat.type != CategoryType.INVESTMENT or cat.archived:
+            raise HTTPException(400, "Escolha uma categoria de investimento ativa.")
+
+
+def _ler_plano(session: Session, dono: User, p: InvestmentPlan):
+    from app.escopo import buscar
+    from app.dominio.tempo import hoje_local
+    ativo = buscar(session, Asset, p.asset_id, dono) if p.asset_id else None
+    conta = buscar(session, FinancialAccount, p.account_id, dono) if p.account_id else None
+    return {**p.model_dump(exclude={"user_id"}), "asset_name": ativo.name if ativo else None,
+            "account_name": conta.name if conta else None,
+            "overdue": p.status == "planned" and p.date < hoje_local()}
+
+
+@router_investimentos.get("/investments/plans")
+def listar_planos(year: int = Query(ge=1900, le=2999), month: int = Query(ge=1, le=12),
+                  session: Session = Depends(get_session), dono: User = Depends(require_user)):
+    from app.cartao import limites_do_mes
+    from app.dominio.tempo import hoje_local
+    inicio, fim = limites_do_mes(year, month)
+    atual = (year, month) == (hoje_local().year, hoje_local().month)
+    return [_ler_plano(session, dono, p) for p in session.exec(
+        consulta(InvestmentPlan, dono).where(InvestmentPlan.date < fim,
+            or_(InvestmentPlan.date >= inicio, InvestmentPlan.status == "planned") if atual else InvestmentPlan.date >= inicio)
+        .order_by(InvestmentPlan.date, InvestmentPlan.id)).all()]
+
+
+@router_investimentos.post("/investments/plans")
+def criar_plano(dados: InvestmentPlanData, session: Session = Depends(get_session), dono: User = Depends(require_user)):
+    exigir_escrita(dono)
+    _validar_plano(session, dono, dados)
+    p = InvestmentPlan(user_id=dono.id, **dados.model_dump())
+    session.add(p)
+    session.flush()
+    registrar(session, acao="investimento.planejado", ator=ator_api(dono.email), user_id=dono.id,
+              entidade="investment_plan", entidade_id=p.id, detalhes=dados.model_dump(mode="json"))
+    session.commit()
+    return _ler_plano(session, dono, p)
+
+
+@router_investimentos.patch("/investments/plans/{plan_id}")
+def editar_plano(plan_id: int, dados: InvestmentPlanData, session: Session = Depends(get_session), dono: User = Depends(require_user)):
+    exigir_escrita(dono)
+    p = _plano(session, dono, plan_id)
+    if p.status != "planned":
+        raise HTTPException(409, "Só uma previsão em aberto pode ser editada.")
+    _validar_plano(session, dono, dados)
+    p.sqlmodel_update(dados.model_dump())
+    session.add(p)
+    registrar(session, acao="investimento.plano_editado", ator=ator_api(dono.email), user_id=dono.id,
+              entidade="investment_plan", entidade_id=p.id, detalhes=dados.model_dump(mode="json"))
+    session.commit()
+    return _ler_plano(session, dono, p)
+
+
+@router_investimentos.post("/investments/plans/{plan_id}/cancel")
+def cancelar_plano(plan_id: int, session: Session = Depends(get_session), dono: User = Depends(require_user)):
+    exigir_escrita(dono)
+    p = _plano(session, dono, plan_id)
+    if p.status == "completed":
+        raise HTTPException(409, "O plano já foi realizado.")
+    p.status = "cancelled"
+    session.add(p)
+    registrar(session, acao="investimento.plano_cancelado", ator=ator_api(dono.email), user_id=dono.id,
+              entidade="investment_plan", entidade_id=p.id)
+    session.commit()
+    return _ler_plano(session, dono, p)
+
+
+@router_investimentos.post("/investments/plans/{plan_id}/confirm")
+def confirmar_plano(plan_id: int, dados: InvestmentPlanConfirm, session: Session = Depends(get_session), dono: User = Depends(require_user)):
+    exigir_escrita(dono)
+    p = _plano(session, dono, plan_id)
+    if p.status == "completed":
+        return _ler_plano(session, dono, p)
+    if p.status == "cancelled":
+        raise HTTPException(409, "A previsão foi cancelada.")
+    from app.dominio.tempo import hoje_local, agora
+    if dados.date > hoje_local():
+        raise HTTPException(400, "A realização não pode ter data futura.")
+    if p.account_id is None or p.asset_id is None or p.category_id is None:
+        raise HTTPException(400, "Complete conta, investimento e categoria antes de confirmar.")
+    _validar_plano(session, dono, InvestmentPlanData(**p.model_dump()))
+    mov = investimentos.registrar(session, dono, InvestmentMovementCreate(
+        type=p.type, amount=p.amount, date=dados.date, account_id=p.account_id, asset_id=p.asset_id,
+        category_id=p.category_id, description=p.description,
+        occurred_at=agora() if dados.date == hoje_local() else None), ator_api(dono.email))
+    p.movement_id, p.status = mov.id, "completed"
+    p.balance_pending = True
+    session.add(p)
+    registrar(session, acao="investimento.plano_realizado", ator=ator_api(dono.email), user_id=dono.id,
+              entidade="investment_plan", entidade_id=p.id, detalhes={"movement_id": mov.id})
+    session.commit()
+    return _ler_plano(session, dono, p)
 
 
 class MovementRead(SQLModel):

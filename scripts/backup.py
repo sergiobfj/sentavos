@@ -61,6 +61,7 @@ TABELAS = [
     "account_balance_snapshots",
     "transfers",
     "investment_movements",
+    "investment_plans",
     "audit_events",
 ]
 
