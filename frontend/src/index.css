@@ -1,76 +1,26 @@
-/* ===========================================================================
-   Sentavos — sistema de design V2
-   ===========================================================================
-
-   Escrito mobile-first: o que está fora de @media é o celular, e o desktop
-   entra como exceção lá embaixo. O app é usado no telefone, e CSS "desktop
-   primeiro" vira uma pilha de override que desfaz decisões em vez de tomá-las.
-
-   O que mudou na V2, e por quê:
-
-   1. O dado é a principal fonte de cor. A interface é grafite e texto; cor
-      aparece em marcador pequeno (bolinha, seta, rótulo), nunca pintando card.
-   2. Dourado tem UMA função: marca, ação primária e seleção. Não é mais aviso,
-      link, estado nem gráfico — com cinco funções ele não dizia nada.
-   3. Nem tudo é card. Relatório é número, espaço e divisor; card fica pra
-      lista e grupo interativo.
-   4. Sem glow, sem gradiente decorativo, sem vidro. Sobram dois gradientes
-      com função: o brilho do esqueleto e a listra de meta estourada.
-
-   Três regras que continuam valendo:
-
-   - O polegar manda: navegação e ação primária nos 40% de baixo.
-   - Um número herói por tela.
-   - Alvo de toque nunca abaixo de 44px.
-
-   Densidade (a partir do Planejamento, out/2026 — vale pra tela nova):
-
-   - Até três métricas secundárias na primeira dobra.
-   - Uma visualização principal por seção.
-   - Lista grande sempre resumida; o resto atrás de "Ver detalhes"/"Ver todos".
-   - Ação avançada em folha (bottom sheet) ou tela secundária.
-   - O mesmo número não aparece em dois componentes vizinhos.
-   - Fórmula inteira não fica na tela: vai pra um "Ver cálculo".
-   - O estado normal não ganha marca: só a exceção (estimado, vencido) tem
-     palavra. Nada de pílula colorida por linha.
-   - Nenhum termo interno na tela (nome de tabela, de campo, de estado).
-   - Em 3 segundos a pessoa tem que achar o número que responde a pergunta
-     da tela; o resto pode exigir toque.
-   =========================================================================== */
-
+/* Sentavos — tokens compartilhados. Cor de ação é independente dos estados. */
 :root {
   color-scheme: dark;
-
-  /* ---------- Superfícies: grafite quase neutro ----------
-     O preto anterior puxava pro marrom (#0d0b07) e o texto pro creme — o
-     "luxo genérico" que fazia tudo parecer tema de dashboard. Aqui o grafite
-     tem só um fio de calor, pra não ficar azulado nem de escritório. */
-  --bg: #121211;
-  --surface: #1a1a19;        /* um degrau acima do fundo: listas e grupos */
-  --surface-2: #222221;      /* campos, botões, folhas */
-  --surface-3: #2c2c2a;      /* trilho de barra, estado pressionado */
-  --border: #30302d;
-  --border-soft: #242423;
-
-  --text: #ecebe7;           /* off-white neutro, não creme */
-  --text-dim: #a3a29c;
-  --text-faint: #6f6e69;
-
-  /* ---------- Marca ---------- */
-  --gold: #e2ad3c;
-  --gold-hi: #f0c565;        /* dourado como TEXTO sobre o grafite */
-  --gold-ink: #1c1606;       /* texto SOBRE o dourado */
-  --gold-ghost: rgba(226, 173, 60, 0.12);
-  --gold-line: rgba(226, 173, 60, 0.55);
-
-  /* ---------- Semânticas: contidas ----------
-     Sálvia, terracota e um azul acinzentado. Os verdes e vermelhos vivos de
-     antes pareciam de outro app e transformavam todo gasto em erro. Estas vão
-     em seta, rótulo e marcador — o número em si fica off-white. */
-  --pos: #8bb89a;
-  --neg: #da8b70;
-  --inv: #93a6dc;
-
+  --bg: #101319;
+  --surface: #1c222d;
+  --surface-2: #252c38;
+  --surface-3: #303949;
+  --border: #343c4b;
+  --border-soft: #272f3c;
+  --text: #f3f5f9;
+  --text-dim: #a4adbb;
+  --text-faint: #98a3b4;
+  --accent: #a79af5;
+  --accent-hi: #bcb1ff;
+  --accent-ink: #19152d;
+  --accent-ghost: rgba(167,154,245,.12);
+  --accent-line: rgba(167,154,245,.55);
+  --pos: #67c7a2;
+  --attention: #e9b875;
+  --neg: #ed9195;
+  --inv: #95b5e4;
+  --control-h: 44px;
+  --row-h: 64px;
   /* Compatibilidade: telas ainda chamam as cores pelo nome antigo. */
   --income: var(--pos);
   --expense: var(--neg);
@@ -103,7 +53,7 @@
 
   /* Sombra só no que flutua (barra de abas, botão +, folhas). Card no fluxo
      da página não precisa dela: a superfície já o separa do fundo. */
-  --shadow-float: 0 10px 28px -12px rgba(0, 0, 0, 0.75);
+  --shadow-float: 0 8px 28px -12px rgba(0, 0, 0, 0.55);
 
   --sans: "Segoe UI Variable Text", "Segoe UI", system-ui, -apple-system, Roboto,
     "Helvetica Neue", Arial, sans-serif;
@@ -133,7 +83,7 @@ body {
 a { color: inherit; text-decoration: none; }
 button { font-family: inherit; color: inherit; }
 h1, h2, h3 { margin: 0; letter-spacing: -0.01em; line-height: 1.25; font-weight: var(--w-bold); }
-::selection { background: var(--gold); color: var(--gold-ink); }
+::selection { background: var(--accent); color: var(--accent-ink); }
 
 /* Número de dinheiro sempre com dígito de largura fixa: sem isso a coluna de
    valores "dança" a cada centavo que muda. */
@@ -196,7 +146,7 @@ h1, h2, h3 { margin: 0; letter-spacing: -0.01em; line-height: 1.25; font-weight:
 .month-btn {
   flex: 1;
   min-width: 0;
-  min-height: 44px;
+  min-height: var(--control-h);
   display: flex;
   align-items: center;
   gap: var(--s2);
@@ -249,7 +199,7 @@ h1, h2, h3 { margin: 0; letter-spacing: -0.01em; line-height: 1.25; font-weight:
   background: var(--surface-2); border: 1px solid transparent;
   font-size: var(--fs-small); font-weight: var(--w-medium); cursor: pointer; text-transform: capitalize;
 }
-.month-sheet .meses button.on { border-color: var(--gold-line); color: var(--gold-hi); }
+.month-sheet .meses button.on { border-color: var(--accent-line); color: var(--accent-hi); }
 
 @keyframes fade { from { opacity: 0; } }
 @keyframes rise { from { transform: translateY(18px); } }
@@ -289,7 +239,7 @@ h1, h2, h3 { margin: 0; letter-spacing: -0.01em; line-height: 1.25; font-weight:
   transition: color 0.2s, background 0.2s;
 }
 .tabbar a svg { width: 21px; height: 21px; }
-.tabbar a.active { color: var(--gold-hi); background: var(--gold-ghost); }
+.tabbar a.active { color: var(--accent-hi); background: var(--accent-ghost); }
 .tabbar a:active { transform: scale(0.96); }
 /* Telas de 320px (iPhone SE antigo): ~56px por aba não cabem "Lançamentos"
    em 10.5px. Um fio menor ali, em vez de reticências em todo celular. */
@@ -309,8 +259,8 @@ h1, h2, h3 { margin: 0; letter-spacing: -0.01em; line-height: 1.25; font-weight:
   border-radius: var(--r-pill);
   border: 0;
   display: grid; place-items: center;
-  background: var(--gold);
-  color: var(--gold-ink);
+  background: var(--accent);
+  color: var(--accent-ink);
   box-shadow: var(--shadow-float);
   cursor: pointer;
   transition: transform 0.12s;
@@ -337,7 +287,7 @@ h1, h2, h3 { margin: 0; letter-spacing: -0.01em; line-height: 1.25; font-weight:
   padding: 0;
 }
 .sec-title a::after, .link-seta::after { content: "→"; color: var(--text-faint); }
-.sec-title button.link { color: var(--gold-hi); }
+.sec-title button.link { color: var(--accent-hi); }
 /* Duas ações no título (Pausar · Editar) sem virar barra de botões. */
 .sec-title .titulo-acoes { display: inline-flex; gap: var(--s4); flex: none; }
 .sec-title .titulo-acoes button { white-space: nowrap; }
@@ -518,19 +468,19 @@ a.card { text-decoration: none; color: inherit; display: block; }
 .btn:active { transform: scale(0.98); }
 .btn:disabled { opacity: 0.45; cursor: not-allowed; }
 .btn-primary {
-  background: var(--gold); border-color: var(--gold); color: var(--gold-ink);
+  background: var(--accent); border-color: var(--accent); color: var(--accent-ink);
   font-weight: var(--w-bold);
 }
-.btn-primary:active { background: var(--gold-hi); }
+.btn-primary:active { background: var(--accent-hi); }
 .btn-ghost { background: transparent; border-color: transparent; color: var(--text-dim); }
 .btn-ghost:active { background: var(--surface-2); }
-.btn-danger { background: transparent; border-color: rgba(218, 139, 112, 0.4); color: var(--neg); }
+.btn-danger { background: transparent; border-color: color-mix(in srgb, var(--neg) 40%, transparent); color: var(--neg); }
 
 /* Cheio, só no botão que CONFIRMA a exclusão no diálogo. O contornado abre a
    conversa; este executa. A diferença de peso é o que evita confundir os dois
    passos. */
 .btn-danger-solid {
-  background: var(--neg); border-color: var(--neg); color: #2a0f06; font-weight: var(--w-bold);
+  background: var(--neg); border-color: var(--neg); color: var(--bg); font-weight: var(--w-bold);
 }
 .btn-sm { min-height: 36px; padding: 0 var(--s3); font-size: var(--fs-small); }
 .btn-block { width: 100%; }
@@ -566,7 +516,7 @@ a.card { text-decoration: none; color: inherit; display: block; }
   cursor: pointer; white-space: nowrap;
   -webkit-tap-highlight-color: transparent;
 }
-.segmented button.on { background: var(--surface-3); color: var(--gold-hi); }
+.segmented button.on { background: var(--surface-3); color: var(--accent-hi); }
 .segmented.largo { display: flex; }
 .segmented.largo button { flex: 1; padding: 0 var(--s1); }
 
@@ -579,8 +529,8 @@ a.card { text-decoration: none; color: inherit; display: block; }
 }
 input, select, textarea {
   width: 100%;
-  min-height: 48px;
-  padding: var(--s3);
+  min-height: var(--control-h);
+  padding: 10px var(--s3);
   border-radius: var(--r-sm);
   border: 1px solid var(--border);
   background: var(--surface-2);
@@ -590,7 +540,7 @@ input, select, textarea {
   font-family: inherit;
 }
 input:focus, select:focus, textarea:focus {
-  outline: 2px solid var(--gold-line); outline-offset: -1px; border-color: transparent;
+  outline: 2px solid var(--accent-line); outline-offset: -1px; border-color: transparent;
 }
 textarea { min-height: 76px; resize: vertical; }
 .row2 { display: grid; grid-template-columns: 1fr 1fr; gap: var(--s3); }
@@ -639,14 +589,14 @@ textarea { min-height: 76px; resize: vertical; }
 }
 .spinner {
   width: 18px; height: 18px; border-radius: var(--r-pill);
-  border: 2px solid var(--surface-3); border-top-color: var(--gold);
+  border: 2px solid var(--surface-3); border-top-color: var(--accent);
   animation: spin 0.7s linear infinite;
 }
 @keyframes spin { to { transform: rotate(360deg); } }
 
 .error-box {
   padding: var(--s3) var(--s4); border-radius: var(--r-sm);
-  background: rgba(218, 139, 112, 0.08); border: 1px solid rgba(218, 139, 112, 0.3);
+  background: color-mix(in srgb, var(--neg) 8%, transparent); border: 1px solid color-mix(in srgb, var(--neg) 30%, transparent);
   color: var(--neg); font-size: var(--fs-small);
 }
 
@@ -688,7 +638,7 @@ textarea { min-height: 76px; resize: vertical; }
 .login-card .brand { display: flex; align-items: center; justify-content: center; gap: var(--s3); }
 .login-card .brand img { width: 36px; }
 .login-card .brand .name { font-size: var(--fs-metric); font-weight: var(--w-bold); letter-spacing: -0.02em; }
-.login-card .brand .name b { color: var(--gold); }
+.login-card .brand .name b { color: var(--accent); }
 .login-tag { text-align: center; color: var(--text-dim); font-size: var(--fs-small); margin: 0; }
 
 /* ------------------------------------------------------------ Sub-abas ---- */
@@ -713,7 +663,7 @@ textarea { min-height: 76px; resize: vertical; }
 .confirm-icone {
   width: 48px; height: 48px; border-radius: var(--r-pill);
   display: grid; place-items: center; margin: 0 auto var(--s4);
-  background: rgba(218, 139, 112, 0.12); color: var(--neg);
+  background: color-mix(in srgb, var(--neg) 12%, transparent); color: var(--neg);
 }
 .confirm-titulo { font-size: var(--fs-title); font-weight: var(--w-bold); margin-bottom: var(--s2); }
 /* O nome do item é o dado que faz a pessoa parar: é por ele que se percebe
@@ -798,7 +748,7 @@ textarea { min-height: 76px; resize: vertical; }
 .budget-row .saldo-input input::placeholder { color: var(--text-faint); font-weight: var(--w-regular); }
 .budget-row .saldo-input input:focus {
   background: var(--surface-2); border-radius: var(--r-sm); border-bottom-color: transparent;
-  color: var(--text); outline: 2px solid var(--gold-line);
+  color: var(--text); outline: 2px solid var(--accent-line);
 }
 .budget-row .saldo-input input:not(:placeholder-shown) { color: var(--text); }
 
@@ -833,7 +783,7 @@ textarea { min-height: 76px; resize: vertical; }
   font-size: var(--fs-small); font-weight: var(--w-medium); color: var(--text-dim); cursor: pointer;
   transition: border-color 0.15s, color 0.15s;
 }
-.tipo-toggle button.on { background: var(--surface-3); color: var(--text); border-color: var(--gold-line); }
+.tipo-toggle button.on { background: var(--surface-3); color: var(--text); border-color: var(--accent-line); }
 
 /* ---------- Seletor de categoria ---------- */
 .cat-trigger {
@@ -859,7 +809,7 @@ textarea { min-height: 76px; resize: vertical; }
   border-radius: var(--r-sm); border: 1px solid transparent;
   background: var(--surface-2); cursor: pointer; text-align: left;
 }
-.cat-opcoes button.on { border-color: var(--gold-line); }
+.cat-opcoes button.on { border-color: var(--accent-line); }
 .cat-opcoes .avatar { width: 34px; height: 34px; font-size: 16px; }
 /* Duas linhas antes de cortar: "Família e presentes" cortado em "Família e
    pre…" gastava o mesmo espaço e entregava menos. */
@@ -967,7 +917,7 @@ textarea { min-height: 76px; resize: vertical; }
 }
 .chip-grid button b { font-size: var(--fs-small); font-weight: var(--w-bold); color: var(--text-dim); }
 .chip-grid button span { font-size: var(--fs-caption); color: var(--text-faint); }
-.chip-grid button.on { background: var(--surface-3); border-color: var(--gold-line); }
+.chip-grid button.on { background: var(--surface-3); border-color: var(--accent-line); }
 .chip-grid button.on b { color: var(--text); }
 
 /* Rolagem horizontal e não quebra: 14 opções de parcela em três fileiras
@@ -984,7 +934,7 @@ textarea { min-height: 76px; resize: vertical; }
   font-size: var(--fs-small); font-weight: var(--w-medium); cursor: pointer;
   -webkit-tap-highlight-color: transparent;
 }
-.chip-linha button.on { border-color: var(--gold-line); color: var(--gold-hi); }
+.chip-linha button.on { border-color: var(--accent-line); color: var(--accent-hi); }
 
 /* ---------- Resumo em pares ---------- */
 .resumo-compra {
@@ -1046,14 +996,14 @@ textarea { min-height: 76px; resize: vertical; }
 /* ---------- Revisão do histórico ----------
    `.list .row` vale (0,2,0), então o modificador precisa vir junto dele. */
 .list .row.revisao-row { cursor: default; }
-.list .row.revisao-row.on { background: var(--gold-ghost); }
+.list .row.revisao-row.on { background: var(--accent-ghost); }
 .list .row.revisao-row .mid { cursor: pointer; }
 /* O alvo é a etiqueta de 44px, não o quadradinho de 20. */
 .revisao-marca {
   display: grid; place-items: center;
   width: 44px; height: 44px; margin-left: -10px; flex: none; cursor: pointer;
 }
-.revisao-marca input { width: 20px; height: 20px; accent-color: var(--gold); cursor: pointer; }
+.revisao-marca input { width: 20px; height: 20px; accent-color: var(--accent); cursor: pointer; }
 
 /* Barra de ação fixa acima da navegação: quem decide é o polegar. */
 .barra-acao {
@@ -1092,7 +1042,7 @@ textarea { min-height: 76px; resize: vertical; }
   background: var(--surface-2); font-size: 20px; line-height: 1; cursor: pointer;
   display: grid; place-items: center; padding: 0;
 }
-.emoji-grade button.on { border-color: var(--gold-line); background: var(--surface-3); }
+.emoji-grade button.on { border-color: var(--accent-line); background: var(--surface-3); }
 .emoji-grupo { font-size: var(--fs-caption); color: var(--text-faint); margin: var(--s3) 0 var(--s1); }
 .emoji-rolagem { max-height: 220px; overflow-y: auto; padding-right: 2px; }
 
@@ -1280,7 +1230,7 @@ button.hero-linhas > span:last-child::after { content: "›"; color: var(--text-
 
 /* Interruptor de conta no saldo considerado. */
 .conta-toggle { display: flex; align-items: center; gap: var(--s3); flex: 1; min-width: 0; cursor: pointer; }
-.conta-toggle input { width: 22px; height: 22px; min-height: 0; accent-color: var(--gold); flex: none; }
+.conta-toggle input { width: 22px; height: 22px; min-height: 0; accent-color: var(--accent); flex: none; }
 
 /* ================================================================ Desktop ==
    Acima de 900px a barra de abas dá lugar à lateral: no mouse não existe zona
@@ -1299,7 +1249,7 @@ button.hero-linhas > span:last-child::after { content: "›"; color: var(--text-
   .sidebar .brand { display: flex; align-items: center; gap: var(--s3); padding: 0 var(--s2); }
   .sidebar .brand img { width: 30px; }
   .sidebar .brand .name { font-size: var(--fs-metric); font-weight: var(--w-bold); letter-spacing: -0.02em; }
-  .sidebar .brand .name b { color: var(--gold); }
+  .sidebar .brand .name b { color: var(--accent); }
   .sidebar .nav { display: flex; flex-direction: column; gap: 2px; }
   .sidebar .nav a {
     display: flex; align-items: center; gap: var(--s3);
@@ -1309,7 +1259,7 @@ button.hero-linhas > span:last-child::after { content: "›"; color: var(--text-
   .sidebar .nav a svg { width: 19px; height: 19px; }
   .sidebar .nav a:hover { background: var(--surface); color: var(--text); }
   .sidebar .nav a.active { background: var(--surface-2); color: var(--text); }
-  .sidebar .nav a.active svg { color: var(--gold); }
+  .sidebar .nav a.active svg { color: var(--accent); }
   .sidebar .foot { margin-top: auto; display: flex; flex-direction: column; gap: var(--s2); align-items: flex-start; padding: 0 var(--s2); }
   .sidebar .foot .who { font-size: var(--fs-caption); color: var(--text-faint); max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
