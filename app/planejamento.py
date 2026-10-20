@@ -507,7 +507,8 @@ def conta_entra(asset: Asset) -> bool:
     return AssetClass(asset.asset_class) == AssetClass.CHECKING
 
 
-def _contas_financeiras(session: Session, dono: User, contas: list[FinancialAccount]) -> list[ContaPlanejamento]:
+def _contas_financeiras(session: Session, dono: User, contas: list[FinancialAccount],
+                        instante: dt.datetime | None = None) -> list[ContaPlanejamento]:
     """O saldo de partida pelas contas: o saldo calculado de cada uma.
 
     Conta sem saldo observado fica de fora (`stale`, sem valor). Desatualizada
@@ -518,7 +519,7 @@ def _contas_financeiras(session: Session, dono: User, contas: list[FinancialAcco
     from app.dominio import contas as dominio_contas
 
     saida = []
-    for s in dominio_contas.saldos(session, dono, contas=contas):
+    for s in dominio_contas.saldos(session, dono, instante, contas=contas):
         c = s.conta
         dia = dominio_contas.dia_local(s.observado_em) if s.observado_em else None
         saida.append(ContaPlanejamento(
@@ -547,7 +548,11 @@ def contas_de_partida(
         .order_by(FinancialAccount.id)
     ).all())
     if financeiras:
-        return _contas_financeiras(session, dono, financeiras)
+        from app.dominio import contas as dominio_contas
+        # Consulta histórica não pode usar observações/movimentos de meses futuros.
+        # Mês corrente e horizonte futuro continuam partindo do saldo de agora.
+        instante = dominio_contas.fim_do_mes(*m0) if indice(m0) < indice(mes_de(hoje())) else None
+        return _contas_financeiras(session, dono, financeiras, instante)
 
     ativos = [
         a for a in session.exec(consulta(Asset, dono).order_by(Asset.asset_class, Asset.name)).all()
@@ -592,7 +597,9 @@ def aviso_do_saldo(
     if not marcadas:
         return aviso
     if any(c.account_id is not None for c in contas):
-        return _aviso_das_contas(session, dono, marcadas, aviso)
+        from app.dominio import contas as dominio_contas
+        instante = dominio_contas.fim_do_mes(*m0) if indice(m0) < indice(mes_de(hoje())) else None
+        return _aviso_das_contas(session, dono, marcadas, aviso, instante)
 
     aviso.contas_sem_saldo = [c.name for c in marcadas if c.as_of is None]
     aviso.contas_desatualizadas = [c.name for c in marcadas if c.stale]
@@ -665,7 +672,8 @@ def aviso_do_saldo(
 
 
 def _aviso_das_contas(
-    session: Session, dono: User, marcadas: list[ContaPlanejamento], aviso: AvisoSaldo
+    session: Session, dono: User, marcadas: list[ContaPlanejamento], aviso: AvisoSaldo,
+    instante: dt.datetime | None = None,
 ) -> AvisoSaldo:
     """Com contas, os movimentos COM conta já estão no saldo calculado. O que
     falta são os movimentos SEM conta depois do saldo observado: listados,
@@ -685,6 +693,8 @@ def _aviso_das_contas(
     movimentos: list[MovimentoDepois] = []
     for m in dominio_contas.movimentos(session, dono, None, aviso.desde):
         if not dominio_contas.depois(m.data, m.ocorrido_em, desde):
+            continue
+        if instante is not None and dominio_contas.depois(m.data, m.ocorrido_em, instante):
             continue
         tipo = rotulo.get(m.tipo, "saida")
         if tipo == "entrada":
