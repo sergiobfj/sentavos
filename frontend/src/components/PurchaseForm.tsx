@@ -148,6 +148,7 @@ export default function PurchaseForm({
           )}
         </div>
 
+        {compra.planned && <button type="button" className="btn btn-primary btn-block" disabled={update.isPending} onClick={()=>update.mutate({id:compra.id,data:{planned:false}},{onSuccess:onClose})}>Confirmar compra realizada</button>}
         {compra.locked && (
           <div className="aviso-box" style={{ marginBottom: "var(--s4)" }}>
             Uma fatura desta compra já foi paga, então <b>valor, parcelas, cartão

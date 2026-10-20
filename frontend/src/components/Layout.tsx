@@ -21,30 +21,18 @@ export default function Layout() {
   const categories = useCategories(true);
   const [escolhendoMes, setEscolhendoMes] = useState(false);
   const [creating, setCreating] = useState(false);
-  const [saved, setSaved] = useState(false);
+  const [saved, setSaved] = useState("");
   const navigate = useNavigate();
   const { pathname, search } = useLocation();
 
-  // O botão de novo lançamento não aparece onde ele não faria nada: em
-  // Configurações não há o que lançar, e em Patrimônio o que se registra é
-  // saldo, que tem fluxo próprio na tela.
-  // A conta de demonstração não escreve, então o botão de novo lançamento não
-  // aparece pra ela: oferecer uma ação que só pode terminar em erro é pior do
-  // que não oferecer.
-  //
-  // Em Faturas ele também sai: ali a ação é pagar a fatura, e o botão flutuante
-  // cobria justamente o rodapé de total/pago/restante — visto na tela, não
-  // deduzido.
-  const emFaturas = new URLSearchParams(search).get("aba") === "faturas";
+  // Ação no cabeçalho, nas duas telas de lançamento cotidiano.
   const ativa = (isActive: boolean) => isActive ? "active" : "";
-  const mostrarFab =
-    !sessao?.somenteLeitura &&
-    !emFaturas && ["/","/lancamentos"].includes(pathname);
+  const mostrarNovo = !sessao?.somenteLeitura && ["/","/lancamentos"].includes(pathname);
   useEffect(() => {
     if (new URLSearchParams(search).get("novo") === "1") setCreating(true);
   }, [search]);
   useEffect(() => {
-    const onSaved = () => { setSaved(true); window.setTimeout(() => setSaved(false), 2800); };
+    const onSaved = (e: Event) => { setSaved((e as CustomEvent<string>).detail || "Lançamento salvo"); window.setTimeout(() => setSaved(""), 2800); };
     window.addEventListener(SAVED_EVENT,onSaved);
     return () => window.removeEventListener(SAVED_EVENT,onSaved);
   }, []);
@@ -68,8 +56,7 @@ export default function Layout() {
             </NavLink>
           ))}
           <div className="e-nav-divider" />
-          <NavLink to="/planejamento">Planejamento detalhado</NavLink>
-          <NavLink to="/orcamento?aba=faturas">Cartões e faturas</NavLink>
+          <NavLink to="/faturas">Cartões e faturas</NavLink>
           <NavLink to="/patrimonio">Patrimônio</NavLink>
           <NavLink to="/configuracoes"><IconEngrenagem /> Configurações</NavLink>
         </nav>
@@ -99,6 +86,18 @@ export default function Layout() {
           </button>
           <button className="e-month-arrow" onClick={() => shift(1)} aria-label="Próximo mês">›</button>
 
+          {mostrarNovo && (
+            <button
+              className="e-add"
+              onClick={() => setCreating(true)}
+              aria-label="Novo lançamento"
+            >
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeLinecap="round">
+                <path d="M12 5v14M5 12h14" />
+              </svg>
+            </button>
+          )}
+
           <button
             className="icon-btn"
             onClick={() => navigate("/configuracoes")}
@@ -108,7 +107,7 @@ export default function Layout() {
           </button>
         </header>
 
-        <main className={`main${mostrarFab ? "" : " sem-fab"}`}>
+        <main className="main sem-fab">
           {sessao?.somenteLeitura && (
             <div className="aviso-demo">
               <b>Modo demonstração.</b> Você pode navegar por tudo, mas não
@@ -118,18 +117,6 @@ export default function Layout() {
           <Outlet />
         </main>
       </div>
-
-      {mostrarFab && (
-        <button
-          className="fab"
-          onClick={() => setCreating(true)}
-          aria-label="Novo lançamento"
-        >
-          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeLinecap="round">
-            <path d="M12 5v14M5 12h14" />
-          </svg>
-        </button>
-      )}
 
       <nav className="tabbar" aria-label="Navegação principal">
         {ABAS.map(({ to, label, end, icon: Icon }) => (
@@ -142,7 +129,7 @@ export default function Layout() {
 
       {escolhendoMes && <MonthSheet onFechar={() => setEscolhendoMes(false)} />}
       {creating && <QuickTransaction categories={categories.data ?? []} onClose={closeCreating}/>}
-      {saved && <div className="e-toast" role="status">Lançamento salvo</div>}
+      {saved && <div className="e-toast" role="status">{saved}</div>}
     </div>
   );
 }

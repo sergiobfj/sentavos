@@ -19,6 +19,8 @@ import {
   transfersApi,
   investmentsApi,
   healthApi,
+  monthApi,
+  investmentPlansApi,
 } from "./api";
 import type { AccountCreate, AccountUpdate, InvestmentMovementCreate, TransferCreate } from "./tiposContas";
 import type {
@@ -75,6 +77,7 @@ const keys = {
 // reserva. E a conferência sugere correspondências entre lançamentos. Mexer em
 // qualquer um desses deixa os três velhos.
 function invalidatePlanning(qc: QueryClient) {
+  qc.invalidateQueries({ queryKey: ["month-summary"] });
   qc.invalidateQueries({ queryKey: keys.health });
   qc.invalidateQueries({ queryKey: keys.planning });
   qc.invalidateQueries({ queryKey: keys.commitments });
@@ -90,6 +93,7 @@ function invalidatePlanning(qc: QueryClient) {
 // desconta pagamento de fatura. Esquecer um dos três deixaria a tela com dois
 // números do mesmo mês discordando — que é o defeito mais caro de depurar aqui.
 function invalidateMovement(qc: QueryClient) {
+  qc.invalidateQueries({ queryKey: ["month-summary"] });
   qc.invalidateQueries({ queryKey: keys.health });
   qc.invalidateQueries({ queryKey: keys.investments });
   qc.invalidateQueries({ queryKey: keys.transfers });
@@ -766,3 +770,16 @@ export function useMonthHealth(period?: Period) {
   const p = period ?? atual;
   return useQuery({ queryKey: [...keys.health, toYm(p)], queryFn: () => healthApi.month(p) });
 }
+
+export function useMonthSummary() {
+  const {period,ym} = usePeriod();
+  return useQuery({queryKey:["month-summary",ym],queryFn:()=>monthApi.summary(period)});
+}
+export function useInvestmentPlans() {
+  const {period,ym} = usePeriod();
+  return useQuery({queryKey:[...keys.investments,"plans",ym],queryFn:()=>investmentPlansApi.list(period)});
+}
+export const useCreateInvestmentPlan = () => useMutacaoDeConta(investmentPlansApi.create);
+export const useEditInvestmentPlan = () => useMutacaoDeConta(({id,data}:{id:number;data:import("./tiposContas").InvestmentPlanData})=>investmentPlansApi.update(id,data));
+export const useCancelInvestmentPlan = () => useMutacaoDeConta(investmentPlansApi.cancel);
+export const useConfirmInvestmentPlan = () => useMutacaoDeConta(({id,date}:{id:number;date:string})=>investmentPlansApi.confirm(id,date));

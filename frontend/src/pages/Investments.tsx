@@ -2,7 +2,8 @@ import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import Modal from "../components/Modal";
 import TransactionForm from "../components/TransactionForm";
-import ContaPicker from "../components/ContaPicker";
+import QuickTransaction from "../components/essencial/QuickTransaction";
+import InvestmentPlans from "../components/essencial/InvestmentPlans";
 import { MarcaEditavel } from "../components/TransactionList";
 import {
   useCategories,
@@ -15,12 +16,9 @@ import {
 import { useAuth } from "../lib/auth";
 import { currentPeriod, formatPeriod, usePeriod } from "../lib/period";
 import { ApiError } from "../lib/api";
-import { formatDiaMes, formatMoney, formatYm, parseMoney, todayIso } from "../lib/format";
+import { formatDiaMes, formatMoney, formatYm } from "../lib/format";
 import { ASSET_CLASS_LABEL, type Transaction } from "../lib/types";
 import {
-  instanteSeHoje,
-  lembrarConta,
-  ultimaConta,
   type InvestmentAssetItem,
   type InvestmentMovement,
   type MovementType,
@@ -41,7 +39,7 @@ export default function Investments() {
   const podeEscrever = !sessao?.somenteLeitura;
   const [editando, setEditando] = useState<Transaction | null>(null);
   const [aberto, setAberto] = useState<Transaction | null>(null);
-  const [novo, setNovo] = useState<MovementType | null>(null);
+  const [novo, setNovo] = useState<Exclude<MovementType,"adjustment"> | null>(null);
 
   // Os lançamentos de investimento do mês (o lado caixa) — cada um com o
   // ativo dele, quando ligado.
@@ -66,7 +64,7 @@ export default function Investments() {
 
   if (itens.length === 0) {
     return (
-      <div className="empty">
+      <><InvestmentPlans/><button className="btn btn-primary" onClick={()=>setNovo("contribution")} disabled={!podeEscrever}>+ Aporte</button>{novo&&<QuickTransaction categories={categories.data??[]} initialKind={novo} onClose={()=>setNovo(null)}/>}<div className="empty">
         <div className="big">📈</div>
         <div className="tit">Nada investido ainda</div>
         <div>
@@ -78,14 +76,14 @@ export default function Investments() {
         <div style={{ marginTop: "var(--s4)" }}>
           <Link className="btn btn-primary" to="/patrimonio">Ir para patrimônio</Link>
         </div>
-      </div>
+      </div></>
     );
   }
 
   return (
     <>
       <section className="hero">
-        <div className="rot">{r.stale_names.length ? "Saldo conhecido em investimentos" : "Total guardado agora"}</div>
+        <div className="rot">{r.stale_names.length || r.reasons.some(reason=>reason.startsWith("Atualize o saldo")) ? "Saldo conhecido em investimentos" : "Total guardado agora"}</div>
         <div className="big tnum">{r.total===0 && r.stale_names.length ? "—" : formatMoney(r.total)}</div>
         {r.stale_names.length > 0 && (
           <div className="nota">
@@ -124,6 +122,7 @@ export default function Investments() {
       {conciliacaoPendente && <p className="nota">Há movimento a conferir; redução de saldo não é prejuízo.</p>}
       {doMes?.yield_status === "nao_apurado" && doMes.reasons.length > 0 && <p className="nota">{doMes.reasons.join(" ")}</p>}
 
+      <InvestmentPlans/>
       <div className="sec-title">
         {/* Sem o mês no título: ele já está no topo, e com as duas ações ao
             lado o título longo quebrava em 360px. */}
@@ -161,7 +160,7 @@ export default function Investments() {
         <MovimentoSheet t={aberto} mov={porLancamento.get(aberto.id) ?? null} itens={itens} podeEscrever={podeEscrever}
           onEditar={() => { setEditando(aberto); setAberto(null); }} onClose={() => setAberto(null)} />
       )}
-      {novo && <NovoMovimento tipo={novo} itens={itens} onClose={() => setNovo(null)} />}
+      {novo && <QuickTransaction initialKind={novo} categories={categories.data??[]} onClose={()=>setNovo(null)}/> }
       {editando && categories.data && (
         <TransactionForm categories={categories.data} transaction={editando} onClose={() => setEditando(null)} />
       )}
@@ -220,73 +219,6 @@ function MovimentoSheet({
         )}
         {erro && <div className="error-box">{erro.message}</div>}
       </div>
-    </Modal>
-  );
-}
-
-/** Aporte ou resgate novo: ativo, conta, valor, data. Cria o lançamento (o lado
- *  caixa) e o movimento juntos. */
-function NovoMovimento({ tipo, itens, onClose }: { tipo: MovementType; itens: InvestmentAssetItem[]; onClose: () => void }) {
-  const criar = useCreateMovement();
-  const categories = useCategories();
-  const investCats = (categories.data ?? []).filter((c) => c.type === "investment" && !c.archived);
-  const [ativo, setAtivo] = useState<number | null>(itens[0]?.asset_id ?? null);
-  const [categoria, setCategoria] = useState<number | null>(null);
-  const [conta, setConta] = useState<number | null>(ultimaConta());
-  const [valor, setValor] = useState("");
-  const [data, setData] = useState(todayIso());
-  const numero = parseMoney(valor) ?? 0;
-  const cat = categoria ?? investCats[0]?.id ?? null;
-  const erro = criar.error as ApiError | null;
-  const aporte = tipo === "contribution";
-  return (
-    <Modal title={aporte ? "Novo aporte" : "Novo resgate"} onClose={onClose}>
-      <form className="m-body" onSubmit={(e) => {
-        e.preventDefault();
-        if (ativo == null || cat == null) return;
-        lembrarConta(conta);
-        criar.mutate({ asset_id: ativo, type: tipo, amount: numero, date: data, account_id: conta, category_id: cat,
-          occurred_at: instanteSeHoje(data) }, { onSuccess: onClose });
-      }}>
-        <div className="field">
-          <span className="label">{aporte ? "Para o ativo" : "Do ativo"}</span>
-          <div className="chip-linha" role="group" aria-label="Ativo">
-            {itens.map((i) => (
-              <button type="button" key={i.asset_id} className={i.asset_id === ativo ? "on" : ""}
-                aria-pressed={i.asset_id === ativo} onClick={() => setAtivo(i.asset_id)}>{i.name}</button>
-            ))}
-          </div>
-        </div>
-        <ContaPicker rotulo={aporte ? "Saiu de" : "Entrou em"} valor={conta} aoEscolher={setConta} />
-        {investCats.length > 1 && (
-          <div className="field">
-            <span className="label">Categoria</span>
-            <div className="chip-linha" role="group" aria-label="Categoria">
-              {investCats.map((c) => (
-                <button type="button" key={c.id} className={c.id === cat ? "on" : ""} aria-pressed={c.id === cat}
-                  onClick={() => setCategoria(c.id)}>{c.name}</button>
-              ))}
-            </div>
-          </div>
-        )}
-        <div className="row2">
-          <div className="field">
-            <label htmlFor="mv-valor">Valor</label>
-            <input id="mv-valor" inputMode="decimal" placeholder="0,00" autoFocus value={valor} onChange={(e) => setValor(e.target.value)} />
-          </div>
-          <div className="field">
-            <label htmlFor="mv-data">Data</label>
-            <input id="mv-data" type="date" value={data} onChange={(e) => setData(e.target.value)} />
-          </div>
-        </div>
-        <p className="hint">
-          {aporte ? "Sai da conta e entra no ativo: não é gasto." : "Sai do ativo e volta pra conta: não é receita nem rendimento."}
-        </p>
-        <button type="submit" className="btn btn-primary btn-block" disabled={criar.isPending || numero <= 0 || ativo == null || cat == null}>
-          {aporte ? "Registrar aporte" : "Registrar resgate"}
-        </button>
-        {erro && <div className="error-box">{erro.message}</div>}
-      </form>
     </Modal>
   );
 }

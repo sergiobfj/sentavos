@@ -12,14 +12,21 @@ existe um e-mail e uma senha configurados no servidor, e mais ninguém entra.
 
 | Aba | O que responde |
 | --- | --- |
-| **Início** | Como foi o mês: saldo do mês, pra onde o gasto foi (por finalidade), como ele evoluiu e as faturas. |
-| **Lançamentos** | Orçado × previsto × pago por categoria, os lançamentos do mês e as faturas dos cartões. |
-| **Planejar** | Quanto ainda posso usar no mês, os próximos meses, compromissos e a conferência do mês. |
-| **Investir** | Quanto tenho aplicado, quanto aportei e resgatei, e quanto rendeu. Visão cruzada de Patrimônio — não guarda dado próprio. |
-| **Patrimônio** | Quanto cada coisa vale hoje, incluindo dívida (que entra subtraindo). |
+| **Meu mês** | Tenho agora, a receber, a pagar, investido no mês e sobra projetada após aportes previstos. |
+| **Lançamentos** | Entradas, despesas, compras no cartão e movimentos de investimento, com estados explícitos. |
+| **Contas** | Fixas, variáveis, financiamentos e faturas: a pagar, a conferir e já pagas. |
+| **Relatórios** | Gasto, caixa e evolução, com filtros de finalidade. |
+| **Investir** | Posição conhecida, aportes/resgates realizados, planos e rendimento apurado. |
 
 Configurações (contas e saldos, cartões, CDI e categorias) fica no ⚙️ do topo,
 fora da barra.
+
+O botão `+` permite planejar aportes e resgates com `Ainda é previsto`.
+Previsão não movimenta dinheiro. Em Investir, toque no plano para editar,
+cancelar ou confirmar explicitamente a realização. Conta, ativo e categoria
+podem ser completados antes de confirmar. A posição do ativo continua sendo
+informada pelo extrato; até atualizar esse saldo, o rendimento fica não apurado.
+Decisões, validação e capturas: [refino de UX e previsões](docs/refino-ux-previsoes.md).
 
 As regras de dinheiro — o que é verdade onde, as invariantes, conta × ativo,
 aporte/resgate, natureza do gasto — estão em
@@ -153,10 +160,10 @@ categoria.
 
 ## Planejamento
 
-Aba própria, **Planejar** (`/planejamento`), e também a linha **"Disponível em
-outubro"** no Início. A tela principal responde "quanto posso usar?"; simulações,
-próximos meses e compromissos são telas próprias, e a conferência do mês fica em
-`/organizar` (com a aba Planejar acesa).
+O motor interno (`app/planejamento.py`) sustenta Meu mês e Contas.
+Orçamentos, metas, compromissos como gestão separada, conferência e simulações
+ficam fora da navegação cotidiana. Comparar meses foi retirado da experiência.
+Os dados e mecanismos necessários a recorrências e faturas são preservados.
 
 Quatro coisas que nunca se misturam:
 
@@ -190,7 +197,10 @@ A conta do mês, feita no servidor (`app/planejamento.py`):
 - **Reserva pra uma parcela** sai do disponível até o mês da parcela; nesse mês
   quem conta é a própria saída (coberta), e a baixa a cumpre. Nada é contado
   duas vezes.
-- **Investimento previsto é reserva**, não saída: guardar não é gastar.
+- **Investimento previsto não é gasto**: os novos planos usam `InvestmentPlan`,
+  com confirmação idempotente para criar um único movimento. O motor desconta
+  aportes previstos como dinheiro reservado e soma resgates previstos ao caixa
+  projetado, indicando a dependência. Previsões antigas continuam compatíveis.
 - **Saldo de partida**: só as contas marcadas (`include_in_planning`; sem
   escolha, só a classe Conta). Dívida nunca entra.
 - **"Simular gasto"** calcula e esquece — por isso funciona até no demo.
@@ -449,6 +459,7 @@ altera uma que já existe.
 | `0009_contas` | contas financeiras, saldo observado com instante, transferências; conta e instante no lançamento e no pagamento de fatura; `archived_on` no ativo — nada preenchido |
 | `0010_movimentos_investimento` | aporte/resgate/ajuste ligados ao ativo, à conta e ao lançamento — nada preenchido |
 | `0011_natureza` | natureza do gasto no lançamento, na categoria e no compromisso — nula = consumo |
+| `0014_investment_plans` | tabela de previsões de investimento, sem reclassificar dados existentes; confirmação vinculada a um único movimento |
 
 Dado existente nunca é reclassificado por migração: o que muda de sentido
 (o saldo agregado vira conta, a entrada da moto vira aquisição) passa pelo

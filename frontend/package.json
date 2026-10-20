@@ -9,7 +9,8 @@
     "preview": "vite preview",
     "lint": "tsc --noEmit",
     "test:essencial": "playwright test --config playwright.essencial.config.ts",
-    "test:integrated": "playwright test --config playwright.integrated.config.ts"
+    "test:integrated": "playwright test --config playwright.integrated.config.ts",
+    "test:refino": "playwright test --config playwright.refino.config.ts"
   },
   "dependencies": {
     "@tanstack/react-query": "^5.62.0",

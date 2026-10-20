@@ -244,6 +244,7 @@ export interface Invoice {
 }
 
 export interface InvoiceItem {
+  planned?: boolean;
   transaction_id: number;
   date: string;
   description: string;
@@ -301,6 +302,7 @@ export interface InvoicesSummary {
 }
 
 export interface Purchase {
+  planned?: boolean;
   expense_class?: ExpenseClass | null;
   id: number;
   card_id: number;
@@ -323,6 +325,7 @@ export interface Purchase {
 }
 
 export interface PurchaseCreate {
+  planned?: boolean;
   expense_class?: ExpenseClass | null;
   card_id: number;
   category_id: number;

@@ -58,11 +58,11 @@ export default function Settings() {
     <div className="e-settings">
       <h1 className="pagina-titulo">Configurações</h1>
       <div className="sec-title"><h2>Financeiro</h2></div>
-      <ul className="lista-compacta"><Linha rotulo="Contas e saldos" legenda="saldos observados e transferências" to="/contas"/><Linha rotulo="Compromissos e recorrências" legenda="parcelas, contas fixas e previsões" to="/planejamento/compromissos"/></ul>
+      <ul className="lista-compacta"><Linha rotulo="Contas e saldos" legenda="saldos observados e transferências" to="/contas"/></ul>
       <details open={section==="cartoes"} className="e-settings-detail"><summary>Cartões</summary><Cartoes/></details>
       <details open={section==="categorias"} className="e-settings-detail"><summary>Categorias</summary><Categorias/></details>
       <div className="sec-title"><h2>Dados</h2></div>
-      <ul className="lista-compacta"><Linha rotulo="Conferir mês" to="/organizar"/><Linha rotulo="Histórico e reconciliação" to="/rever"/><Linha rotulo="Simulações salvas" to="/planejamento/simulacoes"/><Linha rotulo="Patrimônio completo" to="/patrimonio"/></ul>
+      <ul className="lista-compacta"><Linha rotulo="Histórico e reconciliação" to="/rever"/><Linha rotulo="Patrimônio completo" to="/patrimonio"/></ul>
       <details className="e-settings-detail"><summary>Rendimento e CDI</summary><CdiCard/></details>
       <div className="sec-title"><h2>Conta</h2></div>
       <Conta />
