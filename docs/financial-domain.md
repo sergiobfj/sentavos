@@ -89,7 +89,22 @@ financiamento (financeiro), equipamentos (consumo).
   respondem o que o app precisa; um razão contábil seria a segunda fonte.
 - **Snapshot com instante (`observed_at`), lançamento com data.** O
   lançamento ganhou `occurred_at` opcional; sem ele, o lançamento do mesmo dia
-  conta como já incluído no saldo observado daquele dia.
+  não é somado novamente, mas a ordem é ambígua e o saldo fica marcado como
+  incompleto. Não é confirmação de que o movimento já estava no saldo.
+- **Posição observada de investimento é independente do fluxo.** Não se soma
+  aporte a um snapshot mensal que pode já incluí-lo. `position_pending` avisa
+  sobre movimentos sem observação posterior, inclusive os feitos sem plano.
+  No mesmo dia, `AssetSnapshot` só tem data: continua exigindo conferência.
+  `has_observation=false` é ausência de saldo, nunca saldo observado zero.
+- **Agregado e bancos individuais podem se sobrepor.** Meu mês não apresenta
+  total/projeção confirmados nessa situação; Contas exibe a pendência. A escolha
+  explícita `include_in_planning` define as contas livres do mês. Os valores e
+  snapshots originais são preservados até distribuir/reconciliar o agregado.
+- **Responsabilidade de uma parcela é analítica.** `Transaction.finalidade`
+  pode mudar em uma parcela via `/transactions/{id}/responsabilidade`, sem
+  trocar `Purchase.card_id`, fatura, valor ou conta de desembolso. Edição de
+  descrição da compra preserva atribuições individuais; alterar explicitamente
+  sua finalidade continua valendo para todas as parcelas.
 - **Estado do mês derivado, sem tabela de pendências.** Pendência gravada
   envelhece; derivada nunca discorda dos dados.
 - **Migração de dado por plano explícito** (`scripts/foundation_v3.py`):
