@@ -83,8 +83,9 @@ export default function Investments() {
   return (
     <>
       <section className="hero">
-        <div className="rot">{r.stale_names.length || r.reasons.some(reason=>reason.startsWith("Atualize o saldo")) ? "Saldo conhecido em investimentos" : "Total guardado agora"}</div>
-        <div className="big tnum">{r.total===0 && r.stale_names.length ? "—" : formatMoney(r.total)}</div>
+        <div className="rot">Saldo observado em investimentos</div>
+        <div className="big tnum">{r.total===0 && (r.stale_names.length || itens.every(i=>i.has_observation===false)) ? "—" : formatMoney(r.total)}</div>
+        {r.position_pending && <div className="nota">Posição a atualizar após os movimentos realizados. Aportes não são saldo observado. <Link to="/patrimonio">Informar posição no banco</Link></div>}
         {r.stale_names.length > 0 && (
           <div className="nota">
             Não entra no total: {r.stale_names.join(", ")} ({formatMoney(r.stale_total)} no último saldo) — sem saldo de {formatPeriod(currentPeriod())}.
@@ -105,13 +106,16 @@ export default function Investments() {
               <div className="s">
                 {item.stale ? (
                   <span className="aviso-txt">não atualizado · {item.as_of ? formatYm(item.as_of) : ""}</span>
+                ) : item.position_pending ? (
+                  "posição a atualizar após movimento realizado"
                 ) : item.reconciliation_note ? (
-                  "ajuste de conferência"
+                  item.reconciliation_note
                 ) : ASSET_CLASS_LABEL[item.asset_class]}
               </div>
+              <div className="s">{item.has_observation===false?"Sem saldo observado":item.observed_on?`Saldo observado em ${formatDiaMes(item.observed_on)}`:item.as_of?`Saldo observado de ${formatYm(item.as_of)}`:"Sem saldo observado"}{item.contributed>0?` · Aportado no mês ${formatMoney(item.contributed)}`:""}</div>
             </div>
             <div className="amt tnum">
-              {formatMoney(item.value)}
+              {item.has_observation===false?"—":formatMoney(item.value)}
             </div>
             <MarcaEditavel />
           </Link>

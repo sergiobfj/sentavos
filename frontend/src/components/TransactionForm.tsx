@@ -16,6 +16,7 @@ import {
   useDefinirForma,
   useDeleteTransaction,
   useUpdateTransaction,
+  useResponsabilidadeParcela,
 } from "../lib/queries";
 import { usePeriod } from "../lib/period";
 import { ApiError } from "../lib/api";
@@ -63,15 +64,24 @@ export default function TransactionForm({
   // tem o escopo certo — e as quatro telas que abrem este formulário não
   // precisam saber disso.
   if (transaction && ehParcela(transaction)) {
-    return (
-      <PurchaseForm
-        purchaseId={transaction.purchase_id!}
-        categories={categories}
-        onClose={onClose}
-      />
-    );
+    return <Parcela transaction={transaction} categories={categories} onClose={onClose}/>;
   }
   return <Lancamento categories={categories} transaction={transaction} onClose={onClose} />;
+}
+
+function Parcela({transaction, categories, onClose}: {transaction: Transaction; categories: Category[]; onClose: () => void}) {
+  const [compra, setCompra] = useState(false);
+  const [finalidade, setFinalidade] = useState<Finalidade | null>(transaction.finalidade ?? null);
+  const salvar = useResponsabilidadeParcela();
+  if (compra) return <PurchaseForm purchaseId={transaction.purchase_id!} categories={categories} onClose={onClose}/>;
+  return <Modal title="Parcela no cartão" onClose={onClose}><div className="m-body">
+    <p>{transaction.description} · {transaction.installment_no}/{transaction.installments} · {formatMoney(transaction.amount_paid ?? transaction.amount_planned ?? 0)}</p>
+    <p className="hint">Cobrança no cartão {transaction.card_name}. A responsabilidade abaixo vale somente para esta parcela. O pagamento da fatura é registrado separadamente, com a conta que desembolsou.</p>
+    <div className="field"><span className="label">Responsabilidade desta parcela</span><Segmentado rotulo="Responsabilidade desta parcela" opcoes={OPCOES_FINALIDADE} valor={finalidade} aoEscolher={setFinalidade} largo/></div>
+    {salvar.error && <p role="alert">{(salvar.error as ApiError).message}</p>}
+    <button className="btn btn-primary" disabled={!finalidade || salvar.isPending} onClick={()=>finalidade && salvar.mutate({id:transaction.id,finalidade},{onSuccess:onClose})}>Salvar responsabilidade</button>
+    <button className="link" onClick={()=>setCompra(true)}>Editar compra e todas as parcelas</button>
+  </div></Modal>;
 }
 
 function Lancamento({

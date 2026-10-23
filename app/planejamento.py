@@ -684,6 +684,9 @@ def _aviso_das_contas(
     aviso.contas_desatualizadas = [c.name for c in marcadas if c.quality == dominio_contas.DESATUALIZADO]
     aviso.desatualizado = bool(aviso.contas_desatualizadas)
     observados = [c.observed_at for c in marcadas if c.observed_at is not None]
+    # Inclui a ordem desconhecida dos movimentos do mesmo dia e a eventual
+    # sobreposição de agregado/contas. Não transforma nenhum deles em caixa.
+    aviso.sem_dia = any(c.maybe_incomplete for c in marcadas)
     if not observados:
         return aviso
     desde = min(observados)
@@ -692,9 +695,10 @@ def _aviso_das_contas(
               "resgate": "investimento"}
     movimentos: list[MovimentoDepois] = []
     for m in dominio_contas.movimentos(session, dono, None, aviso.desde):
-        if not dominio_contas.depois(m.data, m.ocorrido_em, desde):
+        if not (dominio_contas.depois(m.data, m.ocorrido_em, desde)
+                or dominio_contas.ordem_ambigua(m, desde)):
             continue
-        if instante is not None and dominio_contas.depois(m.data, m.ocorrido_em, instante):
+        if dominio_contas.depois(m.data, m.ocorrido_em, instante or dominio_contas.agora()):
             continue
         tipo = rotulo.get(m.tipo, "saida")
         if tipo == "entrada":

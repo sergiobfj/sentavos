@@ -32,7 +32,7 @@ MODELS = {m.__tablename__: m for m in (
     ReconciliationItem, Transaction,
 )}
 UPDATE_FIELDS = {
-    "transactions": {"description", "date", "expense_class", "note"},
+    "transactions": {"description", "date", "expense_class", "note", "finalidade"},
     "purchases": {"description", "purchase_date"},
     "commitments": {"description", "first_due", "total_amount", "note"},
     "reconciliation_items": {"description", "amount", "date", "kind", "status",
@@ -170,9 +170,16 @@ def prepare(session, user, plan):
             if row is not None and state(row) == after:
                 continue
             if model is Transaction and row is not None:
+                if "finalidade" in op["after"]:
+                    require(set(op["after"]) == {"finalidade"} and row.purchase_id is not None,
+                            "Atribuição nesta rotina deve alterar somente a responsabilidade de uma parcela.")
+                    owned(session, user, Purchase, row.purchase_id)
+                    category = owned(session, user, Category, row.category_id)
+                    require(category.type == CategoryType.EXPENSE and after["finalidade"] in {"pessoal", "familia", "empresa"},
+                            "Responsabilidade exige despesa e finalidade válida.")
                 unpaid_card = row.purchase_id is not None and row.payment_method == PaymentMethod.CREDIT and session.exec(
                     consulta(InvoicePayment, user).where(InvoicePayment.invoice_id == row.invoice_id)).first() is None
-                require(row.amount_paid is None or set(op["after"]) <= {"description", "note"}
+                require(row.amount_paid is None or set(op["after"]) <= {"description", "note", "finalidade"}
                         or unpaid_card and set(op["after"]) <= {"description", "date", "note"},
                         "Lançamento realizado só admite correção descritiva nesta rotina.")
                 if unpaid_card and "date" in op["after"]:
@@ -238,6 +245,9 @@ def reconcile(session, user, plan, apply=False):
     if apply and actions:
         registrar(session, user_id=user.id, ator="script:reconciliar_outubro_2026",
                   acao="reconciliacao.outubro_2026", detalhes=report)
+        # A CLI confirma a conexão externa, não Session.commit(). Enviar o
+        # evento agora garante que a auditoria participe da mesma transação.
+        session.flush()
     return report
 
 
@@ -246,7 +256,9 @@ def main():
     parser.add_argument("--usuario", required=True)
     parser.add_argument("--plano", required=True, type=Path)
     parser.add_argument("--report", required=True, type=Path, help="JSON privado local; não versionar dados reais")
-    parser.add_argument("--apply", action="store_true")
+    modo = parser.add_mutually_exclusive_group()
+    modo.add_argument("--apply", action="store_true")
+    modo.add_argument("--dry-run", action="store_true", help="Somente ler e relatar (padrão)")
     args = parser.parse_args()
     load_dotenv()
     url = os.environ["DATABASE_URL"]

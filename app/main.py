@@ -347,6 +347,37 @@ def update_transaction(
     return enriquecer(session, dono, [transaction])[0]
 
 
+class ResponsabilidadeDaParcela(SQLModel):
+    finalidade: Finalidade
+
+
+@router.patch("/transactions/{transaction_id}/responsabilidade")
+def atribuir_responsabilidade_da_parcela(
+    transaction_id: int, dados: ResponsabilidadeDaParcela,
+    session: Session = Depends(get_session), dono: User = Depends(require_user),
+):
+    """Atribuição analítica de UMA parcela; cartão e liquidação não mudam."""
+    exigir_escrita(dono)
+    parcela = exigir(session, Transaction, transaction_id, dono, "Parcela")
+    if parcela.purchase_id is None:
+        raise HTTPException(400, "Este lançamento não é uma parcela no cartão.")
+    exigir(session, Purchase, parcela.purchase_id, dono, "Compra")
+    categoria = exigir(session, Category, parcela.category_id, dono, "Categoria")
+    if categoria.type != CategoryType.EXPENSE:
+        raise HTTPException(400, "Responsabilidade se aplica a despesa.")
+    if parcela.finalidade != dados.finalidade:
+        from app.dominio.auditoria import registrar, ator_api
+        registrar(session, acao="parcela.responsabilidade", ator=ator_api(dono.email), user_id=dono.id,
+                  entidade="transaction", entidade_id=parcela.id,
+                  detalhes={"antes": parcela.finalidade, "depois": dados.finalidade,
+                            "purchase_id": parcela.purchase_id, "invoice_id": parcela.invoice_id})
+        parcela.finalidade = dados.finalidade
+        session.add(parcela)
+        session.commit()
+        session.refresh(parcela)
+    return enriquecer(session, dono, [parcela])[0]
+
+
 def finalidade_efetiva(
     categoria: Category | None, escolhida: Finalidade | None, padrao: bool
 ) -> Finalidade | None:

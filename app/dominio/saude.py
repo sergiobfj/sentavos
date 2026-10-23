@@ -23,7 +23,7 @@ from sqlmodel import Session, SQLModel
 from app import planejamento
 from app.cartao import limites_do_mes
 from app.dominio import contas as dominio_contas
-from app.dominio import patrimonio
+from app.dominio import patrimonio, investimentos
 from app.escopo import consulta
 from app.faturas import totais
 from app.models import (
@@ -155,6 +155,14 @@ def saude(session: Session, dono: User, ano: int, mes: int) -> SaudeDoMes:
             ))
 
     # ---------- Investimento ----------
+    posicoes = investimentos.resumo(session, dono, ano, mes)
+    pendentes = [i for i in posicoes.items if i.position_pending]
+    if pendentes:
+        pendencias.append(Pendencia(
+            code="INVESTMENT_BALANCE_PENDING", severity=AVISO,
+            title="Posição de investimento a atualizar após movimento realizado",
+            detail=", ".join(i.name for i in pendentes), count=len(pendentes), where="/investimentos",
+        ))
     resumo_mes = patrimonio.resumo(session, dono, ano, mes)
     notas = [i for i in resumo_mes.items
              if i.reconciliation_note and AssetClass(i.asset_class) in INVESTMENT_CLASSES]

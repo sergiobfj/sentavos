@@ -43,7 +43,7 @@ export default function MeuMes() {
   if(!r||!transactions.data||!categories.data) return <div className="loading" role="status">Carregando mês…</div>;
   return <div className="e-month">
     <div className="e-lead">
-      <section className="e-primary" aria-labelledby="e-money-label"><p id="e-money-label">Tenho agora</p><strong className="tnum">{r?.money_now==null?"—":formatMoney(r.money_now)}</strong><button className="e-subtle" onClick={()=>setSheet("contas")}>{r?.balance_stale?"Desatualizado · atualizar saldo":day?`Saldo de ${day} · ver contas`:"Informar saldo das contas"} ›</button></section>
+      <section className="e-primary" aria-labelledby="e-money-label"><p id="e-money-label">{r.balance_kind==="calculado"?"Saldo calculado":"Saldo observado"}</p><strong className="tnum">{r.money_now==null?"—":formatMoney(r.money_now)}</strong><button className="e-subtle" onClick={()=>setSheet("contas")}>{day?`${r.balance_kind==="calculado"?"Calculado desde":"Saldo observado em"} ${day} · `:""}{r.balance_pending||r.balance_stale?"Atualização pendente":day?"ver contas":"Informar saldo das contas"} ›</button></section>
       <section className="e-projection" aria-labelledby="e-projection-label"><p id="e-projection-label">Vai sobrar</p><button onClick={()=>setSheet("calculo")} disabled={!r} className="e-projection-value tnum">{r?.projected==null?"—":formatMoney(r.projected)} <span>›</span></button><small>{r?.reasons.length?(r.projected==null?r.reasons[0]:"Previsão parcial · ver detalhes"):"Após receber, pagar e investir"}</small></section>
     </div>
     <Summary items={[{label:"A receber",value:r?.to_receive},{label:"A pagar",value:r?.to_pay,to:"/contas-a-pagar"},{label:"Investido no mês",value:r?.contributed,to:"/investimentos"}]}/>

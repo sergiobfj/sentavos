@@ -156,6 +156,8 @@ export const authApi = {
 
 // ---------- Transações ----------
 export const transactionsApi = {
+  responsabilidade: (id: number, finalidade: import("./types").Finalidade) =>
+    request<Transaction>(`/transactions/${id}/responsabilidade`, { method: "PATCH", body: JSON.stringify({ finalidade }) }),
   // Sem período devolve tudo — útil pra séries de vários meses.
   list: (period?: Period) =>
     request<Transaction[]>(

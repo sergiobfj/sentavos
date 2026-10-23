@@ -57,6 +57,7 @@ class AccountsSummary(SQLModel):
     without_balance_count: int
     maybe_incomplete: bool
     unassigned_movements: int
+    possible_overlap: bool = False
 
 
 def _ler(s: dominio.SaldoDaConta) -> AccountRead:
@@ -105,6 +106,9 @@ def resumo_das_contas(session: Session = Depends(get_session), dono: User = Depe
         accounts=[_ler(s) for s in r.contas], total=r.total, free=r.livre, restricted=r.restrito,
         to_distribute=r.a_distribuir, stale_count=r.desatualizadas, without_balance_count=r.sem_saldo,
         maybe_incomplete=r.incompleto, unassigned_movements=r.movimentos_sem_conta,
+        possible_overlap=(any(s.saldo and s.conta.type == AccountType.RECONCILIATION for s in r.contas)
+                          and any(s.saldo and s.conta.type != AccountType.RECONCILIATION
+                                  and not s.conta.restricted for s in r.contas)),
     )
 
 

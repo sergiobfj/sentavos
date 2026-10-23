@@ -35,6 +35,7 @@ export interface FinancialAccount {
 }
 
 export interface AccountsSummary {
+  possible_overlap?: boolean;
   accounts: FinancialAccount[];
   total: number;
   free: number;
@@ -152,6 +153,9 @@ export type YieldStatus = "apurado" | "nao_apurado" | "sem_base";
 export type MovementType = "contribution" | "redemption" | "adjustment";
 
 export interface InvestmentAssetItem {
+  position_pending?: boolean;
+  observed_on?: string | null;
+  has_observation?: boolean;
   asset_id: number;
   name: string;
   asset_class: "fixed_income" | "equity" | "crypto";
@@ -171,6 +175,7 @@ export interface InvestmentAssetItem {
 }
 
 export interface InvestmentSummary {
+  position_pending?: boolean;
   year: number;
   month: number;
   items: InvestmentAssetItem[];
@@ -238,6 +243,8 @@ export interface MonthSummary {
   money_now: number | null;
   balance_date: string | null;
   balance_stale: boolean;
+  balance_pending?: boolean;
+  balance_kind?: "observado" | "calculado";
   to_receive: number;
   to_pay: number;
   to_check: number;

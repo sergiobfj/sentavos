@@ -105,7 +105,7 @@ export default function PurchaseForm({
                 category_id: form.category_id,
                 note: form.note.trim() || null,
                 // Todas as parcelas recebem a mesma — o servidor reescreve as N.
-                ...(form.finalidade ? { finalidade: form.finalidade } : {}),
+                ...(form.finalidade && form.finalidade !== compra.finalidade ? { finalidade: form.finalidade } : {}),
                 expense_class: form.expense_class,
               },
             },

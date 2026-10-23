@@ -9,6 +9,7 @@ import { IconeLapis } from "../components/TransactionList";
 import { Rosca } from "../components/Graficos";
 import {
   useAssetSummary,
+  useInvestmentSummary,
   useCreateAsset,
   useDeleteAsset,
   useDeleteAssetSnapshot,
@@ -34,6 +35,7 @@ const RENDEM: AssetClass[] = ["fixed_income", "equity", "crypto"];
 export default function Assets() {
   const { ym, label } = usePeriod();
   const { data, isLoading, error } = useAssetSummary();
+  const investimentos = useInvestmentSummary();
   const [creating, setCreating] = useState(false);
   const [editing, setEditing] = useState<AssetSummaryItem | null>(null);
 
@@ -83,6 +85,7 @@ export default function Assets() {
   const variacaoReal = data.variation ?? 0;
   const foraDoTotal = data.stale_count ?? 0;
   const temDividas = data.liabilities > 0;
+  const posicaoPendente = investimentos.data?.position_pending || investimentos.data?.items.some(i=>i.reconciliation_note);
 
   // A composição é só do que é POSITIVO. Dívida numa rosca viraria uma fatia
   // do mesmo tamanho visual que um ativo do mesmo valor — e ela subtrai, não
@@ -94,12 +97,13 @@ export default function Assets() {
   return (
     <>
       <section className="hero">
-        <div className="rot">Patrimônio líquido</div>
+        <div className="rot">{posicaoPendente ? "Patrimônio observado · parcial" : "Patrimônio líquido"}</div>
         <div className="big tnum">{formatMoney(data.net_worth)}</div>
+        {posicaoPendente && <div className="nota">Posições de investimento a conferir. Aportes transferem dinheiro da conta para o ativo; atualize o saldo observado abaixo para completar o patrimônio.</div>}
         {/* Com ativo desatualizado a variação do mês não é apurável: o mês
             anterior o contava e este não sabe quanto ele vale. Fica só a nota
             de quem está fora — nada de "caiu R$ X" pela metade. */}
-        {foraDoTotal === 0 && Math.abs(variacaoReal) >= 0.01 && (
+        {!posicaoPendente && foraDoTotal === 0 && Math.abs(variacaoReal) >= 0.01 && (
           <div className={`delta ${variacaoReal > 0 ? "pos" : "neg"}`}>
             <span className="seta" aria-hidden>{variacaoReal > 0 ? "↑" : "↓"}</span>
             {formatMoney(Math.abs(variacaoReal))} no mês

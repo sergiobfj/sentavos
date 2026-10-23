@@ -21,8 +21,8 @@ depois do saldo observado — o número pode não ter visto um gasto.
 
 O saldo observado tem hora (`observed_at`, com fuso). Lançamento com
 `occurred_at` compara pela hora. Lançamento só com data (todo o histórico, e o
-que for lançado sem hora): do mesmo dia conta como JÁ DENTRO do saldo
-observado naquele dia; de um dia depois, conta como posterior. É a limitação de
+que for lançado sem hora): do mesmo dia não é somado novamente, mas torna a
+qualidade incompleta porque a ordem é ambígua; de um dia depois, conta como posterior. É a limitação de
 `Transaction.date` não ter hora; a tela manda `occurred_at` quando o lançamento
 é de hoje, que é o caso comum ("acabei de pagar").
 """
@@ -82,6 +82,11 @@ def depois(data: dt.date, ocorrido_em: dt.datetime | None, instante: dt.datetime
     if ocorrido_em is not None:
         return utc(ocorrido_em) > utc(instante)
     return data > dia_local(instante)
+
+
+def ordem_ambigua(m: "Movimento", instante: dt.datetime) -> bool:
+    """Sem hora no mesmo dia não há evidência de inclusão no snapshot."""
+    return m.ocorrido_em is None and m.data == dia_local(instante)
 
 
 @dataclass
@@ -225,13 +230,24 @@ def saldos(
         else:
             qualidade = CALCULADO if posteriores else RECONCILIADO
         incompleto = any(
-            depois(m.data, m.ocorrido_em, s.observed_at) and not depois(m.data, m.ocorrido_em, instante)
+            (depois(m.data, m.ocorrido_em, s.observed_at) or ordem_ambigua(m, s.observed_at))
+            and not depois(m.data, m.ocorrido_em, instante)
             for m in sem_conta
-        )
+        ) or any(ordem_ambigua(m, s.observed_at) for m in por_conta.get(c.id, []))
         resultado.append(SaldoDaConta(
             c, round(s.balance + sum(m.valor for m in posteriores), 2), qualidade,
             utc(s.observed_at), s.balance, len(posteriores), incompleto,
         ))
+    # O agregado pode representar as mesmas contas individuais. Não decidir a
+    # distribuição por nome/valor: sinalizar a sobreposição para reconciliação.
+    agregado = any(s.saldo and s.conta.include_in_planning and not s.conta.restricted
+                   and AccountType(s.conta.type) == AccountType.RECONCILIATION for s in resultado)
+    individuais = any(s.saldo and AccountType(s.conta.type) != AccountType.RECONCILIATION
+                      and s.conta.include_in_planning and not s.conta.restricted for s in resultado)
+    if agregado and individuais:
+        for s in resultado:
+            if s.conta.include_in_planning and not s.conta.restricted:
+                s.incompleto = True
     return resultado
 
 
@@ -250,6 +266,7 @@ class ResumoDeContas:
 
 def resumo(session: Session, dono: User, instante: dt.datetime | None = None) -> ResumoDeContas:
     """Tenho quanto, onde, e quanto disso é livre. Uma regra só pra todo mundo."""
+    instante = instante or agora()
     lista = saldos(session, dono, instante)
     com_saldo = [s for s in lista if s.saldo is not None]
     total = sum(s.saldo for s in com_saldo)
@@ -260,7 +277,9 @@ def resumo(session: Session, dono: User, instante: dt.datetime | None = None) ->
     if datas:
         sem_conta = sum(
             1 for m in movimentos(session, dono, None, min(datas))
-            if any(depois(m.data, m.ocorrido_em, s.observado_em) for s in com_saldo)
+            if not depois(m.data, m.ocorrido_em, instante) and any(
+                depois(m.data, m.ocorrido_em, s.observado_em) or ordem_ambigua(m, s.observado_em)
+                for s in com_saldo)
         )
     return ResumoDeContas(
         contas=lista,

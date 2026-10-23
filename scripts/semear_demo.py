@@ -441,6 +441,7 @@ def semear_contas(dono: User, s: Session, categorias: dict[str, Category]) -> di
         sinal = 1 if tipo == InvestmentMovementType.CONTRIBUTION else -1
         atual = saldos[(a.id, hoje.year, hoje.month)]
         atual.value = round(antes + sinal * valor + rendeu, 2)
+        atual.observed_on = hoje
         s.add(atual)
         contagem["movimentos"] += 1
 

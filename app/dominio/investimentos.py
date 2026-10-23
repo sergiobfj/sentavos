@@ -21,6 +21,7 @@ Por ativo, só quando todo aporte/resgate do mês está ligado a um ativo.
 """
 
 from collections import defaultdict
+import datetime as dt
 
 from fastapi import HTTPException
 from sqlmodel import Session, SQLModel
@@ -34,6 +35,7 @@ from app.models import (
     INVESTMENT_CLASSES,
     Asset,
     AssetClass,
+    AssetSnapshot,
     Category,
     CategoryType,
     InvestmentMovement,
@@ -189,6 +191,9 @@ class InvestmentAssetItem(SQLModel):
     adjusted: float = 0
     yield_amount: float | None = None
     yield_status: str = NAO_APURADO
+    position_pending: bool = False
+    observed_on: dt.date | None = None
+    has_observation: bool = False
 
 
 class InvestmentSummary(SQLModel):
@@ -209,6 +214,7 @@ class InvestmentSummary(SQLModel):
     unlinked: int = 0
     stale_names: list[str] = []
     stale_total: float = 0
+    position_pending: bool = False
 
 
 def resumo(session: Session, dono: User, ano: int, mes: int, nome_do_mes: str | None = None) -> InvestmentSummary:
@@ -237,6 +243,30 @@ def resumo(session: Session, dono: User, ano: int, mes: int, nome_do_mes: str | 
     pendentes_saldo = {p.asset_id for p in session.exec(consulta(InvestmentPlan, dono).where(
         InvestmentPlan.status == "completed", InvestmentPlan.balance_pending == True  # noqa: E712
     )).all() if p.movement_id in movimentos_ids}
+    # A posição nesta arquitetura é uma observação independente. Todo movimento
+    # realizado sem observação posterior (inclusive sem plano) exige conferência.
+    # Não somar o aporte a um snapshot mensal que pode já incorporá-lo.
+    snapshots = {}
+    for s in session.exec(consulta(AssetSnapshot, dono)).all():
+        if (s.year, s.month) > (ano, mes):
+            continue
+        old = snapshots.get(s.asset_id)
+        if old is None or (s.year, s.month) > (old.year, old.month):
+            snapshots[s.asset_id] = s
+    from app.dominio.tempo import hoje_local
+    limite = min(fim - dt.timedelta(days=1), hoje_local())
+    for m in session.exec(consulta(InvestmentMovement, dono).where(InvestmentMovement.date <= limite)).all():
+        s = snapshots.get(m.asset_id)
+        if s is None:
+            pendentes_saldo.add(m.asset_id)
+            continue
+        dia = s.observed_on or (limites_do_mes(s.year, s.month)[1] - dt.timedelta(days=1))
+        # Sem hora no snapshot, o mesmo dia continua ambíguo. Observação do dia
+        # seguinte cobre o movimento; não há rendimento calculado por estimativa.
+        if m.date >= dia:
+            pendentes_saldo.add(m.asset_id)
+        if s.observed_on is None and (s.year, s.month) >= (hoje_local().year, hoje_local().month):
+            pendentes_saldo.add(m.asset_id)
     ligados = {m.transaction_id for m in movimentos if m.transaction_id}
     sem_ativo = sum(1 for t in lancamentos if t.id not in ligados)
     ajustado = sum(m.amount for m in movimentos if InvestmentMovementType(m.type) == InvestmentMovementType.ADJUSTMENT)
@@ -251,6 +281,8 @@ def resumo(session: Session, dono: User, ano: int, mes: int, nome_do_mes: str | 
     motivos.extend(f"Atualize o saldo de {i.name} após o movimento realizado." for i in itens if i.asset_id in pendentes_saldo)
     if desatualizados:
         motivos.append(f"Falta o saldo de {mes_txt} de {', '.join(i.name for i in desatualizados)}.")
+    if anterior > TOLERANCIA and any(i.asset_id not in snapshots for i in itens):
+        motivos.append("Há investimento sem saldo observado; informe a posição no banco.")
     if motivos:
         status, rendeu = NAO_APURADO, None
     elif anterior <= TOLERANCIA:
@@ -277,6 +309,9 @@ def resumo(session: Session, dono: User, ano: int, mes: int, nome_do_mes: str | 
             share=(i.value / total) if total > TOLERANCIA and not i.stale else None,
             contributed=round(mv["c"], 2), redeemed=round(mv["r"], 2), adjusted=round(mv["a"], 2),
             yield_amount=r, yield_status=st,
+            position_pending=i.asset_id in pendentes_saldo,
+            observed_on=snapshots[i.asset_id].observed_on if i.asset_id in snapshots else None,
+            has_observation=i.asset_id in snapshots,
         ))
 
     esperados = [i.expected_yield for i in atuais if i.expected_yield is not None]
@@ -288,6 +323,7 @@ def resumo(session: Session, dono: User, ano: int, mes: int, nome_do_mes: str | 
         expected_yield=round(sum(esperados), 2) if esperados and status == APURADO else None,
         unlinked=sem_ativo, stale_names=[i.name for i in desatualizados],
         stale_total=round(sum(i.value for i in desatualizados), 2),
+        position_pending=bool(pendentes_saldo) or any(i.asset_id not in snapshots for i in itens),
     )
 
 

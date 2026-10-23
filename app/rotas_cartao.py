@@ -508,7 +508,8 @@ def atualizar_compra(
             parcela.note = compra.note
             # Finalidade é rótulo, como a categoria: muda mesmo com fatura
             # paga, porque não mexe em quanto nenhuma fatura cobra.
-            parcela.finalidade = compra.finalidade
+            if "finalidade" in mudancas:
+                parcela.finalidade = compra.finalidade
             parcela.expense_class = compra.expense_class
             session.add(parcela)
 

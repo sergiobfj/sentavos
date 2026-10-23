@@ -62,10 +62,20 @@ def resumo(session, dono, year, month):
     incertas = sum(i.remaining for m in plano.months for i in m.items
                    if i.direction == "saida" and i.certainty != "confirmado")
     base_invalida = not base_conhecida or aviso.sem_dia or aviso.sem_contas or bool(aviso.contas_sem_saldo) or bool(aviso.quantidade)
+    sobreposto = (any(c.account_type == "reconciliation" and abs(c.value) > 0.005 for c in conhecidas)
+                  and any(c.account_type and c.account_type != "reconciliation" and abs(c.value) > 0.005
+                          for c in conhecidas))
+    if sobreposto:
+        motivos.append("Confira a distribuição do saldo agregado antes de somar contas individuais")
+    pendente = base_invalida or aviso.desatualizado or sobreposto
+    if aviso.sem_dia:
+        motivos.append("Confira a ordem dos movimentos e a abrangência dos saldos observados")
     fluxo = investimentos.resumo(session, dono, year, month)
     return {
         "plan": plano, "month": mes,
-        "money_now": round(sum(c.value for c in conhecidas), 2) if conhecidas else None,
+        "money_now": round(sum(c.value for c in conhecidas), 2) if conhecidas and not sobreposto else None,
+        "balance_pending": pendente,
+        "balance_kind": "calculado" if any(c.quality == "calculado" for c in conhecidas) else "observado",
         "balance_date": min((c.observed_on for c in conhecidas if c.observed_on), default=None),
         "balance_stale": aviso.desatualizado,
         "to_receive": round(sum(i.remaining for i in mes.items if i.direction == "entrada" and i.category_type != CategoryType.INVESTMENT), 2),
@@ -73,7 +83,7 @@ def resumo(session, dono, year, month):
         "to_check": round(sum(valor_revisao(r) for r in revisar) + sum(i.remaining for i in estimadas), 2),
         "contributed": fluxo.contributed, "redeemed": fluxo.redeemed,
         "to_invest": round(sum(r.amount for r in mes.reserves if r.source == "aporte"), 2),
-        "projected": None if base_invalida or passado else round(mes.available + incertas, 2),
+        "projected": None if base_invalida or sobreposto or passado else round(mes.available + incertas, 2),
         "partial": bool(motivos), "reasons": ["Mês encerrado"] if passado else motivos,
         "due": devidas, "estimated": estimadas, "review": revisar,
         "paid_cash_ids": [t.id for t in pagos],

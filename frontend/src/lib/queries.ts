@@ -138,6 +138,14 @@ export function useUpdateTransaction() {
   });
 }
 
+export function useResponsabilidadeParcela() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({id, finalidade}: {id: number; finalidade: import("./types").Finalidade}) => transactionsApi.responsabilidade(id, finalidade),
+    onSuccess: () => invalidateMovement(qc),
+  });
+}
+
 export function useDeleteTransaction() {
   const qc = useQueryClient();
   return useMutation({
@@ -191,8 +199,7 @@ export function useCreateAsset() {
   return useMutation({
     mutationFn: (data: AssetCreate) => assetsApi.create(data),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: keys.assets });
-      qc.invalidateQueries({ queryKey: keys.planning });
+      invalidateMovement(qc);
     },
   });
 }
@@ -202,8 +209,7 @@ export function useUpdateAsset() {
   return useMutation({
     mutationFn: ({ id, data }: { id: number; data: AssetUpdate }) => assetsApi.update(id, data),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: keys.assets });
-      qc.invalidateQueries({ queryKey: keys.planning });
+      invalidateMovement(qc);
     },
   });
 }
@@ -213,8 +219,7 @@ export function useDeleteAsset() {
   return useMutation({
     mutationFn: (id: number) => assetsApi.remove(id),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: keys.assets });
-      qc.invalidateQueries({ queryKey: keys.planning });
+      invalidateMovement(qc);
     },
   });
 }
@@ -224,8 +229,7 @@ export function useSetAssetSnapshot() {
   return useMutation({
     mutationFn: (data: AssetSnapshotSet) => assetsApi.setSnapshot(data),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: keys.assets });
-      qc.invalidateQueries({ queryKey: keys.planning });
+      invalidateMovement(qc);
     },
   });
 }
@@ -235,8 +239,7 @@ export function useDeleteAssetSnapshot() {
   return useMutation({
     mutationFn: (id: number) => assetsApi.removeSnapshot(id),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: keys.assets });
-      qc.invalidateQueries({ queryKey: keys.planning });
+      invalidateMovement(qc);
     },
   });
 }

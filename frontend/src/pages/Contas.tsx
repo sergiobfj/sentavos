@@ -55,7 +55,7 @@ export default function Contas() {
       <Cabecalho titulo="Contas e saldos" voltar="Configurações" voltarPara="/configuracoes" />
 
       <section className="hero plano-hero">
-        <div className="big tnum">{formatMoney(data.total)}</div>
+        <div className="big tnum">{data.possible_overlap ? "—" : formatMoney(data.total)}</div>
         <div className="rot">
           em contas{data.restricted > 0 && <> · {formatMoney(data.free)} livres, {formatMoney(data.restricted)} restritos</>}
         </div>
@@ -65,10 +65,10 @@ export default function Contas() {
             entram no total até você informar.
           </div>
         )}
-        {data.maybe_incomplete && (
+        {data.possible_overlap && <div className="nota">Confira a distribuição do saldo agregado: ele pode incluir o dinheiro das contas individuais.</div>}
+        {data.maybe_incomplete && !data.possible_overlap && (
           <div className="nota">
-            {data.unassigned_movements} {data.unassigned_movements === 1 ? "lançamento" : "lançamentos"} sem conta depois
-            do último saldo: o número pode estar incompleto.
+            {data.unassigned_movements > 0 ? `${data.unassigned_movements} movimentos sem conta a conferir desde o saldo observado.` : "Movimentos do mesmo dia sem horário: confira se já estão incluídos no saldo observado."} O número pode estar incompleto.
           </div>
         )}
       </section>

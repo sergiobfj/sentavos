@@ -259,7 +259,7 @@ export function ContasSheet({
   const comContas = contas.some((c) => c.account_id != null);
   const ym = `${period.year}-${String(period.month).padStart(2, "0")}`;
   const total = contas.filter((c) => c.included && !c.stale).reduce((s, c) => s + c.value, 0);
-  const erro = (atualizar.error || saldo.error) as ApiError | null;
+  const erro = (atualizar.error || saldo.error || atualizarConta.error || saldoDaConta.error) as ApiError | null;
 
   return (
     <Modal title="Saldo considerado" onClose={onClose}>
@@ -360,8 +360,7 @@ export function ContasSheet({
         {aviso.quantidade > 0 && aviso.desde && (
           <details className="detalhe">
             <summary>
-              {aviso.quantidade} {aviso.quantidade === 1 ? "movimento" : "movimentos"} depois de {formatDiaMes(aviso.desde)} não
-              {aviso.quantidade === 1 ? " está" : " estão"} no saldo
+              {aviso.quantidade} {aviso.quantidade === 1 ? "movimento" : "movimentos"} a conferir desde {formatDiaMes(aviso.desde)}
             </summary>
             <ul className="lista-compacta">
               {aviso.movimentos.map((m, i) => (
