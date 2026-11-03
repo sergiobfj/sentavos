@@ -193,6 +193,8 @@ def saude(session: Session, dono: User, ano: int, mes: int) -> SaudeDoMes:
         vencidas = []
         for c in compromissos:
             for numero, venc in planejamento.ocorrencias_ate(c, min(fim, hoje)):
+                if dono.operations_start and inicio >= dono.operations_start and venc < dono.operations_start:
+                    continue
                 if venc < inicio and not corrente:
                     continue
                 if planejamento.status_da_ocorrencia(c, numero, venc, estado, hoje) == OccurrenceStatus.VENCIDA:
@@ -212,7 +214,7 @@ def saude(session: Session, dono: User, ano: int, mes: int) -> SaudeDoMes:
     atrasadas = []
     for f in session.exec(consulta(Invoice, dono).where(Invoice.due_date >= inicio, Invoice.due_date < fim)).all():
         total, pago, _ = agregados_fatura.get(f.id, (0.0, 0.0, 0))
-        if total - pago > TOLERANCIA and f.due_date < hoje:
+        if total is not None and total - pago > TOLERANCIA and f.due_date < hoje:
             atrasadas.append((f, total - pago))
     if atrasadas:
         pendencias.append(Pendencia(

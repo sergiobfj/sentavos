@@ -33,6 +33,8 @@ class User(SQLModel, table=True):
     # aplicação, atualizar a Selic viraria editar cinco lugares e esquecer o
     # sexto. Nulo = ainda não informado, e aí o app não projeta nada.
     cdi_annual: float | None = Field(default=None)
+    # Reinício operacional: o histórico anterior continua consultável.
+    operations_start: dt.date | None = None
 
     created_at: dt.datetime = Field(
         default_factory=lambda: dt.datetime.now(dt.timezone.utc)
@@ -310,14 +312,9 @@ class TransactionRead(TransactionBase):
 
 
 # ---------- Cartão de crédito ----------
-# Três entidades e um princípio: a fatura não guarda dinheiro, ela guarda
-# identidade. Total, pago, restante e status são derivados dos itens e dos
-# pagamentos toda vez que a tela pede.
-#
-# É a mesma decisão da aba de Investimento, que não tem dados próprios: dois
-# números para o mesmo dinheiro começam iguais e terminam diferentes. Um status
-# gravado teria ainda um segundo defeito — precisaria de alguém passando de
-# tempos em tempos só pra virar "aberta" em "atrasada" na data certa.
+# A fatura identifica uma obrigação. Seu total vem de um valor manual completo
+# OU da soma dos itens, nunca dos dois. Sem informação, o total é desconhecido.
+# Pagamentos continuam sendo fluxo de caixa; o status é sempre calculado.
 
 
 class CardBase(SQLModel):
@@ -407,6 +404,7 @@ class Purchase(PurchaseBase, table=True):
     __tablename__ = "purchases"
     user_id: int = dono()
     id: int | None = Field(default=None, primary_key=True)
+    installments_stopped_from: dt.date | None = None
     created_at: dt.datetime = Field(
         default_factory=lambda: dt.datetime.now(dt.timezone.utc)
     )
@@ -460,6 +458,20 @@ class Invoice(SQLModel, table=True):
     month: int = Field(ge=1, le=12)
     closing_date: dt.date
     due_date: dt.date
+    # Total manual SUBSTITUI a soma dos itens; nunca é uma despesa adicional.
+    manual_total: float | None = None
+    # Itens/pagamentos anteriores permanecem no histórico, fora da nova cobrança.
+    reset_on: dt.date | None = None
+
+
+class InvoiceManual(SQLModel):
+    total: float | None = Field(default=None, ge=0)
+
+
+class InvoiceCreate(InvoiceManual):
+    card_id: int
+    year: int = Field(ge=1900, le=2999)
+    month: int = Field(ge=1, le=12)
 
 
 class InvoicePaymentBase(SQLModel):
@@ -515,6 +527,7 @@ class InvoiceStatus(str, Enum):
     PARCIAL = "parcial"
     PAGA = "paga"
     ATRASADA = "atrasada"
+    A_PREENCHER = "a_preencher"
 
 
 # Sem juros, multa, rotativo ou IOF — de propósito. Cobrança dessas entra como
@@ -551,11 +564,12 @@ class InvoiceRead(SQLModel):
     month: int
     closing_date: dt.date
     due_date: dt.date
-    total: float = 0
+    total: float | None = None
     paid: float = 0
-    remaining: float = 0
+    remaining: float | None = None
     status: InvoiceStatus = InvoiceStatus.ABERTA
     item_count: int = 0
+    manual: bool = False
 
 
 class InvoicePaymentRead(InvoicePaymentBase):
@@ -602,6 +616,7 @@ class InvoicesSummary(SQLModel):
     # Restante de TODAS as faturas em aberto, de todos os cartões. É o número
     # que vira "após faturas" no Início.
     open_total: float = 0
+    unknown_this_month: int = 0
 
 
 class PurchaseRead(PurchaseBase):

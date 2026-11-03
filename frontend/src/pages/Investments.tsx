@@ -83,8 +83,8 @@ export default function Investments() {
   return (
     <>
       <section className="hero">
-        <div className="rot">Saldo observado em investimentos</div>
-        <div className="big tnum">{r.total===0 && (r.stale_names.length || itens.every(i=>i.has_observation===false)) ? "—" : formatMoney(r.total)}</div>
+        <div className="rot">{r.total===0&&r.stale_names.length ? "Últimas posições observadas · atualização pendente" : "Saldo observado em investimentos"}</div>
+        <div className="big tnum">{r.total===0 && r.stale_names.length ? formatMoney(r.stale_total) : itens.every(i=>i.has_observation===false) ? "—" : formatMoney(r.total)}</div>
         {r.position_pending && <div className="nota">Posição a atualizar após os movimentos realizados. Aportes não são saldo observado. <Link to="/patrimonio">Informar posição no banco</Link></div>}
         {r.stale_names.length > 0 && (
           <div className="nota">

@@ -25,12 +25,13 @@ reconstruída.
 """
 
 import datetime as dt
+import math
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlmodel import Session, SQLModel, func, select
 
 from app.auth import exigir_escrita, require_user
-from app.cartao import avancar_meses, dividir_em_parcelas, competencia_da_parcela
+from app.cartao import avancar_meses, dividir_em_parcelas, competencia_da_parcela, ciclo_da_parcela, dia_do_mes
 from app.database import get_session
 from app.dominio.contas import conta_valida
 from app.escopo import buscar, consulta, exigir
@@ -43,6 +44,8 @@ from app.models import (
     Category,
     CategoryType,
     Invoice,
+    InvoiceCreate,
+    InvoiceManual,
     InvoiceDetail,
     InvoiceItem,
     InvoicePayment,
@@ -289,6 +292,8 @@ def _limpar_faturas_vazias(session: Session, dono: User, faturas: list[Invoice])
     outubro: R$ 0,00" é diferente de "não teve fatura em outubro".
     """
     for fatura in faturas:
+        if fatura.reset_on is not None or fatura.manual_total is not None:
+            continue
         itens = session.exec(
             select(func.count())
             .select_from(Transaction)
@@ -317,6 +322,11 @@ def _gerar_parcelas(session: Session, dono: User, compra: Purchase, cartao: Card
     valores = dividir_em_parcelas(compra.total_amount, compra.installments)
 
     for numero, valor in enumerate(valores, start=1):
+        if compra.installments_stopped_from and (
+            competencia_da_parcela(compra.purchase_date, numero) >= compra.installments_stopped_from
+            or ciclo_da_parcela(compra.purchase_date, cartao.closing_day, cartao.due_day, numero)[1] >= compra.installments_stopped_from
+        ):
+            continue
         fatura = fatura_da_parcela(session, dono, cartao, compra.purchase_date, numero)
         session.add(
             Transaction(
@@ -443,6 +453,8 @@ def atualizar_compra(
         for chave in mudancas
         if chave in CAMPOS_FINANCEIROS and mudancas[chave] != getattr(compra, chave)
     }
+    if compra.installments_stopped_from and (mexe_em_dinheiro or prevista != era_prevista):
+        raise HTTPException(409, "Compra histórica preservada pelo reinício. Cadastre a nova obrigação separadamente.")
 
     if mexe_em_dinheiro:
         pagas = _parcelas_pagas(session, dono, compra)
@@ -634,7 +646,7 @@ def resumo_de_faturas(
         em_aberto = 0.0
         for f in minhas:
             total, pago, _ = agregados.get(f.id, (0.0, 0.0, 0))
-            em_aberto += max(total - pago, 0.0)
+            em_aberto += max((total or 0.0) - pago, 0.0)
 
         # Cartão arquivado sem nenhuma fatura em aberto não precisa ocupar a
         # tela; com saldo em aberto, precisa — é dinheiro a pagar.
@@ -663,12 +675,12 @@ def resumo_de_faturas(
     ).all()
 
     vence_no_mes = sum(
-        agregados.get(f.id, (0.0, 0.0, 0))[0]
+        (agregados.get(f.id, (None, 0.0, 0))[0] or 0.0)
         for f in faturas
         if (f.year, f.month) == (year, month)
     )
     aberto_total = sum(
-        max(agregados.get(f.id, (0.0, 0.0, 0))[0] - agregados.get(f.id, (0.0, 0.0, 0))[1], 0.0)
+        max((agregados.get(f.id, (None, 0.0, 0))[0] or 0.0) - agregados.get(f.id, (None, 0.0, 0))[1], 0.0)
         for f in faturas
     )
 
@@ -680,6 +692,8 @@ def resumo_de_faturas(
         due_this_month=round(vence_no_mes, 2),
         paid_this_month=round(sum(p.amount for p in pagamentos), 2),
         open_total=round(aberto_total, 2),
+        unknown_this_month=sum(1 for f in faturas if (f.year, f.month) == (year, month)
+                               and agregados[f.id][0] is None),
     )
 
 
@@ -726,6 +740,8 @@ def ver_fatura(
         .where(Transaction.invoice_id == invoice_id)
         .order_by(Transaction.date.desc(), Transaction.id.desc())
     ).all()
+    if fatura.reset_on:
+        parcelas = [t for t in parcelas if t.date >= fatura.reset_on]
 
     compras = {
         c.id: c
@@ -779,6 +795,8 @@ def ver_fatura(
         .where(InvoicePayment.invoice_id == invoice_id)
         .order_by(InvoicePayment.date)
     ).all()
+    if fatura.reset_on:
+        pagamentos = [p for p in pagamentos if p.date >= fatura.reset_on]
 
     return InvoiceDetail(
         **base.model_dump(),
@@ -789,7 +807,54 @@ def ver_fatura(
 
 def _restante(session: Session, dono: User, fatura: Invoice) -> float:
     total, pago, _ = totais(session, dono).get(fatura.id, (0.0, 0.0, 0))
+    if total is None:
+        raise HTTPException(409, "Informe o valor da fatura antes de registrar pagamento.")
     return round(total - pago, 2)
+
+
+def _valor_manual(session: Session, dono: User, fatura: Invoice, total: float | None):
+    if total is not None and (not math.isfinite(total) or total < 0):
+        raise HTTPException(400, "Informe um valor válido para a fatura.")
+    _, paid, count = totais(session, dono).get(fatura.id, (None, 0, 0))
+    if paid > 0 and (total is None or total < paid - 0.005):
+        raise HTTPException(409, "O total não pode ser menor que os pagamentos registrados.")
+    fatura.manual_total = round(total, 2) if total is not None else None
+    session.add(fatura)
+
+
+@router_cartao.post("/invoices", response_model=InvoiceRead)
+def criar_fatura(dados: InvoiceCreate, session: Session = Depends(get_session), dono: User = Depends(require_user)):
+    exigir_escrita(dono)
+    card = exigir(session, Card, dados.card_id, dono, "Cartão")
+    if card.archived:
+        raise HTTPException(400, "Cartão arquivado.")
+    fatura = session.exec(consulta(Invoice, dono).where(Invoice.card_id == card.id,
+                         Invoice.year == dados.year, Invoice.month == dados.month)).first()
+    if fatura:
+        raise HTTPException(409, "Esta fatura já existe. Abra-a para informar o valor.")
+    due = dia_do_mes(dados.year, dados.month, card.due_day)
+    close = dia_do_mes(dados.year, dados.month, card.closing_day)
+    if close > due:
+        y, m = avancar_meses(dados.year, dados.month, -1)
+        close = dia_do_mes(y, m, card.closing_day)
+    fatura = Invoice(user_id=dono.id, card_id=card.id, year=dados.year, month=dados.month,
+                     closing_date=close, due_date=due)
+    session.add(fatura)
+    session.flush()
+    _valor_manual(session, dono, fatura, dados.total)
+    session.commit()
+    return montar(fatura, card.name, totais(session, dono), hoje())
+
+
+@router_cartao.patch("/invoices/{invoice_id}", response_model=InvoiceRead)
+def atualizar_fatura(invoice_id: int, dados: InvoiceManual, session: Session = Depends(get_session),
+                      dono: User = Depends(require_user)):
+    exigir_escrita(dono)
+    fatura = exigir(session, Invoice, invoice_id, dono, "Fatura")
+    _valor_manual(session, dono, fatura, dados.total)
+    session.commit()
+    card = exigir(session, Card, fatura.card_id, dono, "Cartão")
+    return montar(fatura, card.name, totais(session, dono), hoje())
 
 
 @router_cartao.post("/invoices/{invoice_id}/payments")
@@ -808,7 +873,9 @@ def pagar_fatura(
     exigir_escrita(dono)
     fatura = exigir(session, Invoice, invoice_id, dono, "Fatura")
 
-    if dados.amount <= 0:
+    if fatura.reset_on and dados.date < fatura.reset_on:
+        raise HTTPException(409, "Pagamento anterior ao reinício pertence ao histórico.")
+    if not math.isfinite(dados.amount) or dados.amount <= 0:
         raise HTTPException(status_code=400, detail="O pagamento precisa ser maior que zero.")
 
     falta = _restante(session, dono, fatura)
@@ -996,6 +1063,11 @@ def reconciliar(
                 "pagamento pelo botão 'Pagar fatura'."
             ),
         )
+
+    if fatura.reset_on and lancamento.date < fatura.reset_on:
+        raise HTTPException(409, "Pagamento histórico não pode ser transferido para a fatura reiniciada.")
+    if totais(session, dono)[fatura.id][0] is None:
+        raise HTTPException(409, "Informe o valor da fatura antes de reconciliar pagamentos.")
 
     categoria = buscar(session, Category, lancamento.category_id, dono)
     if categoria and categoria.type != CategoryType.EXPENSE:

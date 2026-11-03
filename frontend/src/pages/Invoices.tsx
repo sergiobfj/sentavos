@@ -12,9 +12,11 @@ import {
   usePayInvoice,
   useReconcile,
   useUndoPayment,
+  useSaveInvoice,
 } from "../lib/queries";
 import { useAuth } from "../lib/auth";
 import { ApiError } from "../lib/api";
+import { usePeriod } from "../lib/period";
 import { formatDate, formatDiaMes, formatMoney, parseMoney, todayIso } from "../lib/format";
 import {
   INVOICE_STATUS_LABEL,
@@ -33,10 +35,14 @@ const COR_STATUS: Record<InvoiceStatus, string> = {
   parcial: "var(--text)",
   paga: "var(--pos)",
   atrasada: "var(--neg)",
+  a_preencher: "var(--text-dim)",
 };
 
 export default function Invoices() {
   const [abertaId, setAbertaId] = useState<number | null>(null);
+  const [newCard, setNewCard] = useState<CardInvoices | null>(null);
+  const { period } = usePeriod();
+  const { sessao } = useAuth();
   const { data, isLoading, error } = useInvoicesSummary();
 
   if (abertaId != null) {
@@ -79,8 +85,9 @@ export default function Invoices() {
       )}
 
       {data.cards.map((c) => (
-        <CartaoNaLista key={c.card_id} cartao={c} onAbrir={setAbertaId} />
+        <CartaoNaLista key={c.card_id} cartao={c} onAbrir={setAbertaId} onCreate={!sessao?.somenteLeitura ? ()=>setNewCard(c) : undefined} />
       ))}
+      {newCard && <ValorFatura cardId={newCard.card_id} year={period.year} month={period.month} total={null} onClose={()=>setNewCard(null)}/>}
 
       {data.payments.length > 0 && (
         <>
@@ -111,9 +118,11 @@ export default function Invoices() {
 function CartaoNaLista({
   cartao,
   onAbrir,
+  onCreate,
 }: {
   cartao: CardInvoices;
   onAbrir: (id: number) => void;
+  onCreate?: () => void;
 }) {
   // A fatura do mês selecionado é a que se paga agora; a próxima é a que ainda
   // está acumulando. Mostrar as duas responde "quanto devo" e "quanto já
@@ -139,7 +148,7 @@ function CartaoNaLista({
         <FaturaResumida fatura={cartao.current} rotulo="Fatura atual" onAbrir={onAbrir} />
       ) : (
         <div className="hint" style={{ marginTop: "var(--s3)" }}>
-          Nenhuma fatura vence neste mês.
+          A preencher · valor não informado. {onCreate && <button className="link" onClick={onCreate}>Preencher fatura</button>}
         </div>
       )}
 
@@ -163,7 +172,7 @@ function FaturaResumida({
     <button className="fatura-linha" onClick={() => onAbrir(fatura.id)}>
       <div className="mid">
         <div className="rot">{rotulo}</div>
-        <div className="big tnum">{formatMoney(fatura.total)}</div>
+        <div className="big tnum">{fatura.total == null ? "Valor não informado" : formatMoney(fatura.total)}</div>
         <div className="s">
           vence {formatDiaMes(fatura.due_date)} · {fatura.item_count}{" "}
           {fatura.item_count === 1 ? "compra" : "compras"}
@@ -187,6 +196,7 @@ function DetalheFatura({ id, onVoltar }: { id: number; onVoltar: () => void }) {
   const { sessao } = useAuth();
   const [pagando, setPagando] = useState(false);
   const [reconciliando, setReconciliando] = useState(false);
+  const [editingTotal, setEditingTotal] = useState(false);
 
   if (isLoading) {
     return <div className="skel" style={{ height: 320, borderRadius: "var(--r)" }} />;
@@ -206,7 +216,7 @@ function DetalheFatura({ id, onVoltar }: { id: number; onVoltar: () => void }) {
         <div className="rot">
           {fatura.card_name} · fatura de {mesPorExtenso(fatura.year, fatura.month)}
         </div>
-        <div className="big tnum">{formatMoney(fatura.total)}</div>
+        <div className="big tnum">{fatura.total == null ? "Valor não informado" : formatMoney(fatura.total)}</div>
         <div className="delta">
           <span className="chip" style={{ color: COR_STATUS[fatura.status] }}>
             {INVOICE_STATUS_LABEL[fatura.status]}
@@ -256,18 +266,20 @@ function DetalheFatura({ id, onVoltar }: { id: number; onVoltar: () => void }) {
       <div className="card card-pad" style={{ marginTop: "var(--s4)" }}>
         <div className="fatura-total">
           <span>Total</span>
-          <b className="tnum">{formatMoney(fatura.total)}</b>
+          <b className="tnum">{fatura.total == null ? "A preencher" : formatMoney(fatura.total)}</b>
         </div>
         <div className="fatura-total">
           <span>Pago</span>
-          <b className="tnum">{formatMoney(fatura.paid)}</b>
+          <b className="tnum">{fatura.paid > 0 ? formatMoney(fatura.paid) : "Nenhum pagamento"}</b>
         </div>
         <div className="fatura-total destaque">
           <span>Restante</span>
-          <b className="tnum">{formatMoney(fatura.remaining)}</b>
+          <b className="tnum">{fatura.remaining == null ? "Valor não informado" : formatMoney(fatura.remaining)}</b>
         </div>
 
-        {podeEscrever && fatura.remaining > 0 && (
+        {podeEscrever && <button className="btn btn-ghost btn-block" onClick={()=>setEditingTotal(true)}>{fatura.total == null ? "Preencher valor da fatura" : "Editar valor total"}</button>}
+        {fatura.manual && <p className="hint">Total informado manualmente; inclui as compras desta fatura e não cria nova despesa.</p>}
+        {podeEscrever && (fatura.remaining ?? 0) > 0 && (
           <>
             <button
               className="btn btn-primary btn-block"
@@ -314,6 +326,7 @@ function DetalheFatura({ id, onVoltar }: { id: number; onVoltar: () => void }) {
       )}
 
       {pagando && <PagarFatura fatura={fatura} onClose={() => setPagando(false)} />}
+      {editingTotal && <ValorFatura id={fatura.id} cardId={fatura.card_id} year={fatura.year} month={fatura.month} total={fatura.total} onClose={()=>setEditingTotal(false)}/>}
       {reconciliando && (
         <Reconciliar fatura={fatura} onClose={() => setReconciliando(false)} />
       )}
@@ -353,11 +366,24 @@ function DesfazerPagamento({ id, valor }: { id: number; valor: number }) {
   );
 }
 
+function ValorFatura({id,cardId,year,month,total,onClose}: {id?:number;cardId:number;year:number;month:number;total:number|null;onClose:()=>void}) {
+  const [value,setValue] = useState(total == null ? "" : String(total).replace(".",","));
+  const save = useSaveInvoice();
+  const amount = value.trim() ? parseMoney(value) : null;
+  return <Modal title="Valor da fatura" onClose={onClose}><form className="m-body" onSubmit={e=>{
+    e.preventDefault(); save.mutate({id,card_id:cardId,year,month,total:amount},{onSuccess:onClose});
+  }}><div className="field"><label htmlFor="invoice-total">Valor total a pagar</label><input id="invoice-total" inputMode="decimal" autoFocus value={value} onChange={e=>setValue(e.target.value)}/></div>
+    <p className="hint">Informe o total da fatura, incluindo as compras já listadas. Este valor substitui a soma dos itens e não cria uma despesa de consumo. Deixe vazio se ainda não souber.</p>
+    {save.error&&<p role="alert">{save.error.message}</p>}
+    <button className="btn btn-primary btn-block" disabled={save.isPending||!!value.trim()&&amount==null}>Salvar valor</button>
+  </form></Modal>;
+}
+
 function PagarFatura({
   fatura,
   onClose,
 }: {
-  fatura: { id: number; remaining: number; total: number; due_date: string };
+  fatura: { id: number; remaining: number | null; total: number | null; due_date: string };
   onClose: () => void;
 }) {
   // Já vem com o restante preenchido: no uso normal a fatura é paga inteira, e
@@ -369,7 +395,7 @@ function PagarFatura({
   const pagar = usePayInvoice();
 
   const numero = parseMoney(valor) ?? 0;
-  const sobra = Math.round((fatura.remaining - numero) * 100) / 100;
+  const sobra = Math.round(((fatura.remaining ?? 0) - numero) * 100) / 100;
 
   return (
     <Modal
@@ -468,7 +494,7 @@ function Reconciliar({
   fatura,
   onClose,
 }: {
-  fatura: { id: number; remaining: number };
+  fatura: { id: number; remaining: number | null };
   onClose: () => void;
 }) {
   const { data: candidatos, isLoading } = useCandidatosAPagamento(fatura.id);

@@ -238,6 +238,8 @@ export interface InvestmentPlan extends InvestmentPlanData {
   overdue: boolean;
 }
 export interface MonthSummary {
+  empty?: boolean;
+  invoices_unknown?: number;
   plan: import("./tiposPlanejamento").PlanoResposta;
   month: import("./tiposPlanejamento").PlanoMes;
   money_now: number | null;

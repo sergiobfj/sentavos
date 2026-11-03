@@ -8,7 +8,8 @@ from app import planejamento
 from app.cartao import limites_do_mes
 from app.dominio import investimentos
 from app.escopo import consulta
-from app.models import Category, CategoryType, Transaction, ReconciliationItem, InvestmentPlan
+from app.models import Category, CategoryType, Transaction, ReconciliationItem, InvestmentPlan, Invoice, InvoicePayment
+from app.faturas import totais
 
 
 def resumo(session, dono, year, month):
@@ -16,6 +17,7 @@ def resumo(session, dono, year, month):
     hoje = planejamento.hoje()
     passado = (year, month) < (hoje.year, hoje.month)
     inicio, fim = limites_do_mes(year, month)
+    reset_active = bool(dono.operations_start and inicio >= dono.operations_start)
     plano = planejamento.planejar(session, dono, (year, month), agora=inicio if passado else hoje)
     mes = plano.months[-1]
     abertas = [i for i in mes.items if i.direction == "saida" and i.remaining > 0 and i.category_type != CategoryType.INVESTMENT]
@@ -71,19 +73,31 @@ def resumo(session, dono, year, month):
     if aviso.sem_dia:
         motivos.append("Confira a ordem dos movimentos e a abrangência dos saldos observados")
     fluxo = investimentos.resumo(session, dono, year, month)
+    month_transactions = session.exec(consulta(Transaction, dono).where(Transaction.date >= inicio, Transaction.date < fim)).all()
+    month_payments = session.exec(consulta(InvoicePayment, dono).where(InvoicePayment.date >= inicio, InvoicePayment.date < fim)).all()
+    empty = not month_transactions and not month_payments and not mes.items and not mes.reserves and not revisar
+    aggregates = totais(session, dono)
+    unknown = sum(1 for f in session.exec(consulta(Invoice, dono).where(Invoice.year == year, Invoice.month == month)).all()
+                  if aggregates[f.id][0] is None)
+    old_observation = bool(reset_active and any(c.observed_on and c.observed_on < dono.operations_start for c in conhecidas))
+    if unknown:
+        motivos.append("Preencha os valores das faturas")
+    if reset_active and empty:
+        motivos.append("Aguardando informações")
     return {
         "plan": plano, "month": mes,
         "money_now": round(sum(c.value for c in conhecidas), 2) if conhecidas and not sobreposto else None,
-        "balance_pending": pendente,
+        "balance_pending": pendente or old_observation,
         "balance_kind": "calculado" if any(c.quality == "calculado" for c in conhecidas) else "observado",
         "balance_date": min((c.observed_on for c in conhecidas if c.observed_on), default=None),
-        "balance_stale": aviso.desatualizado,
+        "balance_stale": aviso.desatualizado or old_observation,
         "to_receive": round(sum(i.remaining for i in mes.items if i.direction == "entrada" and i.category_type != CategoryType.INVESTMENT), 2),
         "to_pay": round(sum(i.remaining for i in devidas), 2),
         "to_check": round(sum(valor_revisao(r) for r in revisar) + sum(i.remaining for i in estimadas), 2),
         "contributed": fluxo.contributed, "redeemed": fluxo.redeemed,
         "to_invest": round(sum(r.amount for r in mes.reserves if r.source == "aporte"), 2),
-        "projected": None if base_invalida or sobreposto or passado else round(mes.available + incertas, 2),
+        "projected": None if base_invalida or sobreposto or passado or unknown or old_observation or (reset_active and empty) else round(mes.available + incertas, 2),
+        "empty": empty, "invoices_unknown": unknown,
         "partial": bool(motivos), "reasons": ["Mês encerrado"] if passado else motivos,
         "due": devidas, "estimated": estimadas, "review": revisar,
         "paid_cash_ids": [t.id for t in pagos],

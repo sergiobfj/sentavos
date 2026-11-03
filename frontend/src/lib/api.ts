@@ -239,6 +239,10 @@ export const purchasesApi = {
 
 // ---------- Faturas ----------
 export const invoicesApi = {
+  create: (data: { card_id: number; year: number; month: number; total: number | null }) =>
+    request<Invoice>("/invoices", { method: "POST", body: JSON.stringify(data) }),
+  updateTotal: (id: number, total: number | null) =>
+    request<Invoice>(`/invoices/${id}`, { method: "PATCH", body: JSON.stringify({total}) }),
   // Uma chamada serve três telas: Faturas, o cartão de fatura do Início e os
   // pagamentos que a lista de lançamentos mescla.
   summary: ({ year, month }: Period) =>

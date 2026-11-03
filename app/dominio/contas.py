@@ -220,6 +220,11 @@ def saldos(
         if s is None:
             resultado.append(SaldoDaConta(c, None, SEM_SALDO, None, None, 0, False))
             continue
+        if (dono.operations_start and dia_local(instante) >= dono.operations_start
+                and dia_local(s.observed_at) < dono.operations_start):
+            resultado.append(SaldoDaConta(c, s.balance, DESATUALIZADO,
+                                          utc(s.observed_at), s.balance, 0, True))
+            continue
         posteriores = [
             m for m in por_conta.get(c.id, [])
             if depois(m.data, m.ocorrido_em, s.observed_at) and not depois(m.data, m.ocorrido_em, instante)

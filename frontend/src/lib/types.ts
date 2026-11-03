@@ -218,13 +218,14 @@ export interface Card {
 export type CardCreate = Omit<Card, "id" | "archived" | "finalidade"> & { finalidade: Finalidade };
 export type CardUpdate = Partial<CardCreate> & { archived?: boolean };
 
-export type InvoiceStatus = "aberta" | "parcial" | "paga" | "atrasada";
+export type InvoiceStatus = "aberta" | "parcial" | "paga" | "atrasada" | "a_preencher";
 
 export const INVOICE_STATUS_LABEL: Record<InvoiceStatus, string> = {
   aberta: "Aberta",
   parcial: "Parcial",
   paga: "Paga",
   atrasada: "Atrasada",
+  a_preencher: "A preencher",
 };
 
 export interface Invoice {
@@ -236,11 +237,12 @@ export interface Invoice {
   month: number;
   closing_date: string;
   due_date: string;
-  total: number;
+  total: number | null;
   paid: number;
-  remaining: number;
+  remaining: number | null;
   status: InvoiceStatus;
   item_count: number;
+  manual?: boolean;
 }
 
 export interface InvoiceItem {
@@ -292,6 +294,7 @@ export interface CardInvoices {
 }
 
 export interface InvoicesSummary {
+  unknown_this_month?: number;
   year: number;
   month: number;
   cards: CardInvoices[];

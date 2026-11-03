@@ -1,3 +1,5 @@
+import CompromissoForm from "../components/planejamento/CompromissoForm";
+import { useAuth } from "../lib/auth";
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import { LoadError, SectionTitle, Summary } from "../components/essencial/Common";
@@ -17,6 +19,8 @@ function BillRow({ name, value, detail, status, onClick, to }: { name: string; v
 
 export default function ContasAPagar() {
   const { period } = usePeriod();
+  const { sessao } = useAuth();
+  const [creating,setCreating] = useState(false);
   const [selected, setSelected] = useState<{ due?: PlanoItem; review?: ReconciliationItem } | null>(null);
   const summary = useMonthSummary();
   const categories = useCategories(true);
@@ -47,9 +51,9 @@ export default function ContasAPagar() {
   const paid = invoicePayments.reduce((n,p)=>n+p.amount,0)+view.paidCash.reduce((n,t)=>n+(t.amount_paid??0),0);
   const checkCount = view.review.length + view.estimated.length;
   return <div className="e-page e-bills">
-    <SectionTitle title="Contas"><Link to="/faturas">Faturas ›</Link></SectionTitle>
+    <SectionTitle title="Contas"><Link to="/faturas">Faturas ›</Link></SectionTitle>{!sessao?.somenteLeitura&&<button className="btn btn-ghost" onClick={()=>setCreating(true)}>Nova conta a pagar</button>}{creating&&<CompromissoForm titulo="Nova conta a pagar" inicial={{installments:1}} onClose={()=>setCreating(false)}/>}
     <LoadError error={summary.error || transactions.error || invoices.error || commitments.error || hunterDetail.error || paidError} />
-    <Summary items={[{label:"A pagar",value:month?view.toPay:null},{label:"A conferir",value:null,text:month?`${checkCount} ${checkCount===1?"item":"itens"}`:"—",tone:checkCount?"attention":undefined,note:month&&(view.toCheck??0)>0?`${formatMoney(view.toCheck)} neste mês`:undefined},{label:"Já pagas",value:month&&!paidLoading&&!paidError?paid:null}]} />
+    <Summary items={[{label:"A pagar",value:summary.data?.empty||summary.data?.invoices_unknown&&!view.toPay?null:month?view.toPay:null,text:summary.data?.invoices_unknown?"A preencher":"Nenhum lançamento"},{label:"A conferir",value:null,text:month?`${checkCount} ${checkCount===1?"item":"itens"}`:"—",tone:checkCount?"attention":undefined,note:month&&(view.toCheck??0)>0?`${formatMoney(view.toCheck)} neste mês`:undefined},{label:"Já pagas",value:month&&!paidLoading&&!paidError?paid:null}]} />
     <section className="e-bill-section" aria-label="A pagar">
     <SectionTitle title="A pagar"><span className="e-section-count">{view.due.length}</span></SectionTitle>
     <div className="e-list">{view.due.map(i=><BillRow key={i.key} name={`${i.description}${i.label?` · ${i.label}`:""}`} value={i.remaining} detail={`${i.source==="cartao"?"Fatura · ":""}vence ${formatDiaMes(i.date)}${i.source==="cartao"&&i.amount>i.remaining?` · pago ${formatMoney(i.amount-i.remaining)}`:""}`} status={i.status==="vencido"?"Vencida":"A pagar"} to={i.invoice_id!=null?"/faturas":undefined} onClick={()=>{const t=transactions.data?.find(t=>t.id===i.transaction_id);if(t)setEditing(t);else setSelected({due:i});}}/>)}{!view.due.length&&<p className="e-empty">Nenhuma obrigação confirmada pendente neste mês.</p>}</div>

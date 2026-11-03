@@ -410,6 +410,15 @@ export function usePayInvoice() {
   });
 }
 
+export function useSaveInvoice() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({id, ...data}: {id?: number; card_id: number; year: number; month: number; total: number | null}) =>
+      id == null ? invoicesApi.create(data) : invoicesApi.updateTotal(id, data.total),
+    onSuccess: () => invalidateMovement(qc),
+  });
+}
+
 export function useUndoPayment() {
   const qc = useQueryClient();
   return useMutation({

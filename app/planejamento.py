@@ -863,6 +863,10 @@ def planejar(
     nomes = {c.id: c.name for c in session.exec(consulta(Card, dono)).all()}
     for f in session.exec(consulta(Invoice, dono)).all():
         total, pago, _ = agregados.get(f.id, (0.0, 0.0, 0))
+        if total is None:
+            continue
+        if dono.operations_start and inicio_m0 >= dono.operations_start and f.due_date < dono.operations_start:
+            continue
         restante = max(total - pago, 0.0)
         ref = (f.year, f.month)
         if indice(ref) > indice(ate):
@@ -905,6 +909,11 @@ def planejar(
             continue
         direcao = "entrada" if CategoryType(cat.type) == CategoryType.INCOME else "saida"
         for numero, venc in ocorrencias_ate(c, ultimo_dia):
+            if dono.operations_start and inicio_m0 >= dono.operations_start and venc < dono.operations_start:
+                continue
+            if (dono.operations_start and inicio_m0 >= dono.operations_start and c.cancelled_on
+                    and c.cancelled_on <= dono.operations_start and venc >= dono.operations_start):
+                continue
             st = status_da_ocorrencia(c, numero, venc, estado, agora)
             # "Prevista": o lançamento previsto já entra abaixo, como avulso.
             if st in (OccurrenceStatus.DISPENSADA, OccurrenceStatus.ABATIDA, OccurrenceStatus.CANCELADA, OccurrenceStatus.PREVISTA):

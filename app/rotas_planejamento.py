@@ -137,12 +137,15 @@ def _ler(session: Session, dono: User, c: Commitment, detalhado: bool = False):
 def listar_compromissos(
     session: Session = Depends(get_session),
     dono: User = Depends(require_user),
+    incluir_arquivados: bool = Query(default=False),
 ):
     """Todos, com o próximo vencimento de cada um. Ativos primeiro."""
     compromissos = session.exec(consulta(Commitment, dono)).all()
     estado = planejamento.carregar_estado(session, dono, [c.id for c in compromissos])
     categorias = {c.id: c for c in session.exec(consulta(Category, dono)).all()}
     agora = planejamento.hoje()
+    if dono.operations_start and agora >= dono.operations_start and not incluir_arquivados:
+        compromissos = [c for c in compromissos if c.cancelled_on is None or c.cancelled_on > dono.operations_start]
     lidos = [
         planejamento.ler_compromisso(c, categorias.get(c.category_id), estado, agora)
         for c in compromissos

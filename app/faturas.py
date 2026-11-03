@@ -4,13 +4,13 @@
 Aqui é o outro lado: dado o que está gravado, quanto cada fatura soma, quanto já
 foi pago e quanto de dinheiro de verdade saiu da conta no mês.
 
-## Nada aqui é gravado
+## Valor da obrigação
 
-Total, pago, restante e status são calculados toda vez. A alternativa — guardar
-os números na linha da fatura — cria uma segunda fonte de verdade pro mesmo
-dinheiro, e as duas começam iguais e terminam diferentes: basta apagar uma
-parcela e esquecer de recalcular. É a mesma decisão que faz a aba de
-Investimento não ter dados próprios.
+Sem valor manual, o total vem dos itens. Sem itens, o valor é desconhecido e
+a fatura fica "A preencher". Um total informado manualmente substitui a soma
+dos itens, sem criar despesa. Pago, restante e status continuam derivados.
+O corte explícito de uma fatura preserva itens/pagamentos históricos sem
+reutilizá-los como valores da nova obrigação.
 
 O status tem ainda um segundo motivo pra ser derivado: "atrasada" depende da data
 de hoje. Gravado, ele exigiria alguém passando todo dia só pra virar a chave na
@@ -27,7 +27,7 @@ qualquer.
 
 import datetime as dt
 
-from sqlmodel import Session, func, select
+from sqlmodel import Session, func, select, or_
 
 from app.cartao import ciclo_da_parcela, referencia
 from app.dominio import natureza
@@ -90,7 +90,7 @@ def fatura_da_parcela(
     return nova
 
 
-def totais(session: Session, dono: User) -> dict[int, tuple[float, float, int]]:
+def totais(session: Session, dono: User) -> dict[int, tuple[float | None, float, int]]:
     """{invoice_id: (total, pago, quantidade de itens)} para todas as faturas.
 
     Duas consultas agregadas para a conta inteira, em vez de duas por fatura.
@@ -105,7 +105,9 @@ def totais(session: Session, dono: User) -> dict[int, tuple[float, float, int]]:
                 func.coalesce(func.sum(func.coalesce(Transaction.amount_paid, Transaction.amount_planned)), 0.0),
                 func.count(Transaction.id),
             )
-            .where(Transaction.user_id == dono.id, Transaction.invoice_id.is_not(None))
+            .join(Invoice, Transaction.invoice_id == Invoice.id)
+            .where(Transaction.user_id == dono.id,
+                   or_(Invoice.reset_on.is_(None), Transaction.date >= Invoice.reset_on))
             .group_by(Transaction.invoice_id)
         ).all()
     }
@@ -117,25 +119,32 @@ def totais(session: Session, dono: User) -> dict[int, tuple[float, float, int]]:
                 InvoicePayment.invoice_id,
                 func.coalesce(func.sum(InvoicePayment.amount), 0.0),
             )
-            .where(InvoicePayment.user_id == dono.id)
+            .join(Invoice, InvoicePayment.invoice_id == Invoice.id)
+            .where(InvoicePayment.user_id == dono.id,
+                   or_(Invoice.reset_on.is_(None), InvoicePayment.date >= Invoice.reset_on))
             .group_by(InvoicePayment.invoice_id)
         ).all()
     }
 
     return {
-        invoice_id: (itens.get(invoice_id, (0.0, 0))[0], pagos.get(invoice_id, 0.0),
-                     itens.get(invoice_id, (0.0, 0))[1])
-        for invoice_id in set(itens) | set(pagos)
+        f.id: (f.manual_total if f.manual_total is not None else
+               itens[f.id][0] if f.id in itens else None,
+               pagos.get(f.id, 0.0), itens.get(f.id, (0.0, 0))[1])
+        for f in session.exec(consulta(Invoice, dono)).all()
     }
 
 
-def status_de(total: float, pago: float, vencimento: dt.date, hoje: dt.date) -> InvoiceStatus:
+def status_de(total: float | None, pago: float, vencimento: dt.date, hoje: dt.date) -> InvoiceStatus:
     """Precedência: paga → atrasada → parcial → aberta.
 
     Vencida com saldo aparece como atrasada mesmo tendo recebido parte: é a
     informação que pede ação. Quanto já foi pago continua na tela ao lado.
     """
-    if total - pago <= TOLERANCIA:
+    if total is None:
+        return InvoiceStatus.A_PREENCHER
+    if total <= TOLERANCIA:
+        return InvoiceStatus.ABERTA
+    if total > TOLERANCIA and total - pago <= TOLERANCIA:
         return InvoiceStatus.PAGA
     if hoje > vencimento:
         return InvoiceStatus.ATRASADA
@@ -159,11 +168,12 @@ def montar(
         month=fatura.month,
         closing_date=fatura.closing_date,
         due_date=fatura.due_date,
-        total=round(total, 2),
+        total=round(total, 2) if total is not None else None,
         paid=round(pago, 2),
-        remaining=round(max(total - pago, 0.0), 2),
+        remaining=round(max(total - pago, 0.0), 2) if total is not None else None,
         status=status_de(total, pago, fatura.due_date, hoje),
         item_count=qtd,
+        manual=fatura.manual_total is not None,
     )
 
 
@@ -291,7 +301,7 @@ def resumo_de_caixa(
     faturas = session.exec(consulta(Invoice, dono)).all()
 
     faturas_do_mes = sum(
-        agregados.get(f.id, (0.0, 0.0, 0))[0]
+        (agregados.get(f.id, (None, 0.0, 0))[0] or 0.0)
         for f in faturas
         if (f.year, f.month) == (ano, mes)
     )
@@ -301,7 +311,7 @@ def resumo_de_caixa(
     em_aberto = 0.0
     for f in faturas:
         total, pago, _ = agregados.get(f.id, (0.0, 0.0, 0))
-        em_aberto += max(total - pago, 0.0)
+        em_aberto += max((total or 0.0) - pago, 0.0)
 
     conta = saldo_do_mes(somas, faturas_pagas)
     carteira = conta["saldo"]
