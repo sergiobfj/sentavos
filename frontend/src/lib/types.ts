@@ -60,6 +60,7 @@ export const FINALIDADE_LABEL: Record<Finalidade, string> = {
 };
 
 export interface Transaction {
+  due_unknown?: boolean;
   expense_class?: ExpenseClass | null;
   effective_expense_class?: ExpenseClass | null;
   id: number;
@@ -229,6 +230,7 @@ export const INVOICE_STATUS_LABEL: Record<InvoiceStatus, string> = {
 };
 
 export interface Invoice {
+  due_unknown?: boolean;
   id: number;
   card_id: number;
   card_name: string;
@@ -278,6 +280,10 @@ export interface InvoicePayment {
 }
 
 export interface InvoiceDetail extends Invoice {
+  statement_items?: {id:number; description:string; amount:number; finalidade:Finalidade}[];
+  responsibility_totals?: Record<string,number>;
+  items_total?: number;
+  discrepancy?: number | null;
   items: InvoiceItem[];
   payments: InvoicePayment[];
 }

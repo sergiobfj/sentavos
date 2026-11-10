@@ -59,7 +59,7 @@ export default function Investments() {
   if (resumo.error) return <div className="error-box">{(resumo.error as ApiError).message}</div>;
   const r = resumo.data!;
   const itens = r.items;
-  const conciliacaoPendente = itens.some((i) => i.reconciliation_note);
+  const conciliacaoPendente = itens.some((i) => i.reconciliation_note && i.purpose!=="emergency_reserve");
   const doMes = fluxo.data;
 
   if (itens.length === 0) {
@@ -102,7 +102,7 @@ export default function Investments() {
         {itens.map((item) => (
           <Link className={`row${item.stale ? " desatualizado" : ""}`} key={item.asset_id} to="/patrimonio">
             <div className="mid">
-              <div className="t">{item.name}</div>
+              <div className="t">{item.purpose==="emergency_reserve"?`Reserva de emergência · ${item.name}`:item.name}</div>
               <div className="s">
                 {item.stale ? (
                   <span className="aviso-txt">não atualizado · {item.as_of ? formatYm(item.as_of) : ""}</span>

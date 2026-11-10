@@ -329,7 +329,7 @@ function Lancamento({
         </div>
 
         <div className="field">
-          <label htmlFor="t-date">{noCartao ? "Data da compra" : "Data"}</label>
+          <label htmlFor="t-date">{noCartao ? "Data da compra" : transaction?.due_unknown ? "Data do registro (vencimento não informado)" : "Data"}</label>
           <input id="t-date" type="date" value={form.date}
             onChange={(e) => setForm({ ...form, date: e.target.value })} />
         </div>

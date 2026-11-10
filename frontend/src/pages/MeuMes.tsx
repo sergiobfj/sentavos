@@ -29,7 +29,7 @@ export default function MeuMes() {
   const dueVariable=pending.filter(i=>i.direction==="saida"&&i.expense_class!=="fixed"&&i.category_type!=="investment");
   function itemLine(i:PlanoItem):FinancialLine {
     const t=transactions.data?.find(t=>t.id===i.transaction_id);
-    return {key:i.key,description:i.description,date:i.date,value:i.remaining,income:i.direction==="entrada",
+    return {key:i.key,description:i.description,date:i.due_unknown?"":i.date,value:i.remaining,income:i.direction==="entrada",detail:i.due_unknown?"Vencimento não informado":undefined,
       status:i.certainty!=="confirmado"?"A conferir":i.direction==="entrada"?"A receber":"A pagar",
       onClick:t?()=>setEditing(t):()=>navigate("/contas-a-pagar")};
   }
@@ -43,9 +43,16 @@ export default function MeuMes() {
   if(!r||!transactions.data||!categories.data) return <div className="loading" role="status">Carregando mês…</div>;
   return <div className="e-month">
     <div className="e-lead">
-      <section className="e-primary" aria-labelledby="e-money-label"><p id="e-money-label">{r.balance_kind==="calculado"?"Saldo calculado":"Saldo observado"}</p><strong className="tnum">{r.money_now==null?"—":formatMoney(r.money_now)}</strong><button className="e-subtle" onClick={()=>setSheet("contas")}>{day?`${r.balance_kind==="calculado"?"Calculado desde":"Saldo observado em"} ${day} · `:""}{r.balance_pending||r.balance_stale?"Atualização pendente":day?"ver contas":"Informar saldo das contas"} ›</button></section>
+      <section className="e-primary" aria-labelledby="e-money-label"><p id="e-money-label">Tenho agora</p><strong className="tnum">{r.money_now==null?"—":formatMoney(r.money_now)}</strong><button className="e-subtle" onClick={()=>setSheet("contas")}>{r.bank_observation?`${r.bank_observation.name} · saldo observado em ${r.bank_observation.date.slice(8,10)}/${r.bank_observation.date.slice(5,7)} · ver contas`: <>{day?`${r.balance_kind==="calculado"?"Calculado desde":"Saldo observado em"} ${day} · `:""}{r.balance_pending||r.balance_stale?"Atualização pendente":day?"ver contas":"Informar saldo das contas"}</>} ›</button></section>
       <section className="e-projection" aria-labelledby="e-projection-label"><p id="e-projection-label">Vai sobrar</p><button onClick={()=>setSheet("calculo")} disabled={!r} className="e-projection-value tnum">{r?.projected==null?"—":formatMoney(r.projected)} <span>›</span></button><small>{r?.reasons.length?(r.projected==null?(r.empty?"Aguardando informações":r.reasons[0]):"Previsão parcial · ver detalhes"):"Após receber, pagar e investir"}</small></section>
     </div>
+    {(r.emergency_reserve!=null||!!r.earmarked)&&<Summary items={[
+      ...(r.emergency_reserve!=null?[{label:"Reserva de emergência",value:r.emergency_reserve,to:"/investimentos",note:"Separada da conta bancária"}]:[]),
+      {label:"Já separado para pagar",value:r.earmarked??0},
+      {label:"Saldo sem destinação",value:r.unassigned},
+    ]}/>}
+    {!!r.earmarked&&<details className="e-note"><summary>Destinação do dinheiro separado</summary>{r.month.reserves.filter(i=>i.source==="reserva").map(i=><p key={i.key}>{i.description} · {formatMoney(i.amount)}</p>)}</details>}
+    {r.balance_adjustments?.map(a=><p className="e-note" key={a.id}>{a.description}: {formatMoney(a.amount)} · conciliação do saldo observado, sem receita ou despesa.</p>)}
     <Summary items={[{label:"A receber",value:r.empty?null:r.to_receive,text:"Nenhum lançamento"},{label:"A pagar",value:r.empty||r.invoices_unknown&&!r.to_pay?null:r.to_pay,text:r.invoices_unknown?"A preencher":"Nenhum lançamento",to:"/contas-a-pagar"},{label:"Investido no mês",value:r.empty?null:r.contributed,text:"Nenhum lançamento",to:"/investimentos"}]}/>
     {!!r?.to_invest&&<Link className="e-to-invest" to="/investimentos"><span>A investir</span><b className="tnum">{formatMoney(r.to_invest)} ›</b></Link>}
     {!!r?.to_check&&<Link className="e-review-link" to="/contas-a-pagar">A conferir {formatMoney(r.to_check)} · previsão parcial ›</Link>}

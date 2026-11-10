@@ -153,6 +153,7 @@ export type YieldStatus = "apurado" | "nao_apurado" | "sem_base";
 export type MovementType = "contribution" | "redemption" | "adjustment";
 
 export interface InvestmentAssetItem {
+  purpose?: string | null;
   position_pending?: boolean;
   observed_on?: string | null;
   has_observation?: boolean;
@@ -238,6 +239,11 @@ export interface InvestmentPlan extends InvestmentPlanData {
   overdue: boolean;
 }
 export interface MonthSummary {
+  bank_observation?: {name:string; date:string} | null;
+  emergency_reserve?: number | null;
+  earmarked?: number;
+  unassigned?: number | null;
+  balance_adjustments?: {id:number; description:string; amount:number; date:string}[];
   empty?: boolean;
   invoices_unknown?: number;
   plan: import("./tiposPlanejamento").PlanoResposta;

@@ -22,14 +22,14 @@ export function ExpenseClassField({ value, onChange, suggested = false }: { valu
 export interface FinancialLine { key: string; description: string; date: string; value: number | null; detail?: string; status: string; income?: boolean; onClick?: () => void }
 export function FinancialRow({ line, grouped = false }: { line: FinancialLine; grouped?: boolean }) {
   const pending = /Previsto|A receber|A pagar|Pendente|A conferir/.test(line.status);
-  const content = <><span className="e-row-text"><strong>{line.description}</strong><small>{line.detail}{!grouped&&<>{line.detail ? " · " : ""}{formatDiaMes(line.date)}</>}</small></span><span className="e-row-value"><strong className={line.income&&!pending ? "pos" : ""}>{line.value == null ? "—" : `${line.income ? "+" : "−"}${formatMoney(Math.abs(line.value))}`}</strong><small data-tone={pending?"attention":/Recebido|Pago|Realizado/.test(line.status)?"positive":undefined}>{line.status}{grouped&&line.onClick&&<span className="e-row-chevron" aria-hidden="true">›</span>}</small></span></>;
+  const content = <><span className="e-row-text"><strong>{line.description}</strong><small>{line.detail}{!grouped&&line.date&&<>{line.detail ? " · " : ""}{formatDiaMes(line.date)}</>}</small></span><span className="e-row-value"><strong className={line.income&&!pending ? "pos" : ""}>{line.value == null ? "—" : `${line.income ? "+" : "−"}${formatMoney(Math.abs(line.value))}`}</strong><small data-tone={pending?"attention":/Recebido|Pago|Realizado/.test(line.status)?"positive":undefined}>{line.status}{grouped&&line.onClick&&<span className="e-row-chevron" aria-hidden="true">›</span>}</small></span></>;
   return line.onClick ? <button className="e-row" data-entry-key={line.key} onClick={line.onClick}>{content}</button> : <div className="e-row" data-entry-key={line.key}>{content}</div>;
 }
 export function transactionLine(t: Transaction, cat?: Category, onClick?: () => void): FinancialLine {
   const investment = cat?.type === "investment";
   const value = t.amount_paid ?? t.amount_planned;
   const status = t.amount_paid == null ? cat?.type === "income" ? "A receber" : investment ? "Previsto" : "A pagar" : cat?.type === "income" ? "Recebido" : investment ? (value ?? 0) < 0 ? "Resgate" : "Aporte" : t.card_name ? "No cartão" : "Pago";
-  return { key: `t-${t.id}`, description: t.description, date: t.date, value, income: cat?.type === "income" || investment && (value ?? 0) < 0, detail: [cat?.name, t.card_name ? `${t.card_name}${(t.installments ?? 1) > 1 ? ` · ${t.installment_no}/${t.installments}` : ""}` : t.account_name].filter(Boolean).join(" · "), status, onClick };
+  return { key: `t-${t.id}`, description: t.description, date: t.due_unknown && t.amount_paid==null ? "" : t.date, value, income: cat?.type === "income" || investment && (value ?? 0) < 0, detail: [t.due_unknown && t.amount_paid==null ? "Vencimento não informado" : null, cat?.name, t.card_name ? `${t.card_name}${(t.installments ?? 1) > 1 ? ` · ${t.installment_no}/${t.installments}` : ""}` : t.account_name].filter(Boolean).join(" · "), status, onClick };
 }
 export function EntryEditor({ transaction, categories, onClose }: { transaction: Transaction; categories: Category[]; onClose: () => void }) {
   const { sessao } = useAuth();

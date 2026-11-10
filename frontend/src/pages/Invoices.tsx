@@ -20,6 +20,7 @@ import { usePeriod } from "../lib/period";
 import { formatDate, formatDiaMes, formatMoney, parseMoney, todayIso } from "../lib/format";
 import {
   INVOICE_STATUS_LABEL,
+  FINALIDADE_LABEL,
   type CardInvoices,
   type Invoice,
   type InvoiceStatus,
@@ -174,7 +175,7 @@ function FaturaResumida({
         <div className="rot">{rotulo}</div>
         <div className="big tnum">{fatura.total == null ? "Valor não informado" : formatMoney(fatura.total)}</div>
         <div className="s">
-          vence {formatDiaMes(fatura.due_date)} · {fatura.item_count}{" "}
+          {fatura.due_unknown?"Vencimento não informado":`vence ${formatDiaMes(fatura.due_date)}`} · {fatura.item_count}{" "}
           {fatura.item_count === 1 ? "compra" : "compras"}
           {fatura.paid > 0 && <> · {formatMoney(fatura.paid)} pago</>}
         </div>
@@ -221,7 +222,7 @@ function DetalheFatura({ id, onVoltar }: { id: number; onVoltar: () => void }) {
           <span className="chip" style={{ color: COR_STATUS[fatura.status] }}>
             {INVOICE_STATUS_LABEL[fatura.status]}
           </span>
-          {" "}vence {formatDate(fatura.due_date)}
+          {" "}{fatura.due_unknown?"Vencimento não informado":`vence ${formatDate(fatura.due_date)}`}
         </div>
       </section>
 
@@ -230,7 +231,7 @@ function DetalheFatura({ id, onVoltar }: { id: number; onVoltar: () => void }) {
         <span className="extra tnum">fecha {formatDiaMes(fatura.closing_date)}</span>
       </div>
 
-      {fatura.items.length === 0 ? (
+      {fatura.items.length === 0 && !fatura.statement_items?.length ? (
         <div className="empty">
           <div className="tit">Nenhuma compra nesta fatura</div>
         </div>
@@ -248,6 +249,7 @@ function DetalheFatura({ id, onVoltar }: { id: number; onVoltar: () => void }) {
                 <div className="t">{item.description}</div>
                 <div className="s">
                   {formatDiaMes(item.purchase_date)} · {item.category_name}{item.planned ? " · Compra prevista" : " · Compra no cartão"}
+                  {item.finalidade&&` · ${item.finalidade==="empresa"?"SECCO":FINALIDADE_LABEL[item.finalidade]}`}
                   {item.installments && (
                     <>
                       {" · "}
@@ -262,6 +264,9 @@ function DetalheFatura({ id, onVoltar }: { id: number; onVoltar: () => void }) {
           ))}
         </div>
       )}
+      {!!fatura.statement_items?.length&&<div className="list">{fatura.statement_items.map(item=><div className="row" key={`statement-${item.id}`}><div className="mid"><div className="t">{item.description}</div><div className="s">{item.finalidade==="empresa"?"SECCO":FINALIDADE_LABEL[item.finalidade]} · Composição informada da fatura</div></div><div className="amt tnum">{formatMoney(item.amount)}</div></div>)}</div>}
+      {!!Object.keys(fatura.responsibility_totals??{}).length&&<div className="card card-pad" style={{marginTop:"var(--s3)"}}>{Object.entries(fatura.responsibility_totals??{}).map(([key,value])=><div className="fatura-total" key={key}><span>{key==="empresa"?"SECCO":key==="familia"?"Família":key==="pessoal"?"Pessoal":"Não informado"}</span><b className="tnum">{formatMoney(value)}</b></div>)}</div>}
+      {fatura.discrepancy!=null&&Math.abs(fatura.discrepancy)>=0.005&&<p className="hint" role="note">A conferir: itens somam {formatMoney(fatura.items_total)}; diferença de {formatMoney(Math.abs(fatura.discrepancy))} em relação ao total informado. Nenhum item foi ajustado.</p>}
 
       <div className="card card-pad" style={{ marginTop: "var(--s4)" }}>
         <div className="fatura-total">
@@ -383,7 +388,7 @@ function PagarFatura({
   fatura,
   onClose,
 }: {
-  fatura: { id: number; remaining: number | null; total: number | null; due_date: string };
+  fatura: { id: number; remaining: number | null; total: number | null; due_date: string; due_unknown?:boolean };
   onClose: () => void;
 }) {
   // Já vem com o restante preenchido: no uso normal a fatura é paga inteira, e
@@ -440,7 +445,7 @@ function PagarFatura({
           </div>
           <div className="linha">
             <span>Vencimento</span>
-            <b>{formatDate(fatura.due_date)}</b>
+            <b>{fatura.due_unknown?"Não informado":formatDate(fatura.due_date)}</b>
           </div>
         </div>
 

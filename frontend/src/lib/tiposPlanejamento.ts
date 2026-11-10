@@ -25,6 +25,7 @@ export const ORIGEM_LABEL: Record<OrigemPlano, string> = {
 };
 
 export interface PlanoItem {
+  due_unknown?: boolean;
   category_type?: CategoryType | null;
   expense_class?: ExpenseClass | null;
   key: string;
