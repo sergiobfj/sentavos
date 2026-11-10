@@ -175,6 +175,7 @@ def sincronizar_lancamento(session: Session, dono: User, transacao: Transaction)
 
 
 class InvestmentAssetItem(SQLModel):
+    purpose: str | None = None
     asset_id: int
     name: str
     asset_class: AssetClass
@@ -220,6 +221,10 @@ class InvestmentSummary(SQLModel):
 def resumo(session: Session, dono: User, ano: int, mes: int, nome_do_mes: str | None = None) -> InvestmentSummary:
     base = patrimonio.resumo(session, dono, ano, mes)
     itens = [i for i in base.items if AssetClass(i.asset_class) in INVESTMENT_CLASSES]
+    # Depois do reinício, posições antigas não são posições atuais. Seguem
+    # consultáveis nas competências históricas, sem contaminar a reconstrução.
+    if dono.operations_start and (ano, mes) >= (dono.operations_start.year, dono.operations_start.month):
+        itens = [i for i in itens if not i.stale]
     atuais = [i for i in itens if not i.stale]
     desatualizados = [i for i in itens if i.stale]
     total = sum(i.value for i in atuais)
@@ -302,6 +307,7 @@ def resumo(session: Session, dono: User, ano: int, mes: int, nome_do_mes: str | 
         else:
             st, r = APURADO, round(i.value - i.previous - mv["c"] - mv["a"] + mv["r"], 2)
         saida_itens.append(InvestmentAssetItem(
+            purpose=snapshots[i.asset_id].purpose if i.asset_id in snapshots else None,
             asset_id=i.asset_id, name=i.name, asset_class=i.asset_class, value=i.value, previous=i.previous,
             stale=i.stale, as_of=i.as_of, reconciliation_note=i.reconciliation_note or (
                 "Saldo a atualizar após o movimento" if i.asset_id in pendentes_saldo else None), cdi_percent=i.cdi_percent,

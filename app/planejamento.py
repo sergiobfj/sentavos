@@ -723,6 +723,7 @@ def _aviso_das_contas(
 
 
 class PlanoItem(SQLModel):
+    due_unknown: bool = False
     category_type: CategoryType | None = None
     expense_class: ExpenseClass | None = None
     """Uma linha do mês: algo que ainda vai entrar ou sair (ou que já foi)."""
@@ -879,7 +880,7 @@ def planejar(
             situacao = "pago"
             restante = 0.0
         else:
-            situacao = "vencido" if f.due_date < agora else "pendente"
+            situacao = "vencido" if not f.due_unknown and f.due_date < agora else "pendente"
         m = m0 if indice(ref) < indice(m0) else ref
         itens.append(
             PlanoItem(
@@ -897,6 +898,7 @@ def planejar(
                 status=situacao,
                 icon="💳",
                 invoice_id=f.id,
+                due_unknown=f.due_unknown,
             )
         )
 
@@ -1007,7 +1009,8 @@ def planejar(
                 amount=round(valor, 2),
                 remaining=round(valor, 2),
                 certainty="confirmado",
-                status="vencido" if t.date < agora else "pendente",
+                status="vencido" if not t.due_unknown and t.date < agora else "pendente",
+                due_unknown=t.due_unknown,
                 icon=cat.icon if cat else None,
                 color=cat.color if cat else None,
                 transaction_id=t.id,
@@ -1043,6 +1046,27 @@ def planejar(
         fim = mes_de(p.released_on) if p.released_on else None
         alvo = None
         alvo_rotulo = None
+        if p.transaction_id is not None:
+            target = session.exec(consulta(Transaction, dono).where(Transaction.id == p.transaction_id)).first()
+            if target is not None:
+                alvo = f"lancamento:{target.id}"
+                alvo_rotulo = target.description
+                if target.amount_paid is not None:
+                    fim = mes_de(target.date)
+        if p.invoice_id is not None:
+            target = session.exec(consulta(Invoice, dono).where(Invoice.id == p.invoice_id)).first()
+            if target is not None:
+                alvo = f"fatura:{target.id}"
+                alvo_rotulo = "Fatura do cartão"
+                total, pago, _ = agregados.get(target.id, (None, 0, 0))
+                if total is not None and total - pago <= TOLERANCIA:
+                    payments = session.exec(consulta(InvoicePayment, dono).where(InvoicePayment.invoice_id == target.id)).all()
+                    if target.reset_on:
+                        payments = [payment for payment in payments if payment.date >= target.reset_on]
+                    if payments:
+                        fim = mes_de(max(payment.date for payment in payments))
+        if alvo in por_chave and indice(inicio) <= indice((por_chave[alvo].year, por_chave[alvo].month)):
+            por_chave[alvo].provisioned = round(por_chave[alvo].provisioned + p.amount, 2)
         c = compromissos_por_id.get(p.commitment_id) if p.commitment_id is not None else None
         if c is not None and p.commitment_no is not None and existe(c, p.commitment_no):
             numero = p.commitment_no
@@ -1124,6 +1148,10 @@ def planejar(
 
         ativas = [r for r in reservas if r.ativa_em(m) and abs(r.valor) > TOLERANCIA]
         reservado = sum(r.valor for r in ativas)
+        # Destinação e obrigação representam o mesmo dinheiro. Só a reserva
+        # sem saída já contada neste mês reduz novamente a projeção.
+        chaves_de_saida = {i.key for i in saidas_itens if i.remaining > TOLERANCIA}
+        reserva_extra = sum(r.valor for r in ativas if r.alvo not in chaves_de_saida)
         projetado = saldo + entradas - saidas
 
         meses.append(
@@ -1138,7 +1166,7 @@ def planejar(
                 expense_groups={k: round(v, 2) for k, v in grupos.items()},
                 projected=round(projetado, 2),
                 reserved=round(reservado, 2),
-                available=round(projetado - reservado, 2),
+                available=round(projetado - reserva_extra, 2),
                 by_certainty={k: round(v, 2) for k, v in por_certeza.items()},
                 by_source={k: round(v, 2) for k, v in por_origem.items()},
                 overdue=round(vencido, 2),

@@ -41,6 +41,7 @@ from app.models import (
     Commitment,
     FinancialAccount,
     Invoice,
+    InvoiceStatementItem,
     InvoicePayment,
     InvoiceRead,
     InvoiceStatus,
@@ -126,8 +127,15 @@ def totais(session: Session, dono: User) -> dict[int, tuple[float | None, float,
         ).all()
     }
 
+    for invoice_id, soma, qtd in session.exec(
+        select(InvoiceStatementItem.invoice_id, func.sum(InvoiceStatementItem.amount), func.count(InvoiceStatementItem.id))
+        .where(InvoiceStatementItem.user_id == dono.id).group_by(InvoiceStatementItem.invoice_id)
+    ).all():
+        old_sum, old_count = itens.get(invoice_id, (0.0, 0))
+        itens[invoice_id] = (round(old_sum + float(soma), 2), old_count + qtd)
+
     return {
-        f.id: (f.manual_total if f.manual_total is not None else
+        f.id: (float(f.manual_total) if f.manual_total is not None else
                itens[f.id][0] if f.id in itens else None,
                pagos.get(f.id, 0.0), itens.get(f.id, (0.0, 0))[1])
         for f in session.exec(consulta(Invoice, dono)).all()
@@ -146,7 +154,7 @@ def status_de(total: float | None, pago: float, vencimento: dt.date, hoje: dt.da
         return InvoiceStatus.ABERTA
     if total > TOLERANCIA and total - pago <= TOLERANCIA:
         return InvoiceStatus.PAGA
-    if hoje > vencimento:
+    if vencimento is not None and hoje > vencimento:
         return InvoiceStatus.ATRASADA
     if pago > TOLERANCIA:
         return InvoiceStatus.PARCIAL
@@ -171,9 +179,10 @@ def montar(
         total=round(total, 2) if total is not None else None,
         paid=round(pago, 2),
         remaining=round(max(total - pago, 0.0), 2) if total is not None else None,
-        status=status_de(total, pago, fatura.due_date, hoje),
+        status=status_de(total, pago, None if fatura.due_unknown else fatura.due_date, hoje),
         item_count=qtd,
         manual=fatura.manual_total is not None,
+        due_unknown=fatura.due_unknown,
     )
 
 

@@ -7,8 +7,10 @@ Estimativas incertas ficam fora do total confirmado e tornam a previsão parcial
 from app import planejamento
 from app.cartao import limites_do_mes
 from app.dominio import investimentos
+from app.dominio.contas import dia_local
 from app.escopo import consulta
-from app.models import Category, CategoryType, Transaction, ReconciliationItem, InvestmentPlan, Invoice, InvoicePayment
+from app.models import (Category, CategoryType, Transaction, ReconciliationItem, InvestmentPlan,
+                        Invoice, InvoicePayment, AssetSnapshot, AccountBalanceSnapshot)
 from app.faturas import totais
 
 
@@ -84,9 +86,28 @@ def resumo(session, dono, year, month):
         motivos.append("Preencha os valores das faturas")
     if reset_active and empty:
         motivos.append("Aguardando informações")
+    if any(i.due_unknown for i in devidas):
+        motivos.insert(0, "Há obrigações sem vencimento informado")
+    emergency = session.exec(consulta(AssetSnapshot, dono).where(
+        AssetSnapshot.year == year, AssetSnapshot.month == month,
+        AssetSnapshot.purpose == "emergency_reserve")).all()
+    adjustments = session.exec(consulta(AccountBalanceSnapshot, dono).where(
+        AccountBalanceSnapshot.accepted_difference.is_not(None))).all()
+    adjustments = [s for s in adjustments if dia_local(s.observed_at).year == year
+                   and dia_local(s.observed_at).month == month]
+    earmarked = round(sum(r.amount for r in mes.reserves if r.source == "reserva"), 2)
+    money = round(sum(c.value for c in conhecidas), 2) if conhecidas and not sobreposto else None
+    nonzero = [c for c in conhecidas if abs(c.value) > 0.005]
+    reference = nonzero[0] if len(nonzero) == 1 and nonzero[0].quality == "reconciliado" else None
     return {
         "plan": plano, "month": mes,
-        "money_now": round(sum(c.value for c in conhecidas), 2) if conhecidas and not sobreposto else None,
+        "money_now": money,
+        "bank_observation": {"name": reference.name, "date": reference.observed_on} if reference else None,
+        "emergency_reserve": round(sum(s.value for s in emergency), 2) if emergency else None,
+        "earmarked": earmarked,
+        "unassigned": round(money - earmarked, 2) if money is not None else None,
+        "balance_adjustments": [{"id": s.id, "description": "Saldo de ajuste", "amount": s.accepted_difference,
+                                  "date": dia_local(s.observed_at)} for s in adjustments],
         "balance_pending": pendente or old_observation,
         "balance_kind": "calculado" if any(c.quality == "calculado" for c in conhecidas) else "observado",
         "balance_date": min((c.observed_on for c in conhecidas if c.observed_on), default=None),
@@ -96,7 +117,7 @@ def resumo(session, dono, year, month):
         "to_check": round(sum(valor_revisao(r) for r in revisar) + sum(i.remaining for i in estimadas), 2),
         "contributed": fluxo.contributed, "redeemed": fluxo.redeemed,
         "to_invest": round(sum(r.amount for r in mes.reserves if r.source == "aporte"), 2),
-        "projected": None if base_invalida or sobreposto or passado or unknown or old_observation or (reset_active and empty) else round(mes.available + incertas, 2),
+        "projected": None if base_invalida or sobreposto or passado or unknown or old_observation or any(i.due_unknown for i in devidas) or (reset_active and empty) else round(mes.available + incertas, 2),
         "empty": empty, "invoices_unknown": unknown,
         "partial": bool(motivos), "reasons": ["Mês encerrado"] if passado else motivos,
         "due": devidas, "estimated": estimadas, "review": revisar,

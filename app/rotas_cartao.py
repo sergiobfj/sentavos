@@ -25,6 +25,7 @@ reconstruída.
 """
 
 import datetime as dt
+from decimal import Decimal
 import math
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -47,6 +48,8 @@ from app.models import (
     InvoiceCreate,
     InvoiceManual,
     InvoiceDetail,
+    InvoiceStatementItem,
+    StatementItemRead,
     InvoiceItem,
     InvoicePayment,
     InvoicePaymentCreate,
@@ -798,9 +801,22 @@ def ver_fatura(
     if fatura.reset_on:
         pagamentos = [p for p in pagamentos if p.date >= fatura.reset_on]
 
+    observed = session.exec(consulta(InvoiceStatementItem, dono).where(InvoiceStatementItem.invoice_id == invoice_id)
+                            .order_by(InvoiceStatementItem.id)).all()
+    responsibilities = {}
+    item_sum = Decimal("0")
+    for item in [*itens, *observed]:
+        value = Decimal(str(item.amount))
+        item_sum += value
+        key = item.finalidade.value if item.finalidade else "nao_informada"
+        responsibilities[key] = responsibilities.get(key, Decimal("0")) + value
     return InvoiceDetail(
         **base.model_dump(),
         items=itens,
+        statement_items=[StatementItemRead.model_validate(i, from_attributes=True) for i in observed],
+        responsibility_totals={k: float(v) for k, v in responsibilities.items()},
+        items_total=float(item_sum),
+        discrepancy=float(item_sum - fatura.manual_total) if fatura.manual_total is not None and (itens or observed) else None,
         payments=_pagamentos_read(session, dono, pagamentos),
     )
 
@@ -812,11 +828,11 @@ def _restante(session: Session, dono: User, fatura: Invoice) -> float:
     return round(total - pago, 2)
 
 
-def _valor_manual(session: Session, dono: User, fatura: Invoice, total: float | None):
+def _valor_manual(session: Session, dono: User, fatura: Invoice, total: Decimal | None):
     if total is not None and (not math.isfinite(total) or total < 0):
         raise HTTPException(400, "Informe um valor válido para a fatura.")
     _, paid, count = totais(session, dono).get(fatura.id, (None, 0, 0))
-    if paid > 0 and (total is None or total < paid - 0.005):
+    if paid > 0 and (total is None or total < Decimal(str(paid)) - Decimal("0.005")):
         raise HTTPException(409, "O total não pode ser menor que os pagamentos registrados.")
     fatura.manual_total = round(total, 2) if total is not None else None
     session.add(fatura)

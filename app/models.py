@@ -1,4 +1,5 @@
 import datetime as dt
+from decimal import Decimal
 from typing import Any
 
 import sqlalchemy as sa
@@ -164,6 +165,8 @@ class PaymentMethod(str, Enum):
 
 
 class TransactionBase(SQLModel):
+    # date continua sendo a competência/registro; não inventa vencimento.
+    due_unknown: bool = False
     date: dt.date
     description: str
     amount_planned: float | None = None
@@ -264,6 +267,7 @@ class TransactionCreate(TransactionBase):
     pass
 
 class TransactionUpdate(SQLModel):
+    due_unknown: bool | None = None
     date: dt.date | None = None
     description: str | None = None
     amount_planned: float | None = None
@@ -449,6 +453,7 @@ class Invoice(SQLModel, table=True):
     __tablename__ = "invoices"
     __table_args__ = (
         UniqueConstraint("user_id", "card_id", "year", "month", name="uq_invoice_card_period"),
+        UniqueConstraint("user_id", "id", name="uq_invoices_user_id"),
     )
 
     user_id: int = dono()
@@ -459,13 +464,14 @@ class Invoice(SQLModel, table=True):
     closing_date: dt.date
     due_date: dt.date
     # Total manual SUBSTITUI a soma dos itens; nunca é uma despesa adicional.
-    manual_total: float | None = None
+    manual_total: Decimal | None = Field(default=None, sa_type=sa.Numeric(14, 2))
+    due_unknown: bool = False
     # Itens/pagamentos anteriores permanecem no histórico, fora da nova cobrança.
     reset_on: dt.date | None = None
 
 
 class InvoiceManual(SQLModel):
-    total: float | None = Field(default=None, ge=0)
+    total: Decimal | None = Field(default=None, ge=0, max_digits=14, decimal_places=2)
 
 
 class InvoiceCreate(InvoiceManual):
@@ -557,6 +563,7 @@ class InvoiceItem(SQLModel):
 
 
 class InvoiceRead(SQLModel):
+    due_unknown: bool = False
     id: int
     card_id: int
     card_name: str
@@ -582,9 +589,36 @@ class InvoicePaymentRead(InvoicePaymentBase):
     invoice_month: int
 
 
+class StatementItemRead(SQLModel):
+    id: int
+    description: str
+    amount: float
+    finalidade: Finalidade
+
+
+class InvoiceStatementItem(SQLModel, table=True):
+    """Composição observada da fatura, sem presumir data de compra ou consumo."""
+    __tablename__ = "invoice_statement_items"
+    __table_args__ = (
+        sa.UniqueConstraint("user_id", "source_key", name="uq_statement_source"),
+        sa.ForeignKeyConstraint(["user_id", "invoice_id"], ["invoices.user_id", "invoices.id"]),
+    )
+    id: int | None = Field(default=None, primary_key=True)
+    user_id: int = dono()
+    invoice_id: int
+    source_key: str
+    description: str
+    amount: Decimal = Field(sa_type=sa.Numeric(14, 2))
+    finalidade: Finalidade
+
+
 class InvoiceDetail(InvoiceRead):
     items: list[InvoiceItem] = []
     payments: list[InvoicePaymentRead] = []
+    statement_items: list[StatementItemRead] = []
+    responsibility_totals: dict[str, float] = {}
+    items_total: float = 0
+    discrepancy: float | None = None
 
 
 class CardInvoices(SQLModel):
@@ -836,6 +870,7 @@ class AssetUpdate(SQLModel):
 
 # O saldo de um ativo num mês. Preenchido à mão — sem cotação automática no v1.
 class AssetSnapshotBase(SQLModel):
+    purpose: str | None = None
     asset_id: int = Field(foreign_key="assets.id")
     year: int = Field(ge=1900, le=2999)
     month: int = Field(ge=1, le=12)
@@ -1178,6 +1213,9 @@ class PausarRecorrencia(SQLModel):
 
 
 class ProvisionBase(SQLModel):
+    # Vínculos sem gerar uma segunda obrigação.
+    transaction_id: int | None = Field(default=None, sa_column=sa.Column(sa.Integer(), sa.ForeignKey("transactions.id", name="fk_provision_transaction"), nullable=True))
+    invoice_id: int | None = Field(default=None, sa_column=sa.Column(sa.Integer(), sa.ForeignKey("invoices.id", name="fk_provision_invoice"), nullable=True))
     description: str
     amount: float
     # Desde quando o dinheiro está separado. Antes disso ele era livre.

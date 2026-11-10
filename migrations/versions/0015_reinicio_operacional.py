@@ -13,7 +13,7 @@ depends_on = None
 FIELDS = {
     "users": [("operations_start", sa.Date())],
     "purchases": [("installments_stopped_from", sa.Date())],
-    "invoices": [("manual_total", sa.Float()), ("reset_on", sa.Date())],
+    "invoices": [("manual_total", sa.Numeric(14, 2)), ("reset_on", sa.Date())],
 }
 
 
